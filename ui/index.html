@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ChatGPT Tree Viewer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header>
+  <h1>Conversation Tree Explorer</h1>
+</header>
+<button id="openFolder">Open Output Folder</button>
+<ul id="tree"></ul>
+<div id="messages"></div>
+
+<div class="container">
+
+  <aside class="tree-panel">
+    <ul id="tree"></ul>
+  </aside>
+
+  <main class="message-panel">
+    <div id="messages">
+      <p class="placeholder">Select a tree path to view messages</p>
+    </div>
+  </main>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+import os
+import re
+from math import ceil
+
+# CONFIG
+INPUT_DIR = "my_chatgpt_history"
+OUTPUT_DIR = "walls"
+NUM_WALLS = 10
+
+def extract_date(filename):
+    """
+    Extracts YYYY-MM-DD from filename.
+    Returns sortable string, or fallback.
+    """
+    match = re.search(r"\d{4}-\d{2}-\d{2}", filename)
+    return match.group(0) if match else "9999-99-99"
+
+def main():
+    if not os.path.exists(INPUT_DIR):
+        print(f"❌ Input folder '{INPUT_DIR}' not found.")
+        return
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    files = [f for f in os.listdir(INPUT_DIR) if f.endswith(".md")]
+    if not files:
+        print("❌ No markdown files found.")
+        return
+
+    # Sort by date
+    files.sort(key=extract_date)
+
+    total_files = len(files)
+    chunk_size = ceil(total_files / NUM_WALLS)
+
+    print(f"📄 Total files: {total_files}")
+    print(f"🧱 Walls: {NUM_WALLS} (~{chunk_size} per wall)")
+
+    for i in range(NUM_WALLS):
+        chunk = files[i * chunk_size:(i + 1) * chunk_size]
+        if not chunk:
+            break
+
+        wall_path = os.path.join(OUTPUT_DIR, f"wall_{i+1:02}.md")
+
+        with open(wall_path, "w", encoding="utf-8") as wall:
+            wall.write(f"# WALL {i+1:02}\n\n")
+            wall.write(f"_Contains {len(chunk)} conversations_\n\n")
+            wall.write("---\n\n")
+
+            for fname in chunk:
+                wall.write(f"## 📄 {fname}\n\n")
+                with open(os.path.join(INPUT_DIR, fname), "r", encoding="utf-8") as f:
+                    wall.write(f.read())
+                wall.write("\n\n---\n\n")
+
+        print(f"✅ Created {wall_path}")
+
+    print("\n🎉 STEP-2 COMPLETE: 10 wall files created.")
+
+if __name__ == "__main__":
+    main()

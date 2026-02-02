@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "overrides": [
+    {
+      "concept_id": "concept_ai_safety",
+      "brick_id": "brick_123",
+      "action": "promote",
+      "status": "intended",
+      "actor": "human",
+      "timestamp": "2026-02-01T12:00:00Z"
+    }
+  ]
+}

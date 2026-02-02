@@ -1,0 +1,12 @@
+[
+  {
+    "id": "concept_ai_safety",
+    "label": "AI Safety",
+    "bricks": ["brick_123", "brick_456"]
+  },
+  {
+    "id": "concept_alignment",
+    "label": "Alignment",
+    "bricks": ["brick_789"]
+  }
+]

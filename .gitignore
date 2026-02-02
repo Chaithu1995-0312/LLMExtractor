@@ -1,0 +1,79 @@
+############################
+# Python
+############################
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+
+############################
+# Virtual Environments
+############################
+.venv/
+venv/
+ENV/
+env/
+
+############################
+# OS / Editor
+############################
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+############################
+# Logs
+############################
+*.log
+
+############################
+# Data / Runtime Artifacts
+# (CRITICAL FOR YOU)
+############################
+data/
+output/
+*.faiss
+*.index
+*.bin
+
+# Explicit FAISS artifacts
+data/index/index.faiss
+data/index/*.faiss
+data/index/*.json
+
+############################
+# Node / Frontend (Vite / React)
+############################
+node_modules/
+ui/**/node_modules/
+ui/**/dist/
+ui/**/.vite/
+ui/**/.cache/
+
+############################
+# Environment files
+############################
+.env
+.env.*
+!.env.example
+
+############################
+# Testing / Coverage
+############################
+.coverage
+htmlcov/
+.pytest_cache/
+
+############################
+# Temporary / Scratch
+############################
+tmp/
+temp/
+scratch/
