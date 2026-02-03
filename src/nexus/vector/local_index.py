@@ -5,6 +5,7 @@ import faiss
 import os
 from typing import List, Dict
 from nexus.config import INDEX_PATH, BRICK_IDS_PATH
+from nexus.vector.embedder import get_embedder
 
 class LocalVectorIndex:
     def __init__(self):
@@ -38,8 +39,9 @@ class LocalVectorIndex:
 
         texts = [b["content"] for b in pending]
 
-        # placeholder embeddings (OK for now)
-        embeddings = np.random.random((len(texts), self.dimension)).astype("float32")
+        # Real embeddings via Singleton Embedder
+        embedder = get_embedder()
+        embeddings = embedder.embed_texts(texts)
 
         self.index.add(embeddings)
         for b in pending:

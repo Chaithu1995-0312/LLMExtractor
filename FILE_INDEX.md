@@ -1,47 +1,155 @@
-# File Index
+# FILE_INDEX.md
 
-## Nexus CLI
-`nexus-cli/`
-- `__main__.py`
-- `backend/`
-  - `cortex/`
-    - `api.py`: Cortex logic.
-    - `server.py`: Flask application entry point.
-- `nexus/`
-  - `ask/`
-    - `recall.py`: Recall logic logic (Search + Rerank).
-  - `bricks/`
-    - `brick_store.py`: Data access layer for bricks.
-    - `extractor.py`: Extracts bricks from conversation trees.
-  - `extract/`
-    - `tree_splitter.py`: Parses JSON trees into linear paths.
-  - `graph/`
-    - `nodes.json`: Static graph nodes.
-    - `edges.json`: Static graph edges.
-    - `index.md`: Graph explanation.
-  - `rerank/`
-    - `orchestrator.py`: Reranking logic.
-    - `llm_reranker.py`: LLM-based reranking (inferred).
-  - `sync/`
-    - `runner.py`: Main ETL pipeline runner.
-  - `vector/`
-    - `local_index.py`: FAISS wrapper.
-  - `walls/`
-    - `builder.py`: Constructs Markdown walls from trees.
+## 1. Project Root: `d:/chatgptdocs`
 
-## UI (Jarvis)
-`ui/jarvis/`
-- `src/`
-  - `App.tsx`: Main application component.
-  - `main.tsx`: Entry point.
-  - `vite-env.d.ts`: Vite types.
-- `index.html`: HTML entry.
-- `package.json`: Dependencies.
-- `vite.config.ts`: Build config.
+This index provides a comprehensive list of files and directories within the project, along with a brief description of their inferred or confirmed purpose.
 
-## Output (Generated)
-`output/nexus/`
-- `bricks/`: Extracted brick JSONs.
-- `walls/`: Generated Markdown walls.
-- `index.faiss`: Vector index file.
-- `brick_ids.json`: Index metadata.
+### 1.1. Core Configuration & Metadata
+
+- `.gitignore`: Specifies intentionally untracked files to ignore.
+- `pyproject.toml`: Project configuration, dependencies, and build system metadata for the `nexus` package.
+- `README.md`: Project's main documentation and overview.
+- `repo_tree.txt`: (🟡 UNCONFIRMED - Likely a generated tree structure of the repository, similar to the output of `tree` command).
+- `conversations.json`: (🟡 UNCONFIRMED - Potentially stores past conversation data, perhaps for training or analysis).
+- `phase3_audit_trace.jsonl`: Audit log for `CortexAPI.generate` calls, containing JSON records of generations.
+
+### 1.2. Source Code (`src/`)
+
+#### 1.2.1. `src/nexus/` (Main Library)
+
+- `src/nexus/__init__.py`: Python package initialization file for `nexus`.
+- `src/nexus/config.py`: Defines global constants and paths for Nexus data and output.
+
+##### 1.2.1.1. `src/nexus/ask/` (Query & Recall)
+
+- `src/nexus/ask/__init__.py`: Package initialization for `ask` module.
+- `src/nexus/ask/recall.py`: Implements semantic recall (search) logic, integrating embedding, FAISS search, and reranking.
+
+##### 1.2.1.2. `src/nexus/bricks/` (Information Units)
+
+- `src/nexus/bricks/__init__.py`: Package initialization for `bricks` module.
+- `src/nexus/bricks/brick_store.py`: Manages reading brick metadata and content from JSON files.
+- `src/nexus/bricks/extractor.py`: (🟡 UNCONFIRMED - Inferred to handle extraction of raw content into bricks).
+
+##### 1.2.1.3. `src/nexus/cli/` (Command Line Interface)
+
+- `src/nexus/cli/__init__.py`: Package initialization for `cli` module.
+- `src/nexus/cli/main.py`: Main entry point for the `nexus` command-line tool.
+
+##### 1.2.1.4. `src/nexus/extract/` (Content Extraction)
+
+- `src/nexus/extract/__init__.py`: Package initialization for `extract` module.
+- `src/nexus/extract/tree_splitter.py`: (🟡 UNCONFIRMED - Inferred to split content into a tree structure, likely for brick creation).
+
+##### 1.2.1.5. `src/nexus/graph/` (Knowledge Graph)
+
+- `src/nexus/graph/__init__.py`: Package initialization for `graph` module.
+- `src/nexus/graph/ai_explanation_contract.md`: (🟡 UNCONFIRMED - Documentation or schema for AI-generated explanations in a graph context).
+- `src/nexus/graph/anchors.override.json`: (🟡 UNCONFIRMED - Configuration for overriding graph anchors/nodes).
+- `src/nexus/graph/edges.json`: (🟡 UNCONFIRMED - Data file for graph edges).
+- `src/nexus/graph/index.md`: (🟡 UNCONFIRMED - Documentation or overview for the graph module).
+- `src/nexus/graph/nodes.json`: (🟡 UNCONFIRMED - Data file for graph nodes).
+
+##### 1.2.1.6. `src/nexus/rerank/` (Search Result Reranking)
+
+- `src/nexus/rerank/__init__.py`: Package initialization for `rerank` module.
+- `src/nexus/rerank/cross_encoder.py`: Implements reranking using a `sentence-transformers` CrossEncoder model.
+- `src/nexus/rerank/heuristic.py`: Implements a fallback heuristic-based reranking strategy.
+- `src/nexus/rerank/llm_reranker.py`: Implements reranking using a local quantized LLM.
+- `src/nexus/rerank/orchestrator.py`: Manages the multi-stage reranking pipeline.
+
+##### 1.2.1.7. `src/nexus/sync/` (Synchronization & Index Building)
+
+- `src/nexus/sync/__init__.py`: Package initialization for `sync` module.
+- `src/nexus/sync/__main__.py`: (🟡 UNCONFIRMED - Likely the main entry point for synchronization operations).
+- `src/nexus/sync/runner.py`: (🟡 UNCONFIRMED - Orchestrates the synchronization workflow).
+
+##### 1.2.1.8. `src/nexus/vector/` (Vector Operations)
+
+- `src/nexus/vector/__init__.py`: Package initialization for `vector` module.
+- `src/nexus/vector/embedder.py`: Singleton for text embedding using `SentenceTransformer`.
+- `src/nexus/vector/index.py`: (🟡 UNCONFIRMED - Could be an older or alternative index implementation, given `local_index.py` is present).
+- `src/nexus/vector/local_index.py`: Manages the FAISS local vector index.
+
+##### 1.2.1.9. `src/nexus/walls/` (Content Aggregation)
+
+- `src/nexus/walls/__init__.py`: Package initialization for `walls` module.
+- `src/nexus/walls/builder.py`: (🟡 UNCONFIRMED - Inferred to build consolidated content "walls" from bricks).
+
+#### 1.2.2. `src/nexus.egg-info/` (Build Metadata)
+
+- Contains metadata generated by `setuptools` during package installation.
+
+### 1.3. Services (`services/`)
+
+#### 1.3.1. `services/cortex/` (Cortex Microservice)
+
+- `services/cortex/api.py`: Defines the Cortex service API endpoints (`/route`, `/generate`, `/ask_preview`).
+- `services/cortex/phase3_audit_trace.jsonl`: Duplicate audit log file specific to the Cortex service. (🔴 CONFLICT: Also present in project root. One may be a copy or an older version).
+- `services/cortex/runcortexapi.py`: (🟡 UNCONFIRMED - Potentially a script to run the Cortex Flask API, similar to `server.py`).
+- `services/cortex/server.py`: (🟡 UNCONFIRMED - Inferred to be the main Flask application script for Cortex).
+- `services/cortex/server.py.bak`: Backup of the Cortex server file.
+
+### 1.4. Data & Output (`data/`, `output/`)
+
+- `data/`: Directory for persistent data, e.g., vector index and brick ID mappings.
+- `output/`: Directory for generated output, e.g., extracted bricks.
+
+### 1.5. Scripts (`scripts/`)
+
+- `scripts/build_index.py`: (🟡 UNCONFIRMED - Script to build the vector index).
+- `scripts/export_conversations.py`: (🟡 UNCONFIRMED - Script to export conversation data).
+- `scripts/extract_prompts.py`: (🟡 UNCONFIRMED - Script to extract prompts).
+- `scripts/merge_to_walls.py`: (🟡 UNCONFIRMED - Script to merge content into "walls").
+
+#### 1.5.1. `scripts/utilities/` (Utility Scripts)
+
+- `scripts/utilities/ArchitectureFlow.md`: (🟡 UNCONFIRMED - Documentation of architectural flow).
+- `scripts/utilities/chart.py`: (🟡 UNCONFIRMED - Script for charting/visualization).
+- `scripts/utilities/JsonSplitToTree.py`: (🟡 UNCONFIRMED - Utility for splitting JSON into a tree structure).
+- `scripts/utilities/merge_to_10_walls.py.bak`: Backup of a script to merge content to walls.
+- `scripts/utilities/rankerarchitecture.txt`: (🟡 UNCONFIRMED - Documentation on ranker architecture).
+- `scripts/utilities/recursive_exporter.py`: (🟡 UNCONFIRMED - Utility for recursive data export).
+- `scripts/utilities/setup_test_data.py`: (🟡 UNCONFIRMED - Script to set up test data).
+- `scripts/utilities/split_md_files25.py`: (🟡 UNCONFIRMED - Utility to split Markdown files).
+- `scripts/utilities/split_md_files50.py`: (🟡 UNCONFIRMED - Utility to split Markdown files).
+
+### 1.6. Tests (`tests/`)
+
+- `tests/new_feature_tests.py`: (🟡 UNCONFIRMED - Tests for new features).
+- `tests/test_reranker.py`: (🟡 UNCONFIRMED - Tests specifically for the reranker module).
+
+#### 1.6.1. `tests/invariants/` (Invariance Tests)
+
+- `tests/invariants/__init__.py`: Package initialization for `invariants` module.
+- `tests/invariants/test_cortex_invariants.py`: (🟡 UNCONFIRMED - Tests for invariants specific to Cortex service).
+- `tests/invariants/test_pipeline_invariants.py`: (🟡 UNCONFIRMED - Tests for invariants across the data pipeline).
+
+#### 1.6.2. `tests/unit/` (Unit Tests)
+
+- Empty directory. (🟡 UNCONFIRMED - No specific unit test files found here).
+
+### 1.7. User Interface (`ui/`)
+
+- `ui/app.js`: (🟡 UNCONFIRMED - JavaScript for UI application logic).
+- `ui/index.html`: (🟡 UNCONFIRMED - Main HTML file for the UI).
+- `ui/index.json`: (🟡 UNCONFIRMED - Data or configuration for the UI).
+- `ui/styles.css`: (🟡 UNCONFIRMED - CSS for UI styling).
+
+#### 1.7.1. `ui/jarvis/` (Jarvis UI Component)
+
+- `ui/jarvis/CHECKLIST.md`: (🟡 UNCONFIRMED - Checklist related to Jarvis UI development).
+- `ui/jarvis/index.html`: (🟡 UNCONFIRMED - Specific HTML for Jarvis UI).
+- `ui/jarvis/package-lock.json`: Node.js dependency lock file.
+- `ui/jarvis/package.json`: Node.js project configuration and dependencies.
+- `ui/jarvis/README.md`: README for the Jarvis UI component.
+- `ui/jarvis/tsconfig.json`: TypeScript configuration file.
+- `ui/jarvis/tsconfig.node.json`: TypeScript configuration for Node.js environment.
+- `ui/jarvis/vite.config.ts`: Vite build tool configuration for TypeScript.
+
+##### 1.7.1.1. `ui/jarvis/src/` (Jarvis Source Code)
+
+- `ui/jarvis/src/App.tsx`: (🟡 UNCONFIRMED - React/TypeScript main application component).
+- `ui/jarvis/src/main.tsx`: (🟡 UNCONFIRMED - React/TypeScript entry point).
+- `ui/jarvis/src/styles.css`: (🟡 UNCONFIRMED - CSS for Jarvis UI styling).
+- `ui/jarvis/src/vite-env.d.ts`: Vite environment declaration for TypeScript.

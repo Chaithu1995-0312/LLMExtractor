@@ -57,7 +57,7 @@ def cmd_sync(args):
     # Default search for conversations.json in current dir or common exports
     input_file = "conversations.json"
     output_dir = "output/nexus"
-    run_sync(input_file, output_dir)
+    run_sync(input_file, output_dir, rebuild_index=args.rebuild_index)
 
 def cmd_ask(args):
     """Subcommand: ask"""
@@ -128,6 +128,7 @@ def main():
 
     # sync
     parser_sync = subparsers.add_parser("sync", help="Autonomous ingestion and sync daemon")
+    parser_sync.add_argument("--rebuild-index", action="store_true", help="Force clear and rebuild FAISS index")
     parser_sync.set_defaults(func=cmd_sync)
 
     # ask

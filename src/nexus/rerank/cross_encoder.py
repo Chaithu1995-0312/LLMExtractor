@@ -27,8 +27,11 @@ class CrossEncoderReranker:
         # Prepare pairs
         pairs = [[query, c.get("brick_text", "")] for c in candidates]
         
-        # Predict
+        # Predict (batch process)
+        import numpy as np
         scores = self.model.predict(pairs)
+        if isinstance(scores, float): # Handle single result case if it happens
+            scores = np.array([scores])
         
         # Normalize scores to [0, 1] for consistency
         # Logits can be anything, but we want a confident float.

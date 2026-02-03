@@ -3,6 +3,7 @@ import os
 import sys
 from datetime import datetime, timezone
 import json
+from nexus.vector.embedder import get_embedder
 
 # Adjust the path to import CortexAPI from the same directory
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -11,12 +12,14 @@ from api import CortexAPI
 # Use the properly installed nexus package
 try:
     from nexus.ask.recall import recall_bricks_readonly, get_recall_brick_metadata
+    from nexus.cognition.assembler import assemble_topic
     from nexus.config import REPO_ROOT
 except ImportError:
     # Fallback for development if not installed
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     sys.path.append(os.path.join(repo_root, "src"))
     from nexus.ask.recall import recall_bricks_readonly, get_recall_brick_metadata
+    from nexus.cognition.assembler import assemble_topic
     from nexus.config import REPO_ROOT
 
 app = Flask(__name__)
@@ -61,6 +64,49 @@ def jarvis_graph_index():
             "index_content": index_content,
             "anchor_overrides": overrides
         })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/jarvis/anchor", methods=["POST"])
+def jarvis_anchor():
+    data = request.json
+    brick_id = data.get("brick_id")
+    action = data.get("action") # "promote" or "reject"
+    
+    if not brick_id or action not in ["promote", "reject"]:
+        return jsonify({"error": "Invalid anchor data"}), 400
+
+    overrides_path = os.path.join(REPO_ROOT, "src", "nexus", "graph", "anchors.override.json")
+    
+    try:
+        overrides_data = {"overrides": []}
+        if os.path.exists(overrides_path):
+            with open(overrides_path, "r", encoding="utf-8") as f:
+                try:
+                    overrides_data = json.load(f)
+                except Exception:
+                    pass
+        
+        # Add or update
+        found = False
+        for ov in overrides_data["overrides"]:
+            if ov["brick_id"] == brick_id:
+                ov["action"] = action
+                ov["timestamp"] = get_utc_now()
+                found = True
+                break
+        
+        if not found:
+            overrides_data["overrides"].append({
+                "brick_id": brick_id,
+                "action": action,
+                "timestamp": get_utc_now()
+            })
+
+        with open(overrides_path, "w", encoding="utf-8") as f:
+            json.dump(overrides_data, f, indent=2)
+
+        return jsonify({"status": "success", "brick_id": brick_id, "action": action})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -174,7 +220,38 @@ def jarvis_ask_preview():
     }
     return jsonify(response_data)
 
+@app.route("/jarvis/assemble-topic", methods=["POST"])
+def jarvis_assemble_topic():
+    data = request.json or {}
+    topic = data.get("topic")
+
+    if not topic:
+        return jsonify({"error": "topic is required"}), 400
+
+    try:
+        artifact_path = assemble_topic(topic)
+        
+        # Read artifact to get ID
+        with open(artifact_path, "r", encoding="utf-8") as f:
+            art = json.load(f)
+            artifact_id = art["artifact_id"]
+
+        return jsonify({
+            "status": "assembled",
+            "topic": topic,
+            "artifact_id": artifact_id,
+            "artifact_path": artifact_path
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "status": "failed"
+        }), 500
+
 if __name__ == "__main__":
+    print("Prewarming embedder...")
+    get_embedder()
+    print("Embedder ready")
     # For development purposes, run with debug true
     # In production, use a production-ready WSGI server like Gunicorn
-    app.run(debug=True, port=5001)
+    app.run(debug=False, port=5001)

@@ -2,10 +2,21 @@ import json
 import os
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
+import sys
+
+# Try to import BrickStore from Nexus
+try:
+    from nexus.bricks.brick_store import BrickStore
+except ImportError:
+    # Fallback if nexus not installed
+    import os
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src")))
+    from nexus.bricks.brick_store import BrickStore
 
 class CortexAPI:
     def __init__(self, audit_log_path: str = "phase3_audit_trace.jsonl"):
         self.audit_log_path = audit_log_path
+        self.brick_store = BrickStore()
 
     def route(self, user_query: str) -> Dict:
         """Endpoint: /route - Intent-based routing (LOCKED Rules)"""
@@ -36,10 +47,47 @@ class CortexAPI:
         if not context_text and brick_ids:
             return {"error": "MODE-1 Violation: Source reload failed.", "status": "blocked"}
         
-        # 2. LLM Call (Mock for skeleton)
-        model = "gpt-4o" # Example
-        response_text = f"Simulated response for: {user_query[:20]}..."
-        token_cost = 0.002 # Mock
+        # 2. LLM Call (Pluggable Backend)
+        model = "gpt-4o" # Default model tag for audit
+        response_text = ""
+        token_cost = 0.0
+        
+        try:
+            prompt = f"Context from memory:\n{context_text}\n\nUser: {user_query}\nAssistant:"
+            
+            # Check for OpenAI Key
+            openai_key = os.environ.get("OPENAI_API_KEY")
+            if openai_key:
+                from openai import OpenAI
+                client = OpenAI(api_key=openai_key)
+                completion = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0
+                )
+                response_text = completion.choices[0].message.content
+                token_cost = (completion.usage.total_tokens / 1000.0) * 0.03 # Simple estimate
+            else:
+                # Fallback to local Ollama if available
+                import requests
+                try:
+                    ollama_resp = requests.post("http://localhost:11434/api/generate", json={
+                        "model": "llama3",
+                        "prompt": prompt,
+                        "stream": False
+                    }, timeout=30)
+                    if ollama_resp.status_code == 200:
+                        response_text = ollama_resp.json().get("response", "")
+                        model = "ollama/llama3"
+                    else:
+                        raise Exception("Ollama returned error")
+                except Exception:
+                    # Final fallback for demonstration if no LLM is running
+                    response_text = f"[NO LLM DETECTED] This would be a real response using the reloaded context: {context_text[:100]}..."
+                    model = "mock-fallback"
+
+        except Exception as e:
+            return {"error": f"Generation failed: {str(e)}", "status": "failed"}
         
         # 3. Emit audit record
         self._audit_trace(user_id, agent_id, brick_ids, model, token_cost)
@@ -78,14 +126,14 @@ class CortexAPI:
         """MODE-1 enforcement layer: Reload raw source text from bricks"""
         all_text = []
         for brick_id in brick_ids:
-            # In a real implementation, we would look up the brick_id 
-            # in a mapping and reload from tree files.
-            # Mocking the lookup and reload logic.
-            print(f"Reloading raw source for brick: {brick_id}")
-            # If reload fails -> BLOCK (return empty/None)
-            all_text.append(f"Content for {brick_id}")
+            text = self.brick_store.get_brick_text(brick_id)
+            if text:
+                all_text.append(text)
+            else:
+                print(f"CRITICAL: MODE-1 Violation. Failed to reload brick: {brick_id}")
+                return "" # Fail fast on reload failure
         
-        return "\n".join(all_text)
+        return "\n\n".join(all_text)
 
     def _audit_trace(self, user_id: str, agent_id: str, brick_ids: List[str], model: str, token_cost: float):
         """Mandatory audit logging"""

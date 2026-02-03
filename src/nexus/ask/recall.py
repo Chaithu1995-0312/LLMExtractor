@@ -1,7 +1,8 @@
 import os
 from typing import List, Dict
 from nexus.vector.local_index import LocalVectorIndex
-from nexus.bricks.brick_store import BrickStore, query_to_vector # Import the deterministic mock embedding
+from nexus.bricks.brick_store import BrickStore
+from nexus.vector.embedder import get_embedder
 from nexus.rerank.orchestrator import RerankOrchestrator
 
 # Initialize LocalVectorIndex and BrickStore globally or pass them around
@@ -9,8 +10,21 @@ from nexus.rerank.orchestrator import RerankOrchestrator
 # In a more complex app, dependency injection would be preferred.
 _local_index = LocalVectorIndex()
 _brick_store = BrickStore()
-_reranker = RerankOrchestrator()
+_reranker = None
+def _normalize_faiss_output(x):
+    if x is None:
+        return []
+    if hasattr(x, "flatten"):
+        return x.flatten().tolist()
+    if isinstance(x, list):
+        return x
+    return list(x)
 
+def get_reranker():
+    global _reranker
+    if _reranker is None:
+        _reranker = RerankOrchestrator()
+    return _reranker
 def _normalize_distance_to_confidence(distance: float) -> float:
     # FAISS L2 distance needs to be converted to cosine similarity and then normalized.
     # L2 distance is sqrt(2 * (1 - cos_similarity)). So cos_similarity = 1 - (distance**2) / 2
@@ -31,14 +45,18 @@ def _normalize_distance_to_confidence(distance: float) -> float:
     return max(0.0, min(1.0, confidence))
 
 def recall_bricks(query: str, k: int = 10) -> List[Dict]:
-    query_vec = query_to_vector(query)
+    if _local_index.index.ntotal == 0:
+        print("DEBUG FAISS index empty — skipping recall")
+        return []
+    embedder = get_embedder()
+    query_vec = embedder.embed_query(query)
     print("DEBUG query vector shape =", query_vec.shape)
     print("DEBUG index dim =", _local_index.index.d)
     distances, indices = _local_index.search(query_vec, k)
     
     candidates = []
-    flat_indices = indices.flatten().tolist()
-    flat_distances = distances.flatten().tolist()
+    flat_indices = _normalize_faiss_output(indices)
+    flat_distances = _normalize_faiss_output(distances)
 
     for i, idx in enumerate(flat_indices):
         if idx != -1 and idx < len(_local_index.brick_ids):
@@ -54,7 +72,8 @@ def recall_bricks(query: str, k: int = 10) -> List[Dict]:
             })
             
     # Apply Reranker
-    reranked_results = _reranker.rerank(query, candidates)
+    reranked_results = get_reranker().rerank(query, candidates)
+
     
     # Map back to expected output format
     results = []

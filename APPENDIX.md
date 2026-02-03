@@ -1,67 +1,68 @@
 # Appendix
 
-## A. JSON Schemas
+## A. Configuration Reference
 
-### 1. Brick Structure (`output/nexus/bricks/*.json`)
+| Variable | Value/Path | Description |
+| :--- | :--- | :--- |
+| `REPO_ROOT` | `d:\chatgptdocs` | Root of the workspace. |
+| `DATA_DIR` | `REPO_ROOT/data` | Storage for index and fixtures. |
+| `INDEX_PATH` | `DATA_DIR/index/index.faiss` | Location of FAISS vector index. |
+| `BRICK_IDS_PATH` | `DATA_DIR/brick_ids.json` | Metadata for vector-to-brick mapping. |
+| `DEFAULT_OUTPUT_DIR` | `REPO_ROOT/output/nexus` | Target for extracted Bricks/Trees. |
+
+## B. Dependency Graph
+
+### Python (Backend)
+Defined in `pyproject.toml`:
+*   `faiss-cpu`: Vector similarity search.
+*   `sentence-transformers`: (Intended) Embedding generation.
+*   `flask`: API server.
+*   `tiktoken`: Token counting for "Walls".
+*   `numpy`: Numerical operations.
+
+### Node.js (Frontend)
+Defined in `ui/jarvis/package.json`:
+*   `vite`: Build tool and dev server.
+*   `react`: UI library.
+*   `typescript`: Type safety.
+
+## C. Data Schemas
+
+### Brick Schema (JSON)
 ```json
 {
-  "brick_id": "string (uuid)",
-  "source_file": "string (path to tree json)",
+  "brick_id": "unique_hash_string",
+  "content": "Raw text content...",
+  "source_file": "path/to/source_tree.json",
   "source_span": {
-    "message_id": "string",
-    "block_index": "integer"
+    "message_id": "uuid",
+    "block_index": 0
   },
-  "content": "string (text content)",
-  "status": "PENDING | EMBEDDED"
+  "timestamp": "ISO8601",
+  "status": "PENDING|EMBEDDED"
 }
 ```
 
-### 2. Graph Node (`nexus/graph/nodes.json`)
-```json
-[
-  {
-    "id": "string (unique)",
-    "label": "string (display name)",
-    "anchors": {
-      "hard": ["string (brick_id)"],
-      "soft": ["string (brick_id)"]
-    }
-  }
-]
-```
-
-### 3. Graph Edge (`nexus/graph/edges.json`)
-```json
-[
-  {
-    "source": "string (node_id)",
-    "target": "string (node_id)",
-    "type": "string (relation label)"
-  }
-]
-```
-
-### 4. Tree Path (`output/nexus/trees/.../*.json`)
+### Audit Trace Record (JSONL)
 ```json
 {
-  "conversation_id": "string",
-  "title": "string",
-  "tree_path_id": "string (root>child>child)",
-  "messages": [
-    {
-      "message_id": "string",
-      "role": "user | assistant",
-      "content": "string",
-      "model_name": "string",
-      "created_at": "string (iso8601)"
-    }
-  ]
+  "user_id": "string",
+  "agent_id": "string",
+  "brick_ids_used": ["id1", "id2"],
+  "model": "gpt-4o",
+  "token_cost": 0.002,
+  "timestamp": "ISO8601"
 }
 ```
 
-## B. Configuration Constants
-*(Inferred from code)*
-
--   **Vector Dimension**: `384` (`local_index.py`)
--   **Wall Token Limit**: `32000` (`walls/builder.py`)
--   **API Port**: `5001` (`server.py`)
+### Concept Node (Graph)
+```json
+{
+  "id": "concept_id",
+  "label": "Human Readable Label",
+  "anchors": {
+    "hard": ["brick_id_1"],
+    "soft": ["brick_id_2"]
+  }
+}
+```

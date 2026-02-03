@@ -2,11 +2,156 @@
   {
     "id": "concept_ai_safety",
     "label": "AI Safety",
-    "bricks": ["brick_123", "brick_456"]
+    "bricks": [
+      "brick_123",
+      "brick_456"
+    ]
   },
   {
     "id": "concept_alignment",
     "label": "Alignment",
-    "bricks": ["brick_789"]
+    "bricks": [
+      "brick_789"
+    ]
+  },
+  {
+    "id": "17a47caeb6c4e1b0cb5fcc3fdd8816cbcf8069876c31b5bfec61cb877eba9cc4",
+    "type": "TOPIC_COGNITION_V1",
+    "topic": "system architecture",
+    "created_at": "2026-02-03T18:57:49.931505+00:00"
+  },
+  {
+    "id": "topic_system-architecture",
+    "type": "topic",
+    "topic_slug": "system-architecture",
+    "original_query": "system architecture"
+  },
+  {
+    "id": "862e1abb22f37eeae0dc48720019ba5a",
+    "type": "brick"
+  },
+  {
+    "id": "e732375cb1024003c4960274f890d2bc",
+    "type": "brick"
+  },
+  {
+    "id": "716108cbad55077cb7dc3c3577111528",
+    "type": "brick"
+  },
+  {
+    "id": "64b6b08034edcf4dd9263f71d0ddf479",
+    "type": "brick"
+  },
+  {
+    "id": "d5df6bae0eafc3c36c2fbcdd3aadce12",
+    "type": "brick"
+  },
+  {
+    "id": "0dc60b124dea95fb33551268c114be45",
+    "type": "brick"
+  },
+  {
+    "id": "f77902b412c3e100beea22f0a0abe852",
+    "type": "brick"
+  },
+  {
+    "id": "562cc0c86186ee0de49ad4baf68ae702",
+    "type": "brick"
+  },
+  {
+    "id": "9116a36d9b0ca8dfec284e1b234004b3",
+    "type": "brick"
+  },
+  {
+    "id": "99df429861bac5ff90579b8776bb8038",
+    "type": "brick"
+  },
+  {
+    "id": "8e2542dae546eb964b32c8048be73c5f",
+    "type": "brick"
+  },
+  {
+    "id": "049ae7a3e9d99cdc3f5204d773f5547a",
+    "type": "brick"
+  },
+  {
+    "id": "be4d19f297aad08e68fc7ef7ed889f60",
+    "type": "brick"
+  },
+  {
+    "id": "b6901daf980098903bdef6975c80d7c2",
+    "type": "brick"
+  },
+  {
+    "id": "408f406293887a2e8a6f71e55f1995dc",
+    "type": "brick"
+  },
+  {
+    "id": "bc934b6b314105ab9c9c3fd13a29d751f24da9bf488f6be1e3e9c9ea73f1eb72",
+    "type": "TOPIC_COGNITION_V1",
+    "topic": "nexus memory",
+    "created_at": "2026-02-03T19:37:04.927133+00:00"
+  },
+  {
+    "id": "topic_nexus-memory",
+    "type": "topic",
+    "topic_slug": "nexus-memory",
+    "original_query": "nexus memory"
+  },
+  {
+    "id": "5575f8a6e7fd0467a0a75cc615cc6d82",
+    "type": "brick"
+  },
+  {
+    "id": "5719bfa1733050d58221826458952e11",
+    "type": "brick"
+  },
+  {
+    "id": "49060b8a8cae19a94800bf6a6cc8ecc5",
+    "type": "brick"
+  },
+  {
+    "id": "6b178888dae49ad28f4fd87d9553ad14",
+    "type": "brick"
+  },
+  {
+    "id": "79a98af2d8858f2105e0fb1d35116ad5",
+    "type": "brick"
+  },
+  {
+    "id": "a9b258b7ef77556eec51193a9cd0f6d8",
+    "type": "brick"
+  },
+  {
+    "id": "b55a84941f9439eb76d557314e9cd3c4",
+    "type": "brick"
+  },
+  {
+    "id": "596fa28dd8cf2686882923220f516222",
+    "type": "brick"
+  },
+  {
+    "id": "d18a95a143e45134b0cc441db64d13cd",
+    "type": "brick"
+  },
+  {
+    "id": "e3ca5f90d50e6d8b1972ab879411f027",
+    "type": "brick"
+  },
+  {
+    "id": "3b013de35ce60fb40ee2bbcfefebeb9e",
+    "type": "brick"
+  },
+  {
+    "id": "fabc24d565089172ee8a06275661f1e2",
+    "type": "brick"
+  },
+  {
+    "id": "018d0328ac7db037c8c3d49253c33eed",
+    "type": "brick"
+  },
+  {
+    "id": "245a4801ba50c5802bf4f895634b0a1d",
+    "type": "brick"
   }
 ]

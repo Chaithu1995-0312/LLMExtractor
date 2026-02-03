@@ -5,10 +5,11 @@ from nexus.extract.tree_splitter import load_conversations, process_conversation
 from nexus.bricks.extractor import extract_bricks_from_file
 from nexus.walls.builder import build_walls
 from nexus.vector.local_index import LocalVectorIndex
+from nexus.config import INDEX_PATH, BRICK_IDS_PATH
 from datetime import datetime, timezone
 
-def run_sync(input_json: str, output_dir: str):
-    print(f"[{datetime.now(timezone.utc).isoformat()}] Starting Sync...")
+def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
+    print(f"[{datetime.now(timezone.utc).isoformat()}] Starting Sync (rebuild_index={rebuild_index})...")
     
     try:
         # 1. Load Conversations
@@ -34,6 +35,14 @@ def run_sync(input_json: str, output_dir: str):
         print(f"[{datetime.now(timezone.utc).isoformat()}] Walls built: {wall_count}")
         
         # 5. Vector Embedding
+        if rebuild_index:
+            print(f"[{datetime.now(timezone.utc).isoformat()}] Rebuilding Index: clearing existing files...")
+            if os.path.exists(INDEX_PATH): os.remove(INDEX_PATH)
+            if os.path.exists(BRICK_IDS_PATH): os.remove(BRICK_IDS_PATH)
+            # Force all bricks to PENDING for re-indexing
+            for b in all_bricks:
+                b["status"] = "PENDING"
+
         index = LocalVectorIndex()
         index.add_bricks(all_bricks)
         index.save()

@@ -60,15 +60,3 @@ class BrickStore:
         except Exception:
             return None
         return None
-
-# Placeholder for a deterministic query embedding function
-def query_to_vector(query: str) -> 'np.ndarray':
-    # In a real system, this would use an actual embedding model
-    # For deterministic mocking, we'll convert the query to a hash and then to a vector
-    import numpy as np
-    import hashlib
-
-    hash_val = int(hashlib.sha256(query.encode("utf-8")).hexdigest(), 16)
-    np.random.seed(hash_val % (2**32 - 1)) # Seed with part of the hash for determinism
-    # Assuming dimension is 384 as per LocalVectorIndex
-    return np.random.random((1, 384)).astype("float32")
