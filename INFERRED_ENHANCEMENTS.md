@@ -1,25 +1,35 @@
 # Inferred Enhancements
 
-## 1. Graph-Driven RAG (The "Anchor" Loop)
-The presence of "Hard Anchors" and "Soft Anchors" in the Graph data structure suggests a powerful feedback loop:
-*   **Current**: User searches $\rightarrow$ Recalls Bricks $\rightarrow$ Manually Promotes to Anchor.
-*   **Enhancement**: **Anchor-Biased Retrieval**. When a user queries a concept (e.g., "Architecture"), the system should *automatically* retrieve all "Hard Anchored" bricks for that concept *before* performing vector search. This guarantees that human-curated knowledge always trumps probabilistic search.
+## Strategic Upgrades
 
-## 2. Dynamic Wall Construction
-The `nexus wall` command builds static token blocks.
-*   **Enhancement**: **Just-in-Time Walls**. Instead of pre-building walls, allow Cortex to request a "Wall of Context" for a specific time range or topic dynamically.
-*   **Use Case**: "Summarize my coding work from last week". Nexus assembles a 100k token wall of all coding-related bricks from that timespan on the fly.
+### 1. SQLite Migration (Persistence Layer)
+**Current State**: `json.load`/`dump` for Graph and Brick Metadata.
+**Proposal**: Move `brick_ids.json`, `nodes.json`, and `edges.json` into a single SQLite database (`nexus.db`).
+**Benefit**: ACID compliance, Atomic updates, SQL querying capability, much better performance for large datasets.
 
-## 3. Local LLM Integration
-The architecture is designed for "Offline Sovereignty".
-*   **Enhancement**: Integrate `ollama` or `llama.cpp` directly into `CortexAPI`.
-*   **Benefit**: Full privacy. No data leaves the machine, even for generation. The "Simulated Response" can be replaced by Llama-3-8B running locally.
+### 2. Asynchronous API (Service Layer)
+**Current State**: Flask (Sync blocking).
+**Proposal**: Migrate `services/cortex` to FastAPI or Quart.
+**Benefit**: `assemble_topic` is I/O and CPU bound. An async architecture would allow the UI to poll for status or use WebSockets/SSE rather than hanging until completion.
 
-## 4. Visual Graph Editing
-The UI supports "Promote/Reject".
-*   **Enhancement**: Full Graph CRUD. Allow users to create new Concept Nodes and draw edges directly in the Jarvis UI.
-*   **Impact**: Turns Jarvis from a passive viewer into an active "Knowledge Gardener" tool.
+### 3. Hierarchical Topic Modeling (Cognition)
+**Current State**: Flat list of bricks recalled by similarity.
+**Proposal**: Implement clustering (HDBSCAN) on the recalled vectors to identify sub-themes before assembly.
+**Benefit**: Better structured "Cognition Artifacts" that break down complex queries into sub-sections.
 
-## 5. Multi-Modal Bricks
-Current extractors focus on text.
-*   **Enhancement**: Parse image attachments from `conversations.json` (if available in export) and store them as "Image Bricks" with CLIP embeddings.
+## Tactical Improvements
+
+### 4. Portable Indexing
+**Current State**: Absolute paths stored in index.
+**Proposal**: Store paths relative to `$NEXUS_DATA_ROOT`.
+**Benefit**: Allows the entire `data/` folder to be synced between machines or developers without breaking retrieval.
+
+### 5. Embedder Optimization
+**Current State**: CPU-based inference (assumed from lack of CUDA checks in code snippets).
+**Proposal**: Add ONNX Runtime support or quantization.
+**Benefit**: Faster ingestion and lower latency on recall.
+
+### 6. Graph Visualization
+**Current State**: Raw JSON dump to UI.
+**Proposal**: Server-side layout calculation or filtering (e.g., returning only the "ego graph" of a topic).
+**Benefit**: The frontend won't crash when trying to render 10,000 nodes.

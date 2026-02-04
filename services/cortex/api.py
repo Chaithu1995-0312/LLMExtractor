@@ -121,6 +121,31 @@ class CortexAPI:
             "status": "preview"
         }
 
+    def assemble(self, topic: str) -> Dict:
+        """Endpoint: /cognition/assemble - Trigger topic assembly"""
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Cortex: Assembling topic '{topic}'...")
+        
+        try:
+            # Lazy import to avoid circular deps
+            from nexus.cognition.assembler import assemble_topic
+            
+            artifact_path = assemble_topic(topic)
+            
+            # Load the artifact to return summary
+            with open(artifact_path, "r", encoding="utf-8") as f:
+                artifact = json.load(f)
+                
+            return {
+                "status": "success",
+                "artifact_id": artifact.get("artifact_id"),
+                "path": artifact_path,
+                "document_count": len(artifact.get("payload", {}).get("raw_excerpts", [])),
+                "derived_from_bricks": len(artifact.get("derived_from", []))
+            }
+            
+        except Exception as e:
+            print(f"ERROR: Assembly failed: {e}")
+            return {"error": str(e), "status": "failed"}
 
     def _reload_source_text(self, brick_ids: List[str]) -> str:
         """MODE-1 enforcement layer: Reload raw source text from bricks"""

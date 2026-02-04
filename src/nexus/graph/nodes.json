@@ -153,5 +153,73 @@
   {
     "id": "245a4801ba50c5802bf4f895634b0a1d",
     "type": "brick"
+  },
+  {
+    "id": "d07529b46feec317d74cdbb492cdf10bbfa2e91279a5199dbde908602c6f385f",
+    "type": "TOPIC_COGNITION_V1",
+    "topic": "machine learning",
+    "created_at": "2026-02-03T21:03:55.621779+00:00"
+  },
+  {
+    "id": "topic_machine-learning",
+    "type": "topic",
+    "topic_slug": "machine-learning",
+    "original_query": "machine learning"
+  },
+  {
+    "id": "3b8795ded0cef6498941ec0d0adf6b09",
+    "type": "brick"
+  },
+  {
+    "id": "ec2ad313baa242e9934dae1450582abb",
+    "type": "brick"
+  },
+  {
+    "id": "078baca389022ad8b2252e54f8d3efa7",
+    "type": "brick"
+  },
+  {
+    "id": "aace86723c8ce2102c675504b407dbd3",
+    "type": "brick"
+  },
+  {
+    "id": "6a3ff477a510a5a6b4e198b0c1b948f0",
+    "type": "brick"
+  },
+  {
+    "id": "1520b2c672501359b60770d7998d43af",
+    "type": "brick"
+  },
+  {
+    "id": "3edb7f6df363e81a2caf11a30ed1d59f",
+    "type": "brick"
+  },
+  {
+    "id": "280b2e217d0995f53b3fa59147a8b820",
+    "type": "brick"
+  },
+  {
+    "id": "acd9dcb85357a7dc9bd66ae76f7ff958",
+    "type": "brick"
+  },
+  {
+    "id": "a24fe95847cc9917b21418bd7254c3ea",
+    "type": "brick"
+  },
+  {
+    "id": "a6b1ae9652348ca0651c23b3f5793f3b",
+    "type": "brick"
+  },
+  {
+    "id": "7b369f11d08fc8b8821d4d83ec3748ec",
+    "type": "brick"
+  },
+  {
+    "id": "141fda170393c1b41d6cf223b77e701a",
+    "type": "brick"
+  },
+  {
+    "id": "f1107611372cf5775abde702e00b0cc8",
+    "type": "brick"
   }
 ]

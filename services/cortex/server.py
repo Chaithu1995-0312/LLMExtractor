@@ -220,33 +220,24 @@ def jarvis_ask_preview():
     }
     return jsonify(response_data)
 
-@app.route("/jarvis/assemble-topic", methods=["POST"])
-def jarvis_assemble_topic():
+@app.route("/cognition/assemble", methods=["POST"])
+def cognition_assemble():
+    """Generic endpoint for topic assembly"""
     data = request.json or {}
     topic = data.get("topic")
 
     if not topic:
         return jsonify({"error": "topic is required"}), 400
 
-    try:
-        artifact_path = assemble_topic(topic)
-        
-        # Read artifact to get ID
-        with open(artifact_path, "r", encoding="utf-8") as f:
-            art = json.load(f)
-            artifact_id = art["artifact_id"]
+    result = cortex_api.assemble(topic)
+    if result.get("status") == "failed":
+        return jsonify(result), 500
+    return jsonify(result)
 
-        return jsonify({
-            "status": "assembled",
-            "topic": topic,
-            "artifact_id": artifact_id,
-            "artifact_path": artifact_path
-        })
-    except Exception as e:
-        return jsonify({
-            "error": str(e),
-            "status": "failed"
-        }), 500
+@app.route("/jarvis/assemble-topic", methods=["POST"])
+def jarvis_assemble_topic():
+    # Alias to the generic endpoint for backward compatibility/UI support
+    return cognition_assemble()
 
 if __name__ == "__main__":
     print("Prewarming embedder...")
