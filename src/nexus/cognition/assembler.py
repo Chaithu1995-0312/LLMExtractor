@@ -262,6 +262,18 @@ def assemble_topic(topic_query: str) -> str:
                     dst=("intent", fact_id),
                     edge_type=EdgeType.ASSEMBLED_IN
                 )
+            
+            # Link Intent to Bricks (GraphRAG support)
+            # We assume the fact is derived from the set of bricks used in context.
+            # Only link if the intent node was just created/accessed (fact_id).
+            # Note: If fact_id refers to an existing node that we didn't touch, we might skip.
+            # But here fact_id is hash of fact string, so if we processed it, it's relevant.
+            for bid in all_brick_ids:
+                graph.register_edge(
+                    src=("intent", fact_id),
+                    dst=("brick", bid),
+                    edge_type=EdgeType.DERIVED_FROM
+                )
         
         for brick_id in all_brick_ids:
             graph.register_node("brick", brick_id, {})

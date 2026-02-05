@@ -1,45 +1,36 @@
-# Gaps and Todos
+# Gaps and TODOs
 
-## Critical Gaps (🔴)
+## Critical Path
 
-### 1. Inactive Infrastructure Code
--   **Gap**: `Neo4jGraphManager` and `PineconeVectorIndex` are fully implemented but not wired into the active system.
--   **Risk**: Code rot. Future developers might be confused about which storage engine is authoritative.
--   **Action**: Decide to either migrate *to* them or delete them. Given "implementation reality", deleting or moving to `archive/` is recommended if SQLite/FAISS is sufficient.
+### 🔴 Infrastructure & CI/CD
+- [ ] **GitHub Actions Workflow**: No automated testing or linting on push.
+- [ ] **Dockerization**: Service runs on bare metal; needs a `Dockerfile` and `docker-compose.yml` for Cortex + UI + DB.
+- [ ] **Environment Config**: Hardcoded paths (e.g., `d:/chatgptdocs`) in environment details need to be fully configurable via `.env`.
 
-### 2. Lack of Access Control (ACLs)
--   **Gap**: `recall_bricks` has a `scope` boost, but no hard enforcement prevents a user from accessing private bricks if the vector match is strong enough.
--   **Risk**: Data leakage between "Private" and "Global" scopes.
--   **Action**: Implement strict filtering in `LocalVectorIndex.search` or post-filtering in `recall_bricks`.
+### 🟡 Cognitive Pipeline Maturity
+- [ ] **DSPy Optimization**: `FactSignature` is too generic. Needs specialized signatures for Code, Architecture, and Definitions.
+- [ ] **Reranking Integration**: `cross_encoder.py` exists but isn't wired into the `recall_bricks` hot path in `nexus.ask`.
+- [ ] **Hallucination Check**: No self-correction loop to verify if extracted facts are actually supported by the source Bricks.
 
-### 3. Missing Garbage Collection
--   **Gap**: If source files are modified or deleted, old bricks remain in `data/bricks/` and the FAISS index forever.
--   **Risk**: Index bloat and phantom recalls of deleted content.
--   **Action**: Implement a `purge` or `reindex` command.
+### 🟡 User Interface Experience
+- [ ] **Real-time Updates**: UI likely polls or refreshes manually. Needs WebSocket or SSE for graph updates.
+- [ ] **Complex Editing**: Can only "Promote/Reject". Cannot edit Intent statements or merge nodes via UI.
+- [ ] **Scope Management**: No UI to create or assign Scopes to Intents.
 
-## Technical Debt (🟡)
+## Technical Debt
 
-### 1. Frontend Integration
--   **Gap**: `ui/jarvis` exists but its connection to `CortexAPI` is verified only by `ask_preview`. The full "Assembly" or "Graph Visualization" features might be mocks.
--   **Action**: Audit `ui/jarvis/src/store.ts` to confirm API calls.
+### 🧪 Vector Storage Scalability
+- **Current**: `IndexFlatL2` (Brute force).
+- **Risk**: Performance degradation > 100k vectors.
+- **Fix**: Switch to `IndexIVFFlat` or migrate to Qdrant/Chroma.
 
-### 2. Hardcoded Routing Rules
--   **Gap**: `CortexAPI.route` uses hardcoded keywords (`"trade"`, `"architect"`).
--   **Risk**: Brittle and unscalable.
--   **Action**: Move to a configuration file or a small classifier model.
+### 🧪 Graph Projections
+- **Current**: `projection.py` has logic but isn't exposed via API.
+- **Risk**: API returns raw graph; frontend has to do heavy lifting to filter views.
+- **Fix**: Expose projection endpoints (e.g., `/graph/view?scope=python`).
 
-### 3. Dependency Management
--   **Gap**: `nexus.ask.recall` has global state (`_local_index`, `_brick_store`) initialized at module level.
--   **Risk**: Hard to test; circular import potential.
--   **Action**: Use a dependency injection container or factory pattern.
+## Missing Features
 
-## Feature Requests (From Inferred Context)
-
-### 1. Continuous Assembly
--   **Idea**: Instead of triggering `/assemble` manually, the system should auto-assemble topics when sufficient new bricks accumulate.
-
-### 2. Multi-User Support
--   **Idea**: The current `conversations.json` ingestion implies a single-user or single-team perspective. Multi-tenancy is not supported.
-
-### 3. Graph Visualization
--   **Idea**: Expose the SQLite graph via an interactive endpoint (e.g., Cytoscape or generic JSON) for the UI, replacing the likely-mocked `NexusNode.tsx`.
+- **Auth**: No authentication on Cortex API.
+- **Multi-user**: No user isolation in Graph or History.
+- **Backup**: No automated backup for `graph.db`.

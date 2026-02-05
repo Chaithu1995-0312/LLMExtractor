@@ -1,41 +1,52 @@
 # Rules and Invariants
 
-## Core Directives
+## Intent Lifecycle State Machine
+The lifecycle of an Intent is strictly monotonic. Transitions generally move towards higher stability or finality.
 
-### 1. The Mode-1 Invariant (No Summary Retrieval)
--   **Rule**: Retrieval must never serve summarized content or embeddings directly to the generation model without reloading the original raw source.
--   **Enforcement**: `CortexAPI._reload_source_text` explicitly loads content from `BrickStore`. If this fails (return empty), the `generate` call is aborted with `status: blocked`.
--   **Rationale**: Summaries drift; raw data is ground truth.
+- **Monotonicity**: An Intent cannot regress to a less stable state (e.g., `FROZEN` $\rightarrow$ `LOOSE` is illegal).
+- **Valid Transitions**:
+    - `LOOSE` $\rightarrow$ `FORMING` | `KILLED`
+    - `FORMING` $\rightarrow$ `FROZEN` | `KILLED`
+    - `FROZEN` $\rightarrow$ `SUPERSEDED` | `KILLED`
+    - `SUPERSEDED` $\rightarrow$ `KILLED`
+    - `KILLED` $\rightarrow$ $\emptyset$ (Terminal State)
 
-### 2. Immutable History
--   **Rule**: Ingested conversation history is immutable. It is never modified or deleted by the system.
--   **Enforcement**: `src/nexus/sync` only appends/creates new bricks. Existing bricks are identified by SHA256 content hash and skipped if already present (idempotency).
+## Graph Integrity Constraints
 
-### 3. Monotonic Knowledge Growth
--   **Rule**: New knowledge does not delete old knowledge; it supersedes it.
--   **Enforcement**: `GraphManager` uses `OVERRIDES` edges to link conflicting Intents.
--   **Lifecycle**:
-    -   `LOOSE`: Just observed.
-    -   `FORMING`: Confirmed by multiple sources or high confidence.
-    -   `FROZEN`: System invariant (requires explicit override).
-    -   `SUPERSEDED`: Replaced by a newer intent.
-    -   `KILLED`: Explicitly rejected.
+### 1. Scope Binding
+**Invariant**: Any Intent entering the `FROZEN` state MUST have at least one outgoing `APPLIES_TO` edge pointing to a valid `ScopeNode`.
+- *Enforcement*: Checked in `GraphManager.promote_intent` before state update commit.
+- *Reasoning*: Canonical knowledge must be contextualized. Universal truths are rare; scoped truths are useful.
 
-### 4. Zero-Hallucination Assembly
--   **Rule**: Topic assembly must only use facts explicitly present in the source bricks.
--   **Enforcement**: DSPy signatures (`CognitiveExtractor`) are designed to extract, not invent. The system relies on the LLM's adherence to the prompt context. (Note: This is probabilistic, not deterministic code-level enforcement).
+### 2. Override Stability
+**Invariant**: An `OVERRIDES` edge can only be created if the source Intent is already `FROZEN`.
+- *Enforcement*: Checked in `GraphManager.add_typed_edge`.
+- *Reasoning*: You cannot override existing knowledge with a draft (LOOSE/FORMING). Only established facts can override other facts.
 
-## Data Integrity
+### 3. Single Override Principle
+**Invariant**: A target Intent can be the destination of at most one `OVERRIDES` edge.
+- *Enforcement*: Checked in `GraphManager.add_typed_edge`.
+- *Reasoning*: prevents conflict chains. If multiple Intents override the same target, the conflict must be resolved into a single superior Intent first.
 
-### Brick Immutability
--   **ID Generation**: `sha256(source_file + index + content)`.
--   **Constraint**: If the source file changes, new bricks are generated. Old bricks become orphaned in the index but remain in the store (unless a purge script is run, which is not currently implemented).
+## Ingestion & Data Rules
 
-### Graph Integrity
--   **Schema**: Nodes and Edges must conform to types defined in `src/nexus/graph/schema.py`.
--   **Validation**: `src/nexus/graph/validation.py` (referenced) likely runs periodic checks to ensure no dangling edges or invalid lifecycle states.
+### 1. Brick Atomicity
+**Rule**: A Brick represents the smallest unit of coherent thought.
+- *Definition*: Text blocks separated by double newlines (`\n\n`) in the source message.
+- *Implication*: Context is preserved via metadata linkage to the original message, not within the Brick content itself.
 
-## Security & Audit
--   **Audit Trace**: Every `generate` call using Nexus memory must be logged to `phase3_audit_trace.jsonl`.
--   **Fields**: `user_id`, `agent_id`, `brick_ids_used`, `model`, `token_cost`.
--   **Scope Access**: `recall_bricks` boosts priority for non-global scopes but does not strictly *deny* access to global scopes (currently). Hard ACLs are not yet visible.
+### 2. Idempotency
+**Rule**: All Graph and Vector operations must be idempotent.
+- *Implementation*:
+    - `GraphManager.register_node`: Updates if exists, inserts if new.
+    - `GraphManager.register_edge`: Checks existence before insertion.
+    - `LocalVectorIndex`: Stores processed Brick IDs to prevent duplicate embedding.
+
+## API Contracts
+
+### 1. Read-Write Separation
+- **GET** requests (e.g., `graph-index`) MUST NOT modify the graph state.
+- **POST** requests (e.g., `anchor`) MUST be transactional.
+
+### 2. Error Propagation
+- Service layer exceptions (e.g., `ValueError` from `GraphManager`) MUST be caught and mapped to appropriate HTTP 4xx status codes (e.g., 400 Bad Request for invariant violations).

@@ -179,6 +179,20 @@ class GraphManager:
             return json.loads(row[0])
         return None
 
+    def get_node(self, node_id: str) -> Optional[Tuple[str, Dict]]:
+        """
+        Retrieve node type and data.
+        Returns (type, data_dict) or None.
+        """
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("SELECT type, data FROM nodes WHERE id=?", (node_id,))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return (row[0], json.loads(row[1]))
+        return None
+
     def promote_intent(self, intent_id: str, new_lifecycle: IntentLifecycle):
         """
         Promote an intent to a new lifecycle state, enforcing monotonicity and invariants.
@@ -352,3 +366,68 @@ class GraphManager:
             )
             sources[r[0]] = s
         return sources
+
+    def delete_node(self, node_id: str) -> bool:
+        """
+        Delete a node and all connected edges.
+        """
+        conn = self._get_conn()
+        c = conn.cursor()
+        try:
+            # Delete edges where this node is source or target
+            c.execute("DELETE FROM edges WHERE source = ? OR target = ?", (node_id, node_id))
+            
+            # Delete the node
+            c.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+            
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error deleting node {node_id}: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def get_all_nodes_raw(self) -> List[Dict]:
+        """
+        Retrieve all nodes as dictionaries suitable for API response.
+        """
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("SELECT id, type, data, created_at FROM nodes")
+        rows = c.fetchall()
+        conn.close()
+        
+        nodes = []
+        for r in rows:
+            data = json.loads(r[2])
+            # Merge fields
+            node = {
+                "id": r[0],
+                "type": r[1],
+                "created_at": r[3],
+                **data
+            }
+            nodes.append(node)
+        return nodes
+
+    def get_all_edges_raw(self) -> List[Dict]:
+        """
+        Retrieve all edges as dictionaries suitable for API response.
+        """
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("SELECT source, target, type, data FROM edges")
+        rows = c.fetchall()
+        conn.close()
+        
+        edges = []
+        for r in rows:
+            data = json.loads(r[3] if r[3] else "{}")
+            edges.append({
+                "source": r[0],
+                "target": r[1],
+                "type": r[2],
+                **data
+            })
+        return edges

@@ -1,89 +1,69 @@
 # Module Deep Dives
 
-## 1. Ingestion Engine (`src/nexus/sync`)
+## 1. Nexus Graph Core (`src/nexus/graph`)
 
-### Purpose
-Converts raw conversational history (JSON trees) into atomic "Bricks" suitable for vector embedding and retrieval.
+### Data Model (`schema.py`)
+The graph is built on four primary node types and strict edge typing:
 
-### Mechanism
-1.  **Parsing**: Reads `tree_file_path` JSONs.
-2.  **Distillation**: Uses `src/nexus/bricks/extractor.py` to clean and split text.
-    -   Library: `unstructured` (cleaning).
-    -   Splitting: Paragraph-based splitting (fallback to simple split if unstructured fails).
-3.  **Brick Creation**: Generates a stable SHA256 `brick_id` based on source path, content, and index.
-4.  **Persistence**: Saves bricks to `data/bricks/`.
-5.  **Indexing**: Passes bricks to `LocalVectorIndex` for embedding.
+- **Intents**: Represents assertions or knowledge units.
+    - Fields: `statement`, `lifecycle` (Enum), `intent_type` (Enum).
+    - Invariant: Must track `lifecycle` state.
+- **Scopes**: Represents context or domains (e.g., "Architecture").
+    - Fields: `name`, `description`.
+- **Sources**: Represents raw provenance.
+    - Fields: `content`, `origin_file`, `origin_span`.
+- **Edges**: Directed relationships.
+    - Types: `DERIVED_FROM`, `APPLIES_TO`, `OVERRIDES`, `CONFLICTS_WITH`, `REFINES`, `DEPENDS_ON`.
 
-### Technical Constraints
--   **Granularity**: Currently splits by message/paragraph. May lose context if paragraphs are too short.
--   **Idempotency**: Relies on stable hashing. Rerunning sync on same data produces same IDs.
+### Manager Logic (`manager.py`)
+The `GraphManager` acts as the persistence and logic layer over SQLite.
 
-## 2. Recall System (`src/nexus/ask`)
+- **Persistence**: Flat tables `nodes` (JSON blob) and `edges` (JSON blob).
+- **Lifecycle Management**: `promote_intent` enforces monotonic transitions:
+    - `LOOSE` $\rightarrow$ `FORMING` $\rightarrow$ `FROZEN` $\rightarrow$ `SUPERSEDED` / `KILLED`.
+    - **Critical Invariant**: A generic `FROZEN` intent MUST have an `APPLIES_TO` edge pointing to a `ScopeNode`.
+- **Edge Logic**: `add_typed_edge` enforces write-time invariants (e.g., `OVERRIDES` requires source to be `FROZEN`).
 
-### Purpose
-Retrieves relevant context for a query while strictly enforcing "read-only" safety during preview/routing.
+## 2. Cognition Layer (`src/nexus/cognition`)
 
-### Architecture
--   **Entry Point**: `recall_bricks` or `recall_bricks_readonly`.
--   **Vector Search**: Queries `LocalVectorIndex` (FAISS).
-    -   Converts L2 distance to confidence score (0.0 - 1.0).
--   **Hydration**: Fetches full text and metadata from `BrickStore`.
--   **Reranking**: `RerankOrchestrator` uses Cross-Encoder to refine results.
--   **Scoping**: Applies priority boost for non-global scopes.
+### DSPy Integration (`dspy_modules.py`)
+Uses the DSPy framework to programmatically extract structured data from unstructured text.
 
-### Key Class: `LocalVectorIndex`
--   **Backend**: `faiss.IndexFlatL2`.
--   **Storage**: `data/index/nexus_bricks.index`.
--   **Mapping**: Maintains a parallel JSON list of `brick_ids` to map FAISS integer IDs back to string IDs.
+- **Fact Extraction**:
+    - Signature: `context` $\rightarrow$ `facts` (List of atomic statements).
+    - Module: `dspy.ChainOfThought(FactSignature)`.
+- **Diagram Extraction**:
+    - Signature: `context` $\rightarrow$ `latex_formulas`, `mermaid_diagrams`.
+    - Module: `dspy.ChainOfThought(DiagramSignature)`.
 
-## 3. Cognition Assembler (`src/nexus/cognition`)
+### Assembler (`assembler.py`)
+Orchestrates the raw-to-structured pipeline:
+1.  Receives a `topic` or query.
+2.  Recalls relevant Bricks via Vector Store.
+3.  Passes Bricks to `CognitiveExtractor`.
+4.  Projects extracted Facts into `Intent` candidates (`LOOSE` state).
 
-### Purpose
-Synthesizes scattered bricks into a coherent, structured Knowledge Artifact (Topic).
+## 3. Cortex Service (`services/cortex`)
 
-### Workflow ("Mode-1")
-1.  **Recall**: Fetches top-k bricks for the topic.
-2.  **Expansion**: Loads the *entire* source conversation tree for every recalled brick.
-    -   *Why?* To provide full context to the extraction model.
-3.  **Deduplication**: Merges overlapping source spans.
-4.  **Extraction**: `CognitiveExtractor` (DSPy module) processes the aggregated text.
-    -   Extracts: Facts, Mermaid diagrams, LaTeX formulas.
-5.  **Persistence**: Writes artifact to `output/artifacts/{slug}_{hash}.json`.
-6.  **Graph Sync**: Updates the Knowledge Graph with new Intents and Relationships.
+### API Architecture (`server.py`)
+Flask-based wrapper exposing internal Managers to the outer world (UI/MCP).
 
-### DSPy Integration
--   **Signature**: `Context -> Facts, Mermaid, Latex`.
--   **Model**: Configured globally (likely GPT-4o or similar via DSPy).
+- **Endpoints**:
+    - `GET /jarvis/graph-index`: Dumps full graph state for visualization.
+    - `POST /jarvis/anchor`: Handles "Promote" (Anchor) and "Reject" actions from UI.
+    - `GET /jarvis/brick-meta`: Retrieves raw text context for a Brick ID.
+    - `POST /cognition/assemble`: Triggers on-demand topic assembly.
+- **Error Handling**: Standard HTTP codes (400 for bad input, 404 for missing resources, 500 for internal errors).
+- **Dependency Injection**: Instantiates `GraphManager` and `LocalVectorIndex` per request (or singleton via module scope).
 
-## 4. Graph Manager (`src/nexus/graph`)
+## 4. Ingestion Pipeline (`src/nexus/sync`)
 
-### Purpose
-Manages the lifecycle and relationships of knowledge units (Intents).
-
-### Schema (SQLite)
--   **Nodes**: Generic table `(id, type, data_json)`.
-    -   Types: `intent`, `topic`, `artifact`, `brick`, `source`, `scope`.
--   **Edges**: Generic table `(source, target, type, data_json)`.
-    -   Types: `ASSEMBLED_IN`, `DERIVED_FROM`, `OVERRIDES`, `APPLIES_TO`.
-
-### Lifecycle Logic
--   **Monotonicity**: State transitions are strictly controlled.
-    -   `LOOSE` -> `FORMING` -> `FROZEN` -> `SUPERSEDED` -> `KILLED`.
--   **Conflict Resolution**:
-    -   Newer `FORMING` intent can override older `FORMING` intent.
-    -   `FROZEN` intent acts as an anchor; newer data must explicitly `OVERRIDE` it (and likely requires human/high-confidence approval, though currently automated based on similarity > 0.85).
-
-## 5. Cortex API (`services/cortex`)
-
-### Purpose
-Exposes system capabilities via REST (or internal Python API).
-
-### Endpoints
--   `/route`: Keyword-based agent routing.
--   `/generate`: RAG generation with mandatory source reload audit.
--   `/assemble`: Triggers topic assembly.
--   `/ask_preview`: Read-only recall for UI.
-
-### Security / Audit
--   **Audit Log**: `phase3_audit_trace.jsonl`.
--   **Invariant**: Generation *must* reload source text from bricks. If reload fails, generation is blocked.
+### History Ingestion (`ingest_history.py`)
+- **Source**: `conversations.json` (Exported chat logs).
+- **Process**:
+    1.  Load JSON tree.
+    2.  Traverse messages.
+    3.  `Extractor` splits content by double newlines (`\n\n`).
+    4.  Generate stable IDs (UUID or Hash).
+    5.  Embed text via `Embedder`.
+    6.  Upsert to `LocalVectorIndex`.

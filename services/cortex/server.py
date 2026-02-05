@@ -13,6 +13,7 @@ from api import CortexAPI
 try:
     from nexus.ask.recall import recall_bricks_readonly, get_recall_brick_metadata
     from nexus.cognition.assembler import assemble_topic
+    from nexus.graph.manager import GraphManager
     from nexus.config import REPO_ROOT
 except ImportError:
     # Fallback for development if not installed
@@ -20,6 +21,7 @@ except ImportError:
     sys.path.append(os.path.join(repo_root, "src"))
     from nexus.ask.recall import recall_bricks_readonly, get_recall_brick_metadata
     from nexus.cognition.assembler import assemble_topic
+    from nexus.graph.manager import GraphManager
     from nexus.config import REPO_ROOT
 
 app = Flask(__name__)
@@ -30,33 +32,34 @@ def get_utc_now():
 
 @app.route("/jarvis/graph-index", methods=["GET"])
 def jarvis_graph_index():
-    graph_dir = os.path.join(REPO_ROOT, "src", "nexus", "graph")
-    nodes_path = os.path.join(graph_dir, "nodes.json")
-    edges_path = os.path.join(graph_dir, "edges.json")
-    index_path = os.path.join(graph_dir, "index.md")
-    overrides_path = os.path.join(graph_dir, "anchors.override.json")
-
     try:
-        if not (os.path.exists(nodes_path) and os.path.exists(edges_path) and os.path.exists(index_path)):
-             return jsonify({"error": "Graph index files not found"}), 404
-
-        with open(nodes_path, "r", encoding="utf-8") as f:
-            nodes = json.load(f)
+        graph_manager = GraphManager()
+        nodes = graph_manager.get_all_nodes_raw()
+        edges = graph_manager.get_all_edges_raw()
         
-        with open(edges_path, "r", encoding="utf-8") as f:
-            edges = json.load(f)
-
-        with open(index_path, "r", encoding="utf-8") as f:
-            index_content = f.read()
-
+        # Backward compatibility: Synthesize overrides list from node metadata
         overrides = []
-        if os.path.exists(overrides_path):
-            try:
-                with open(overrides_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    overrides = data.get("overrides", [])
-            except Exception:
-                overrides = []
+        for n in nodes:
+            if n.get("anchored"):
+                overrides.append({
+                    "brick_id": n["id"],
+                    "action": "promote",
+                    "timestamp": n.get("created_at") # Metadata might not have updated_at, fallback to created_at
+                })
+            elif n.get("rejected"):
+                overrides.append({
+                    "brick_id": n["id"],
+                    "action": "reject",
+                    "timestamp": n.get("created_at")
+                })
+        
+        # Try to read index content for context if available
+        graph_dir = os.path.join(REPO_ROOT, "src", "nexus", "graph")
+        index_path = os.path.join(graph_dir, "index.md")
+        index_content = ""
+        if os.path.exists(index_path):
+             with open(index_path, "r", encoding="utf-8") as f:
+                index_content = f.read()
 
         return jsonify({
             "nodes": nodes,
@@ -76,35 +79,19 @@ def jarvis_anchor():
     if not brick_id or action not in ["promote", "reject"]:
         return jsonify({"error": "Invalid anchor data"}), 400
 
-    overrides_path = os.path.join(REPO_ROOT, "src", "nexus", "graph", "anchors.override.json")
-    
     try:
-        overrides_data = {"overrides": []}
-        if os.path.exists(overrides_path):
-            with open(overrides_path, "r", encoding="utf-8") as f:
-                try:
-                    overrides_data = json.load(f)
-                except Exception:
-                    pass
+        graph_manager = GraphManager()
         
-        # Add or update
-        found = False
-        for ov in overrides_data["overrides"]:
-            if ov["brick_id"] == brick_id:
-                ov["action"] = action
-                ov["timestamp"] = get_utc_now()
-                found = True
-                break
+        updates = {}
+        if action == "promote":
+            updates = {"anchored": True, "rejected": False}
+        elif action == "reject":
+            updates = {"anchored": False, "rejected": True}
         
-        if not found:
-            overrides_data["overrides"].append({
-                "brick_id": brick_id,
-                "action": action,
-                "timestamp": get_utc_now()
-            })
-
-        with open(overrides_path, "w", encoding="utf-8") as f:
-            json.dump(overrides_data, f, indent=2)
+        # Persist to graph database. 
+        # Note: We assume the node exists or we are registering a placeholder "brick" node if it doesn't.
+        # Ideally, brick nodes are already ingested.
+        graph_manager.register_node("brick", brick_id, updates, merge=True)
 
         return jsonify({"status": "success", "brick_id": brick_id, "action": action})
     except Exception as e:

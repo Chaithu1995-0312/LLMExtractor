@@ -47,6 +47,11 @@ class CortexAPI:
         if not context_text and brick_ids:
             return {"error": "MODE-1 Violation: Source reload failed.", "status": "blocked"}
         
+        # 1.5 Inject Graph Context (GraphRAG)
+        graph_context = self._fetch_graph_context(brick_ids)
+        if graph_context:
+            context_text += "\n\n" + graph_context
+        
         # 2. LLM Call (Pluggable Backend)
         model = "gpt-4o" # Default model tag for audit
         response_text = ""
@@ -108,7 +113,8 @@ class CortexAPI:
         sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "nexus-cli")))
         from nexus.ask.recall import recall_bricks_readonly
 
-        recalled_bricks = recall_bricks_readonly(query)
+        # Explicitly enforce global scope for unauthenticated previews
+        recalled_bricks = recall_bricks_readonly(query, allowed_scopes=["global"])
 
         top_bricks_output = [
             {"brick_id": brick["brick_id"], "confidence": round(brick["confidence"], 4)}
@@ -159,6 +165,25 @@ class CortexAPI:
                 return "" # Fail fast on reload failure
         
         return "\n\n".join(all_text)
+
+    def _fetch_graph_context(self, brick_ids: List[str]) -> str:
+        """Fetch related intents/facts from the Knowledge Graph."""
+        try:
+            # We import here to avoid potential top-level circular deps if not using sys.path tricks
+            # Ensure path is correct for import
+            if "nexus" not in sys.modules:
+                sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src")))
+            
+            from nexus.ask.recall import get_related_intents
+            
+            intents = get_related_intents(brick_ids)
+            if not intents:
+                return ""
+            
+            return "## Graph Context (Verified):\n" + "\n".join(f"- {i}" for i in intents)
+        except Exception as e:
+            print(f"WARN: Graph context fetch failed: {e}")
+            return ""
 
     def _audit_trace(self, user_id: str, agent_id: str, brick_ids: List[str], model: str, token_cost: float):
         """Mandatory audit logging"""
