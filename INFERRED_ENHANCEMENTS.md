@@ -1,35 +1,40 @@
 # Inferred Enhancements
 
-## Strategic Upgrades
+## Architecture Refinements
 
-### 1. SQLite Migration (Persistence Layer)
-**Current State**: `json.load`/`dump` for Graph and Brick Metadata.
-**Proposal**: Move `brick_ids.json`, `nodes.json`, and `edges.json` into a single SQLite database (`nexus.db`).
-**Benefit**: ACID compliance, Atomic updates, SQL querying capability, much better performance for large datasets.
+### 1. Unified Graph Interface
+-   **Current State**: `sqlite3` calls are scattered in `GraphManager`.
+-   **Improvement**: Abstract `GraphStore` interface (Protocol) to allow seamless switching between SQLite and Neo4j. This would validate the existence of `Neo4jGraphManager` and allow scaling.
 
-### 2. Asynchronous API (Service Layer)
-**Current State**: Flask (Sync blocking).
-**Proposal**: Migrate `services/cortex` to FastAPI or Quart.
-**Benefit**: `assemble_topic` is I/O and CPU bound. An async architecture would allow the UI to poll for status or use WebSockets/SSE rather than hanging until completion.
+### 2. Hybrid Search (Keyword + Vector)
+-   **Current State**: Pure dense retrieval (`FAISS` L2 distance).
+-   **Improvement**: Add a sparse index (BM25) to catch exact keyword matches (e.g., project names, specific error codes) that embeddings might miss. Combine scores (Reciprocal Rank Fusion).
 
-### 3. Hierarchical Topic Modeling (Cognition)
-**Current State**: Flat list of bricks recalled by similarity.
-**Proposal**: Implement clustering (HDBSCAN) on the recalled vectors to identify sub-themes before assembly.
-**Benefit**: Better structured "Cognition Artifacts" that break down complex queries into sub-sections.
+### 3. Event-Driven Ingestion
+-   **Current State**: `python -m nexus.sync` is a batch process.
+-   **Improvement**: Watch the `data/` directory for file changes (watchdog) and trigger incremental ingestion automatically.
 
-## Tactical Improvements
+## Cognition Upgrades
 
-### 4. Portable Indexing
-**Current State**: Absolute paths stored in index.
-**Proposal**: Store paths relative to `$NEXUS_DATA_ROOT`.
-**Benefit**: Allows the entire `data/` folder to be synced between machines or developers without breaking retrieval.
+### 1. Iterative "Mode-2" Reasoning
+-   **Current State**: "Mode-1" is single-pass extraction.
+-   **Improvement**: Implement "Mode-2" (Iterative Refinement).
+    -   Step 1: Extract facts.
+    -   Step 2: Check for contradictions in Graph.
+    -   Step 3: Re-query/Re-read if needed.
+    -   Step 4: Update Intent Lifecycle.
 
-### 5. Embedder Optimization
-**Current State**: CPU-based inference (assumed from lack of CUDA checks in code snippets).
-**Proposal**: Add ONNX Runtime support or quantization.
-**Benefit**: Faster ingestion and lower latency on recall.
+### 2. Automatic Topic Discovery
+-   **Current State**: User must ask for a topic (`/assemble?topic=X`).
+-   **Improvement**: Cluster bricks in vector space to auto-discover latent topics ("You have 50 bricks discussing 'Login Auth', should I assemble them?").
 
-### 6. Graph Visualization
-**Current State**: Raw JSON dump to UI.
-**Proposal**: Server-side layout calculation or filtering (e.g., returning only the "ego graph" of a topic).
-**Benefit**: The frontend won't crash when trying to render 10,000 nodes.
+## Developer Experience
+
+### 1. Nexus CLI
+-   **Improvement**: Expand `nexus-cli` to support standard admin tasks:
+    -   `nexus purge <file_id>`
+    -   `nexus graph stats`
+    -   `nexus config set vector_provider pinecone`
+
+### 2. Visualization Dashboard
+-   **Improvement**: A dedicated admin UI (separate from Jarvis) to inspect the raw bricks, vector distribution, and graph topology for debugging.

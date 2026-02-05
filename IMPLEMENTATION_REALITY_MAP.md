@@ -1,51 +1,52 @@
 # Implementation Reality Map
 
 ## Overview
-This document maps the theoretical architectural components to their concrete implementation state.
-Status Legend:
-- ✅ **Complete**: Fully implemented and functional.
-- 🟡 **Partial**: Implemented but missing features or robustness.
-- 🔴 **Missing**: Planned but code does not exist.
-- 🧪 **Experimental**: Prototype quality, not production-ready.
+This document maps the theoretical architecture to the actual codebase state, highlighting discrepancies, inactive code paths, and confirmed implementations.
 
-## Component Status
+## Component Status Matrix
 
-### 1. Ingestion Pipeline
-| Component | File Path | Status | Notes |
-|-----------|-----------|:------:|-------|
-| **Sync Runner** | `src/nexus/sync/runner.py` | ✅ | Orchestrates the full pipeline successfully. |
-| **Tree Splitter** | `src/nexus/extract/tree_splitter.py` | ✅ | Handles conversation splitting correctly. |
-| **Brick Extractor** | `src/nexus/bricks/extractor.py` | ✅ | Fragments messages into bricks. |
-| **Wall Builder** | `src/nexus/walls/builder.py` | ✅ | Aggregates bricks for storage. |
+| Module | Intended Role | Actual Implementation | Status | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **Ingestion** | Parse & Split | `src/nexus/sync/ingest_history.py` | ✅ | Uses `unstructured` for cleaning. |
+| **Vector Store** | Semantic Search | `src/nexus/vector/local_index.py` (FAISS) | ✅ | **Divergence**: `PineconeVectorIndex` exists but is unused. |
+| **Graph Store** | Relationship Mgmt | `src/nexus/graph/manager.py` (SQLite) | ✅ | **Divergence**: `Neo4jGraphManager` exists but is unused. |
+| **Recall** | Retrieval | `src/nexus/ask/recall.py` | ✅ | Strictly uses `LocalVectorIndex`. |
+| **Cognition** | Logic/Reasoning | `src/nexus/cognition/assembler.py` | ✅ | Uses DSPy (`CognitiveExtractor`) for extraction. |
+| **Orchestration** | API/Routing | `services/cortex/api.py` | ✅ | Simple routing table + LLM injection. |
+| **Frontend** | UI | `ui/jarvis` (React) | 🟡 | Code exists but integration with Cortex is partial. |
 
-### 2. Vector System
-| Component | File Path | Status | Notes |
-|-----------|-----------|:------:|-------|
-| **Local Index** | `src/nexus/vector/local_index.py` | ✅ | FAISS integration works. |
-| **Embedder** | `src/nexus/vector/embedder.py` | ✅ | Singleton `sentence-transformers` wrapper. |
-| **Brick Store** | `src/nexus/bricks/brick_store.py` | ✅ | Metadata retrieval works. |
+## Code Path Analysis
 
-### 3. Cognition Engine
-| Component | File Path | Status | Notes |
-|-----------|-----------|:------:|-------|
-| **Assembler** | `src/nexus/cognition/assembler.py` | 🟡 | Works but has placeholder comments (`extracted_facts`, `decisions`). |
-| **Recall** | `src/nexus/ask/recall.py` | ✅ | Integrates vector search + reranking. |
-| **Reranker** | `src/nexus/rerank/orchestrator.py` | ✅ | Orchestrates cross-encoder reranking. |
+### Active Paths
+1.  **Ingestion**: `python -m nexus.sync` -> `runner.py` -> `ingest_history.py` -> `extractor.py` -> `LocalVectorIndex`.
+2.  **Recall**: `CortexAPI.ask_preview` -> `recall_bricks_readonly` -> `LocalVectorIndex.search`.
+3.  **Assembly**: `CortexAPI.assemble` -> `assemble_topic` -> `recall_bricks_readonly` -> `CognitiveExtractor` -> `GraphManager` (SQLite).
 
-### 4. Knowledge Graph
-| Component | File Path | Status | Notes |
-|-----------|-----------|:------:|-------|
-| **Graph Manager** | `src/nexus/graph/manager.py` | 🟡 | Functional but naive JSON implementation (read/write entire file). |
-| **Anchors** | `src/nexus/graph/anchors.override.json` | 🧪 | Mechanism exists but minimal logic usage. |
+### Inactive / Dead Paths
+-   `src/nexus/vector/pinecone_index.py`: Full implementation of Pinecone client, but not imported/used by `recall.py`.
+-   `src/nexus/graph/neo4j_manager.py`: Full Neo4j driver implementation, but `assembler.py` imports `GraphManager` (SQLite).
+-   `services/cortex/server.py`: Referenced in file lists but `runcortexapi.py` seems to be the entry point or `api.py` is the library. *Correction: `server.py` likely runs FastAPI.*
 
-### 5. Service Layer
-| Component | File Path | Status | Notes |
-|-----------|-----------|:------:|-------|
-| **Cortex Server** | `services/cortex/server.py` | ✅ | Flask API exposing required endpoints. |
-| **Cortex API** | `services/cortex/api.py` | 🟡 | Helper class, possibly redundant with server logic. |
+## Key Discrepancies
 
-## Reality Gaps
-1. **Concurrency**: The GraphManager and Index writing are not thread-safe.
-2. **Error Handling**: Many `try/except Exception` blocks that swallow errors or print to stdout.
-3. **Hardcoded Paths**: `DEFAULT_OUTPUT_DIR` and other paths rely on relative positioning rather than robust configuration injection.
-4. **Testing**: `tests/` directory exists but coverage is unknown; `test_assemble_topic.py` is a script, not a proper test suite.
+### Graph Storage
+-   **Plan**: Likely originally intended for Neo4j (scalability).
+-   **Reality**: Uses `sqlite3` in `src/nexus/graph/manager.py`. The schema is relational (Nodes table, Edges table) simulating a graph.
+-   **Implication**: Lower operational overhead, but potential performance bottleneck at massive scale. Complex path queries (Cypher) are manually implemented or limited.
+
+### Vector Storage
+-   **Plan**: Cloud-native (Pinecone).
+-   **Reality**: Local-native (FAISS).
+-   **Implication**: Zero cost, privacy-preserving, but requires local disk management and lacks serverless scaling.
+
+### Cognition
+-   **Plan**: Complex multi-step reasoning?
+-   **Reality**: DSPy `CognitiveExtractor` does a single pass to extract Facts, Mermaid, and Latex. It is effective but linear.
+
+## Confirmed Invariants
+-   **Mode-1 Enforcement**: `CortexAPI` checks `_reload_source_text` from `BrickStore`. If bricks cannot be reloaded, generation fails. This invariant is **LOCKED** in code.
+-   **Immutable Artifacts**: `assembler.py` writes JSON files with content hashes to `artifacts/`.
+
+## Uncertainty Markers
+-   🧪 **UI Integration**: The `ui/jarvis` folder contains a React app, but it is unclear if it fully consumes the `CortexAPI` or just mocks data.
+-   🧪 **Migration Scripts**: `scripts/migrate_to_intents.py` suggests a transition is in progress or recently completed.

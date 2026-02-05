@@ -65,10 +65,22 @@ def recall_bricks(query: str, k: int = 10) -> List[Dict]:
             
             # Hydrate with text for reranker
             brick_text = _brick_store.get_brick_text(brick_id)
+            metadata = _brick_store.get_brick_metadata(brick_id)
+            
+            # Bug Fix: Priority Scoping
+            # Narrower scopes (e.g. project-specific) get a priority boost.
+            # Global or broad scopes have lower priority.
+            priority_boost = 0.0
+            if metadata and "scope" in metadata:
+                scope = metadata["scope"].lower()
+                if scope != "global":
+                    priority_boost = 0.1 # Boost non-global intents
+            
             candidates.append({
                 "brick_id": brick_id,
-                "base_confidence": confidence,
-                "brick_text": brick_text if brick_text else ""
+                "base_confidence": confidence + priority_boost,
+                "brick_text": brick_text if brick_text else "",
+                "scope": metadata.get("scope") if metadata else "global"
             })
             
     # Apply Reranker

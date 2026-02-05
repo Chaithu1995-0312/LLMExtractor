@@ -1,57 +1,68 @@
-# Canonical Overview: Nexus Cognitive Backbone
+# Nexus Cognitive Memory System — Canonical Overview
 
-## System Identity
-**Nexus** is a local-first, privacy-centric cognitive architecture designed to ingest conversational memory, fragment it into atomic units ("Bricks"), embed them for semantic retrieval, and reassemble them into structured knowledge artifacts ("Topics") via a graph-augmented cognition engine. It serves as the backend for "Jarvis", a UI interface for knowledge interaction.
+## Objective
+Nexus is a memory-first cognitive system that ingests conversational data incrementally, preserves all raw information, and assembles lossless topic-level cognition artifacts for consumption by LLM agents and UIs. It operates on the "Mode-1" principle: recall finds locations, but assembly creates knowledge, ensuring provenance is never lost.
 
-## Core Architecture
+## Core Capabilities
+- **Incremental Ingestion**: Process new conversation data without reprocessing historical archives.
+- **Brick-Based Extraction**: Decompose conversations into atomic, self-contained "bricks" via semantic distillation.
+- **Deterministic Topic Assembly**: Synthesize knowledge artifacts (topics) from recalled bricks using DSPy-driven extraction.
+- **Graph-Based Traceability**: Link Facts (Intents) back to their source Bricks and Conversations via a Knowledge Graph.
+- **Lifecycle Management**: Track the maturity of knowledge from "Loose" observations to "Frozen" system invariants.
 
-### 1. Ingestion & Fragmentation Pipeline (Sync)
-The entry point is a massive dump of conversational history (`conversations.json`).
-- **Tree Splitting**: Raw JSON is split into individual conversation trees.
-- **Brick Extraction**: Trees are traversed to extract atomic blocks of text (Bricks) based on message boundaries and paragraph delimiters.
-- **Wall Building**: Bricks are aggregated into "Walls" (intermediate storage structures).
+## Architectural Doctrine
+1.  **Compile, Don’t Summarize**: Do not compress history into lossy vectors. Keep the raw data (Bricks) and index it.
+2.  **Recall Finds Locations**: Vector search is only for finding entry points (Bricks).
+3.  **Assembly Creates Knowledge**: Cognition happens at read-time (or async assembly time), producing immutable artifacts.
+4.  **Monotonic Growth**: New data never invalidates old data; it only supersedes it via explicit graph relationships (OVERRIDES).
 
-### 2. Vector Memory System
-- **Embedding**: Bricks are embedded using `sentence-transformers` (384d vectors).
-- **Indexing**: Embeddings are stored in a local FAISS index (`index.faiss`).
-- **Metadata**: A parallel JSON store (`brick_ids.json`) maps index positions to Brick IDs and source metadata.
+## High-Level Architecture
 
-### 3. Cognition Engine (Assembler)
-The "Brain" of the system, capable of synthesizing new knowledge artifacts.
-- **Recall**: Retrieves relevant Bricks using vector similarity (`recall_bricks_readonly`).
-- **Expansion**: Resolves Bricks back to their original source files to gather full context.
-- **Deduplication**: Uses content hashing to merge identical source documents.
-- **Assembly**: Constructs a structured JSON artifact containing the query, provenance, raw excerpts, and coverage status.
-- **Persistence**: Saves artifacts to disk with content-addressable filenames.
-
-### 4. Knowledge Graph
-A lightweight, JSON-based graph database (`nodes.json`, `edges.json`) that tracks relationships:
-- **Topics** ↔ **Artifacts** (`ASSEMBLED_IN`)
-- **Artifacts** ↔ **Bricks** (`DERIVED_FROM`)
-- **Anchors**: User-defined overrides for relevance (promote/reject).
-
-### 5. Cortex API (Service Layer)
-A Flask-based REST API exposing the system to the frontend.
-- **Endpoints**: `/jarvis/assemble-topic`, `/jarvis/graph-index`, `/jarvis/brick-full`.
-- **Role**: Read-only access to memory + Triggering assembly tasks + Graph manipulation.
-
-## Data Flow
 ```mermaid
 graph TD
-    A[conversations.json] -->|Sync| B[Tree Splitter]
-    B --> C[Brick Extractor]
-    C --> D[Local Vector Index]
-    D -->|Recall| E[Assembler]
-    E -->|Read| B
-    E -->|Write| F[Cognition Artifacts]
-    E -->|Update| G[Knowledge Graph]
-    H[Cortex API] -->|Query| D
-    H -->|Trigger| E
-    H -->|Read| G
+    User[User / Chat Logs] -->|Sync| Ingest[Ingestion Engine]
+    Ingest -->|Split| Bricks[Atomic Bricks]
+    Bricks -->|Embed| VectorDB[FAISS Index]
+    Bricks -->|Store| BrickStore[Brick Filesystem]
+    
+    Query[User Query] -->|Ask| Cortex[Cortex API]
+    Cortex -->|Recall| Recall[Recall Engine]
+    Recall -->|Search| VectorDB
+    Recall -->|Rerank| Reranker[Cross-Encoder]
+    Recall -->|Hydrate| BrickStore
+    
+    Cortex -->|Assemble| Assembler[Cognition Assembler]
+    Assembler -->|Read| Recall
+    Assembler -->|Extract| DSPy[DSPy Modules]
+    Assembler -->|Persist| Artifacts[Topic Artifacts]
+    Assembler -->|Link| Graph[SQLite Knowledge Graph]
+    
+    Graph -->|Lineage| Lineage[Intent Lineage]
 ```
 
-## Primary Design Principles
-1. **Source of Truth**: The raw conversation trees on disk are the ultimate source of truth. Bricks are derived views.
-2. **Content Addressing**: Artifacts and documents are identified by content hashes to ensure idempotency.
-3. **Local-First**: All data (vectors, graph, files) resides locally; no external cloud dependencies required for core function.
-4. **Traceability**: Every generated artifact must maintain strict provenance links back to the original source message and span.
+## Data Flow
+1.  **Ingest**: Conversations are parsed into Trees, then split into Bricks.
+2.  **Index**: Bricks are embedded and added to the Local Vector Index (FAISS).
+3.  **Recall**: A query retrieves candidate Bricks (semantic search + reranking).
+4.  **Assemble**: 
+    - Full source documents are reloaded for candidate Bricks.
+    - DSPy extracts structured Facts and Visuals.
+    - An immutable JSON Artifact is created.
+    - Graph nodes (Topic, Artifact, Intent) are updated.
+
+## Primary Components
+| Component | Description | Status |
+| :--- | :--- | :--- |
+| **Ingestion** | `src/nexus/sync` - Handlers for raw history parsing. | ✅ Active |
+| **Brick Store** | `src/nexus/bricks` - Atomic storage of content segments. | ✅ Active |
+| **Vector Index** | `src/nexus/vector` - FAISS-based semantic retrieval. | ✅ Active |
+| **Recall** | `src/nexus/ask` - Orchestration of search and reranking. | ✅ Active |
+| **Cognition** | `src/nexus/cognition` - LLM-based logic (DSPy) for assembly. | ✅ Active |
+| **Graph** | `src/nexus/graph` - SQLite-based relationship tracking. | ✅ Active |
+| **Cortex** | `services/cortex` - API gateway and orchestration layer. | ✅ Active |
+
+## Storage Strategy
+- **Raw Data**: JSON files on disk (`d:/chatgptdocs/data`).
+- **Vectors**: Local FAISS index file.
+- **Graph**: Local SQLite database (`graph.db`).
+- **Artifacts**: JSON files in `output/artifacts`.

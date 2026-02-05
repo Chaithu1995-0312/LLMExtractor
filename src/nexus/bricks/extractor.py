@@ -1,7 +1,9 @@
 import json
 import os
 import hashlib
-from typing import List, Dict
+from typing import List, Dict, Optional
+from unstructured.partition.auto import partition
+from unstructured.cleaners.core import clean, clean_extra_whitespace, group_broken_paragraphs
 
 def generate_brick_id(source_file: str, content: str, index: int) -> str:
     """Generate a unique, stable brick ID."""
@@ -10,10 +12,11 @@ def generate_brick_id(source_file: str, content: str, index: int) -> str:
 
 def extract_bricks_from_file(tree_file_path: str, output_dir: str):
     """
-    Extract atomic bricks from a tree path file.
-    Goal: No summaries, only atomic units.
-    One message = One or more bricks (split by double newline for now as atomic units).
+    Extract atomic bricks from a tree path file using Semantic Distillation.
+    Goal: No summaries, only atomic units with noise removed.
+    Uses Unstructured.io to strip noise and keep context.
     """
+    # 1. Load raw data to get message metadata
     with open(tree_file_path, "r", encoding="utf-8") as f:
         tree_data = json.load(f)
 
@@ -25,10 +28,19 @@ def extract_bricks_from_file(tree_file_path: str, output_dir: str):
         if not content.strip():
             continue
 
-        # Split content into atomic paragraphs/blocks
-        # Rule: One brick = one idea. For ChatGPT messages, 
-        # double newlines are a good proxy for distinct ideas.
-        blocks = [b.strip() for b in content.split("\n\n") if b.strip()]
+        # 2. Semantic Distillation via Unstructured.io
+        # We treat each message as a mini-document to preserve context per message
+        try:
+            # Clean content before partitioning
+            cleaned_content = clean(content, extra_whitespace=True, dashes=True, bullets=True)
+            cleaned_content = group_broken_paragraphs(cleaned_content)
+            
+            # Use simple split for now as partition(text=...) has issues in this version
+            blocks = [b.strip() for b in cleaned_content.split("\n\n") if b.strip() and len(b.strip()) > 20]
+        except Exception as e:
+            # Fallback to simple split if Unstructured fails
+            print(f"Unstructured distillation failed for message {msg.get('message_id')}: {e}")
+            blocks = [b.strip() for b in content.split("\n\n") if b.strip()]
         
         for idx, block in enumerate(blocks):
             brick_id = generate_brick_id(tree_file_path, block, idx)

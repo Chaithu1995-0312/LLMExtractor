@@ -1,105 +1,89 @@
 # Module Deep Dives
 
-## 1. Sync & Ingestion Pipeline (`src/nexus/sync`)
+## 1. Ingestion Engine (`src/nexus/sync`)
 
 ### Purpose
-To transform a monolithic `conversations.json` dump into a queryable, atomized vector store.
+Converts raw conversational history (JSON trees) into atomic "Bricks" suitable for vector embedding and retrieval.
 
-### Key Components
-- **`TreeSplitter`**: Parses the source JSON. Splits it into individual JSON files per conversation tree. Uses a hash of content to detect duplicates.
-- **`BrickExtractor`**:
-  - Traverses the conversation tree.
-  - Identifies "Bricks": Semantic units of text.
-  - Splitting Logic: Message boundaries are hard stops. Within messages, splits on double newlines (`\n\n`).
-  - Metadata: Captures `message_id`, `role`, `timestamp`, `block_index`.
-- **`WallBuilder`**: Aggregates processed files into larger "Wall" files to reduce filesystem fragmentation, though this seems to be a storage optimization step that might be partially decoupled from the indexing itself in the current runner.
-- **`Runner`**: The orchestrator.
-  1. Load Conversations
-  2. Extract Trees (Disk I/O intensive)
-  3. Extract Bricks (CPU intensive)
-  4. Build Walls
-  5. Vector Embedding (GPU/CPU intensive)
+### Mechanism
+1.  **Parsing**: Reads `tree_file_path` JSONs.
+2.  **Distillation**: Uses `src/nexus/bricks/extractor.py` to clean and split text.
+    -   Library: `unstructured` (cleaning).
+    -   Splitting: Paragraph-based splitting (fallback to simple split if unstructured fails).
+3.  **Brick Creation**: Generates a stable SHA256 `brick_id` based on source path, content, and index.
+4.  **Persistence**: Saves bricks to `data/bricks/`.
+5.  **Indexing**: Passes bricks to `LocalVectorIndex` for embedding.
 
-### Data Flow
-`conversations.json` ➔ `[Conversation Trees]` ➔ `[Bricks (in-memory)]` ➔ `[Walls]` ➔ `LocalVectorIndex`
+### Technical Constraints
+-   **Granularity**: Currently splits by message/paragraph. May lose context if paragraphs are too short.
+-   **Idempotency**: Relies on stable hashing. Rerunning sync on same data produces same IDs.
 
----
-
-## 2. Vector System (`src/nexus/vector`)
+## 2. Recall System (`src/nexus/ask`)
 
 ### Purpose
-To provide semantic similarity search over the extracted Bricks.
+Retrieves relevant context for a query while strictly enforcing "read-only" safety during preview/routing.
 
 ### Architecture
-- **Engine**: FAISS (Facebook AI Similarity Search).
-- **Index Type**: `IndexFlatL2` (Exact search, no quantization).
-- **Dimension**: 384 (matches `all-MiniLM-L6-v2`).
-- **Storage**:
-  - `index.faiss`: Binary FAISS index.
-  - `brick_ids.json`: Parallel list mapping integer IDs (FAISS) to string Brick IDs (Nexus).
-- **Embedder**: Singleton wrapper around `sentence_transformers`.
+-   **Entry Point**: `recall_bricks` or `recall_bricks_readonly`.
+-   **Vector Search**: Queries `LocalVectorIndex` (FAISS).
+    -   Converts L2 distance to confidence score (0.0 - 1.0).
+-   **Hydration**: Fetches full text and metadata from `BrickStore`.
+-   **Reranking**: `RerankOrchestrator` uses Cross-Encoder to refine results.
+-   **Scoping**: Applies priority boost for non-global scopes.
 
-### Operations
-- **`add_bricks(bricks)`**:
-  - Filters for `PENDING` status.
-  - Embeds text content.
-  - Adds to FAISS index.
-  - Appends IDs to `brick_ids` list.
-  - Updates status to `EMBEDDED`.
-- **`search(vector, k)`**: Returns distances and indices. Distances are L2; lower is better.
+### Key Class: `LocalVectorIndex`
+-   **Backend**: `faiss.IndexFlatL2`.
+-   **Storage**: `data/index/nexus_bricks.index`.
+-   **Mapping**: Maintains a parallel JSON list of `brick_ids` to map FAISS integer IDs back to string IDs.
 
----
-
-## 3. Cognition Engine (`src/nexus/cognition`)
+## 3. Cognition Assembler (`src/nexus/cognition`)
 
 ### Purpose
-To synthesize higher-order knowledge artifacts from retrieved memories.
+Synthesizes scattered bricks into a coherent, structured Knowledge Artifact (Topic).
 
-### The Assembly Pipeline (`assembler.py`)
-1. **Recall**: Queries the Vector Index for a `topic_query`.
-2. **Expansion**:
-   - Takes recalled Bricks.
-   - Uses `brick_metadata` to find the original `source_file`.
-   - Loads the *full* conversation tree for that file.
-3. **Deduplication**:
-   - Hashes the content of loaded trees.
-   - If multiple bricks point to the same content (even if different files), they are merged into a single "Document".
-4. **Assembly**:
-   - Constructs a `TopicCognitionArtifact`.
-   - Payload includes:
-     - `topic`: The query.
-     - `provenance`: List of Brick IDs and Source Files.
-     - `raw_excerpts`: Structured conversation excerpts with highlighted spans.
-5. **Persistence**: Saves to `artifacts/` with a content-hash-based filename.
-6. **Graph Linkage**: Updates the Knowledge Graph with `ASSEMBLED_IN` and `DERIVED_FROM` edges.
+### Workflow ("Mode-1")
+1.  **Recall**: Fetches top-k bricks for the topic.
+2.  **Expansion**: Loads the *entire* source conversation tree for every recalled brick.
+    -   *Why?* To provide full context to the extraction model.
+3.  **Deduplication**: Merges overlapping source spans.
+4.  **Extraction**: `CognitiveExtractor` (DSPy module) processes the aggregated text.
+    -   Extracts: Facts, Mermaid diagrams, LaTeX formulas.
+5.  **Persistence**: Writes artifact to `output/artifacts/{slug}_{hash}.json`.
+6.  **Graph Sync**: Updates the Knowledge Graph with new Intents and Relationships.
 
----
+### DSPy Integration
+-   **Signature**: `Context -> Facts, Mermaid, Latex`.
+-   **Model**: Configured globally (likely GPT-4o or similar via DSPy).
 
-## 4. Knowledge Graph (`src/nexus/graph`)
+## 4. Graph Manager (`src/nexus/graph`)
 
 ### Purpose
-To track relationships between Topics, Artifacts, and Bricks, providing a structural overlay to the vector soup.
+Manages the lifecycle and relationships of knowledge units (Intents).
 
-### Implementation
-- **Storage**: Naive JSON files (`nodes.json`, `edges.json`).
-- **Nodes**:
-  - `Topic`: Represents a query/concept.
-  - `Artifact`: Represents a specific assembled JSON file.
-  - `Brick`: Represents a source fragment.
-- **Edges**:
-  - `ASSEMBLED_IN`: Topic ➔ Artifact.
-  - `DERIVED_FROM`: Artifact ➔ Brick.
-- **Anchors**: `anchors.override.json` allows manual intervention (promote/reject) to influence future recall (though integration into `recall.py` needs verification).
+### Schema (SQLite)
+-   **Nodes**: Generic table `(id, type, data_json)`.
+    -   Types: `intent`, `topic`, `artifact`, `brick`, `source`, `scope`.
+-   **Edges**: Generic table `(source, target, type, data_json)`.
+    -   Types: `ASSEMBLED_IN`, `DERIVED_FROM`, `OVERRIDES`, `APPLIES_TO`.
 
----
+### Lifecycle Logic
+-   **Monotonicity**: State transitions are strictly controlled.
+    -   `LOOSE` -> `FORMING` -> `FROZEN` -> `SUPERSEDED` -> `KILLED`.
+-   **Conflict Resolution**:
+    -   Newer `FORMING` intent can override older `FORMING` intent.
+    -   `FROZEN` intent acts as an anchor; newer data must explicitly `OVERRIDE` it (and likely requires human/high-confidence approval, though currently automated based on similarity > 0.85).
 
-## 5. Cortex Service (`services/cortex`)
+## 5. Cortex API (`services/cortex`)
 
 ### Purpose
-The HTTP interface for the Jarvis UI.
+Exposes system capabilities via REST (or internal Python API).
 
 ### Endpoints
-- `GET /jarvis/graph-index`: Returns the full graph for visualization.
-- `POST /jarvis/assemble-topic`: Triggers the Assembler.
-- `GET /jarvis/brick-full`: Retrieves the full context of a specific brick.
-- `POST /jarvis/anchor`: Updates anchor overrides.
+-   `/route`: Keyword-based agent routing.
+-   `/generate`: RAG generation with mandatory source reload audit.
+-   `/assemble`: Triggers topic assembly.
+-   `/ask_preview`: Read-only recall for UI.
+
+### Security / Audit
+-   **Audit Log**: `phase3_audit_trace.jsonl`.
+-   **Invariant**: Generation *must* reload source text from bricks. If reload fails, generation is blocked.

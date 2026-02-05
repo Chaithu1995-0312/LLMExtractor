@@ -1,534 +1,423 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useNexusStore } from './store';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  MessageSquare, 
+  Share2, 
+  ChevronRight, 
+  ChevronLeft, 
+  Search, 
+  Send, 
+  BookOpen, 
+  Activity,
+  Maximize2,
+  ExternalLink
+} from 'lucide-react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
+import mermaid from 'mermaid';
+import ReactFlow, { 
+  Background, 
+  Controls, 
+  applyNodeChanges, 
+  applyEdgeChanges,
+  Node,
+  Edge,
+  NodeChange,
+  EdgeChange,
+  Connection,
+  addEdge
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+import { NexusNode } from './components/NexusNode';
 
-// Types strictly following the spec
-interface BrickResult {
-  brick_id: string;
-  confidence: number;
-}
+const nodeTypes = {
+  nexus: NexusNode,
+};
 
-interface SelectedBrick {
-  brick_id: string;
-  source_file: string;
-  source_span: object;
-  text_sample?: string;
-}
+// Initialize mermaid
+mermaid.initialize({ startOnLoad: true, theme: 'dark' });
 
-interface ExpandedBrick {
-  brick_id: string;
-  source_file: string;
-  message_id: string;
-  block_index: number;
-  role: string;
-  created_at: string | null;
-  full_text: string;
-}
+// --- Components ---
 
-interface ApiResponse {
-  query: string;
-  top_bricks: BrickResult[];
-  status: string;
-}
+const Mermaid = ({ content }: { content: string }) => {
+  const ref = useRef<HTMLDivElement>(null);
 
-interface GraphNode {
-  id: string;
-  label: string;
-  bricks?: string[]; // Backward compatibility
-  anchors?: {
-    hard: string[];
-    soft: string[];
-  };
-}
-
-interface GraphEdge {
-  source: string;
-  target: string;
-  type: string;
-}
-
-interface AnchorOverride {
-    concept_id: string;
-    brick_id: string;
-    action: "promote" | "reject";
-    status: string;
-}
-
-interface GraphIndexResponse {
-  nodes: GraphNode[] | { nodes: GraphNode[] };
-  edges: GraphEdge[] | { edges: GraphEdge[] };
-  index_content: string;
-  anchor_overrides?: AnchorOverride[];
-}
-
-type AnchorIntent =
-  | { action: "promote"; brickId: string }
-  | { action: "reject"; brickId: string };
-
-type HighlightLevel = "strong" | "weak" | "none";
-
-function getHighlightLevel(
-  node: GraphNode,
-  recalledBricks: string[]
-): HighlightLevel {
-  if (node.anchors?.hard?.some(id => recalledBricks.includes(id))) {
-    return "strong";
-  }
-
-  if (node.anchors?.soft?.some(id => recalledBricks.includes(id))) {
-    return "weak";
-  }
-
-  return "none";
-}
-
-export default function App() {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<BrickResult[]>([]);
-  const [selectedBrick, setSelectedBrick] = useState<SelectedBrick | null>(null);
-  const [expandedBrick, setExpandedBrick] = useState<ExpandedBrick | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // New state for Graph View
-  const [graphData, setGraphData] = useState<GraphIndexResponse | null>(null);
-  const [showGraph, setShowGraph] = useState(false);
-  const [anchorIntents, setAnchorIntents] = useState<Record<string, AnchorIntent>>({});
-  
-  // State for expanded neighbors (traversal)
-  const [expandedNeighbors, setExpandedNeighbors] = useState<Set<string>>(new Set());
-  // State for showing anchored bricks drawer
-  const [showAnchorsFor, setShowAnchorsFor] = useState<Set<string>>(new Set());
-
-  const logPromote = (conceptId: string, brickId: string) => {
-    const key = `${conceptId}:${brickId}`;
-    if (anchorIntents[key]) return;
-
-    console.log(JSON.stringify({
-      action: "PROMOTE_TO_HARD",
-      concept_id: conceptId,
-      brick_id: brickId,
-      timestamp: new Date().toISOString()
-    }));
-
-    setAnchorIntents(prev => ({
-      ...prev,
-      [key]: { action: "promote", brickId }
-    }));
-  };
-
-  const logReject = (conceptId: string, brickId: string) => {
-    const key = `${conceptId}:${brickId}`;
-    if (anchorIntents[key]) return;
-
-    console.log(JSON.stringify({
-      action: "REJECT_SOFT",
-      concept_id: conceptId,
-      brick_id: brickId,
-      timestamp: new Date().toISOString()
-    }));
-
-    setAnchorIntents(prev => ({
-      ...prev,
-      [key]: { action: "reject", brickId }
-    }));
-  };
-
-  const handlePreview = async () => {
-    if (!query.trim()) return;
-
-    setLoading(true);
-    setError(null);
-    setSelectedBrick(null);
-    setResults([]); // "Clicking “Preview” replaces results"
-
-    try {
-      // NON-NEGOTIABLE: ONLY call GET /jarvis/ask-preview
-      const response = await fetch(`/jarvis/ask-preview?query=${encodeURIComponent(query)}`);
-      
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
-
-      const data: ApiResponse = await response.json();
-      
-      // "Sort results by confidence DESC"
-      const sortedBricks = data.top_bricks.sort((a, b) => b.confidence - a.confidence);
-      setResults(sortedBricks);
-
-      if (sortedBricks.length === 0) {
-        // "If results empty -> show “No matching bricks found”" -> Handled in render
-      }
-
-    } catch (err: any) {
-      // "If API fails -> show “Preview unavailable”"
-      setError('Preview unavailable');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleBrickClick = async (brick: BrickResult) => {
-    // "brick detail panel (read-only)"
-    // Initial loading state / reset
-    setSelectedBrick({
-      brick_id: brick.brick_id,
-      source_file: 'Loading...',
-      source_span: {},
-      text_sample: 'Loading...'
-    });
-
-    try {
-      const res = await fetch(`/jarvis/brick-meta?brick_id=${encodeURIComponent(brick.brick_id)}`);
-      if (!res.ok) {
-        setSelectedBrick({
-            brick_id: brick.brick_id,
-            source_file: 'Error fetching details',
-            source_span: {},
-            text_sample: 'Error fetching details'
-        });
-        return;
-      }
-      const data: SelectedBrick = await res.json();
-      setSelectedBrick(data);
-    } catch (e) {
-      setSelectedBrick({
-        brick_id: brick.brick_id,
-        source_file: 'Error fetching details',
-        source_span: {},
-        text_sample: 'Error fetching details'
+  useEffect(() => {
+    if (ref.current) {
+      mermaid.render(`mermaid-${Math.random().toString(36).substr(2, 9)}`, content).then((res) => {
+        if (ref.current) ref.current.innerHTML = res.svg;
       });
     }
-  };
-
-  const loadFullBrick = async (brickId: string) => {
-    try {
-      const res = await fetch(
-        `/jarvis/brick-full?brick_id=${encodeURIComponent(brickId)}`
-      );
-
-      if (!res.ok) return;
-
-      const data = await res.json();
-      setExpandedBrick(data);
-    } catch (e) {
-      console.error("Failed to load full brick", e);
-    }
-  };
-
-  const handleGraphView = async () => {
-      try {
-          const res = await fetch('/jarvis/graph-index');
-          if (!res.ok) throw new Error('Failed to load graph index');
-          const data: GraphIndexResponse = await res.json();
-          setGraphData(data);
-          setShowGraph(true);
-          
-          // Process Overrides
-          if (data.anchor_overrides) {
-             const newIntents: Record<string, AnchorIntent> = {};
-             data.anchor_overrides.forEach(override => {
-                 const key = `${override.concept_id}:${override.brick_id}`;
-                 newIntents[key] = { 
-                     action: override.action, 
-                     brickId: override.brick_id 
-                 };
-             });
-             setAnchorIntents(prev => ({ ...prev, ...newIntents }));
-          }
-      } catch (e) {
-          console.error("Error loading graph index", e);
-          alert("Failed to load Enhanced AI View");
-      }
-  };
-
-  const toggleNeighbors = (nodeId: string) => {
-      setExpandedNeighbors(prev => {
-          const next = new Set(prev);
-          if (next.has(nodeId)) next.delete(nodeId);
-          else next.add(nodeId);
-          return next;
-      });
-  };
-
-  const toggleAnchors = (nodeId: string) => {
-      setShowAnchorsFor(prev => {
-          const next = new Set(prev);
-          if (next.has(nodeId)) next.delete(nodeId);
-          else next.add(nodeId);
-          return next;
-      });
-  };
-
-  // Helper to safely extract nodes array regardless of schema structure
-  const getNodes = (data: GraphIndexResponse | null): GraphNode[] => {
-    if (!data) return [];
-    if (Array.isArray(data.nodes)) return data.nodes;
-    // Handle { nodes: [...] } wrapper
-    if (data.nodes && Array.isArray((data.nodes as any).nodes)) return (data.nodes as any).nodes;
-    return [];
-  };
-
-  const getEdges = (data: GraphIndexResponse | null): GraphEdge[] => {
-    if (!data) return [];
-    if (Array.isArray(data.edges)) return data.edges;
-    // Handle { edges: [...] } wrapper
-    if (data.edges && Array.isArray((data.edges as any).edges)) return (data.edges as any).edges;
-    return [];
-  };
-
-  // Derived state for graph rendering
-  const nodes = getNodes(graphData);
-  const edges = getEdges(graphData);
-  const recalledBrickIds = results.map(r => r.brick_id);
+  }, [content]);
 
   return (
-    <div className="container">
-      {/* LEFT / TOP: Query Input */}
-      <div className="panel left-panel">
-        <h2>Jarvis Preview</h2>
-        <div className="input-group">
-          <input 
-            type="text" 
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Enter query..."
-            disabled={loading}
-          />
-          <button onClick={handlePreview} disabled={loading}>
-            {loading ? 'Searching...' : 'Preview'}
-          </button>
-        </div>
-      </div>
+    <motion.div 
+      whileHover={{ scale: 1.01 }}
+      ref={ref} 
+      className="my-4 bg-secondary/30 glass border border-white/5 p-4 rounded-lg overflow-auto cursor-zoom-in shadow-inner" 
+    />
+  );
+};
 
-      {/* CENTER: Results List */}
-      <div className="panel center-panel">
-        <h3>Recalled Bricks</h3>
-        {error && <div className="error">{error}</div>}
+interface Message {
+  role: string;
+  content: string;
+  bricks?: any[];
+}
+
+const ChatMessage = ({ role, content }: Message) => {
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'} mb-8`}
+    >
+      <div className={`max-w-[85%] p-5 rounded-xl ${
+        role === 'user' 
+        ? 'bg-primary text-primary-foreground ml-12 shadow-[0_0_20px_-5px_rgba(59,130,246,0.3)]' 
+        : 'glass-panel mr-12 shadow-2xl'
+      }`}>
+        <ReactMarkdown
+          remarkPlugins={[remarkMath]}
+          rehypePlugins={[rehypeKatex]}
+          components={{
+            code({ node, inline, className, children, ...props }: any) {
+              const match = /language-(\w+)/.exec(className || '');
+              if (!inline && match && match[1] === 'mermaid') {
+                return <Mermaid content={String(children).replace(/\n$/, '')} />;
+              }
+              return (
+                <code className={`${className} bg-black/30 px-1 rounded`} {...props}>
+                  {children}
+                </code>
+              );
+            },
+            p: ({ children }) => <p className="mb-4 last:mb-0 leading-relaxed">{children}</p>,
+          }}
+        >
+          {content}
+        </ReactMarkdown>
+      </div>
+    </motion.div>
+  );
+};
+
+// --- Main App ---
+
+const panelTransition = {
+  type: "spring" as const,
+  stiffness: 300,
+  damping: 30,
+};
+
+const SegmentedBar = ({ confidence }: { confidence: number }) => {
+  const segments = 10;
+  const activeSegments = Math.round(confidence * segments);
+  
+  return (
+    <div className="segmented-bar">
+      {Array.from({ length: segments }).map((_, i) => (
+        <div 
+          key={i} 
+          className={`segmented-bar-item ${i < activeSegments ? 'active' : ''}`}
+        />
+      ))}
+    </div>
+  );
+};
+
+export default function App() {
+  const { mode, setMode, rightPanelOpen, toggleRightPanel, selectedBrickId, setSelectedBrickId, selectedNodeId, setSelectedNodeId } = useNexusStore();
+  const [query, setQuery] = useState('');
+  const [messages, setMessages] = useState<Message[]>([
+    { role: 'assistant', content: 'Welcome to the **Nexus Workbench**. How can I help you explore the knowledge base today?' }
+  ]);
+
+  // React Flow State
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
+
+  const onNodesChange = (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds));
+  const onEdgesChange = (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds));
+  const onConnect = (params: Connection) => setEdges((eds) => addEdge(params, eds));
+
+  const { data: graphData } = useQuery({
+    queryKey: ['graph-index'],
+    queryFn: async () => {
+      const res = await fetch('/jarvis/graph-index');
+      if (!res.ok) throw new Error('Failed to fetch graph');
+      return res.json();
+    },
+    enabled: mode === 'explore'
+  });
+
+  const { data: brickMeta } = useQuery({
+    queryKey: ['brick-meta', selectedBrickId],
+    queryFn: async () => {
+      const res = await fetch(`/jarvis/brick-meta?brick_id=${selectedBrickId}`);
+      if (!res.ok) throw new Error('Failed to fetch brick meta');
+      return res.json();
+    },
+    enabled: !!selectedBrickId
+  });
+
+  const askMutation = useMutation({
+    mutationFn: async (q: string) => {
+      const res = await fetch(`/jarvis/ask-preview?query=${encodeURIComponent(q)}`);
+      if (!res.ok) throw new Error('Query failed');
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: `I found ${data.top_bricks.length} matching bricks for your query.`,
+        bricks: data.top_bricks
+      }]);
+    }
+  });
+
+  useEffect(() => {
+    if (graphData && graphData.nodes) {
+      const initialNodes = (Array.isArray(graphData.nodes) ? graphData.nodes : graphData.nodes.nodes).map((n: any, i: number) => ({
+        id: n.id,
+        type: 'nexus',
+        position: { x: Math.random() * 400, y: i * 100 },
+        data: { ...n, type: n.type || 'Fact' }
+      }));
+      const initialEdges = (Array.isArray(graphData.edges) ? graphData.edges : graphData.edges.edges).map((e: any) => ({
+        id: `${e.source}-${e.target}`,
+        source: e.source,
+        target: e.target,
+        label: e.type,
+        animated: e.type === 'OVERRIDES'
+      }));
+      setNodes(initialNodes);
+      setEdges(initialEdges);
+    }
+  }, [graphData]);
+
+  const handleSend = () => {
+    if (!query.trim()) return;
+    const userQ = query;
+    setMessages(prev => [...prev, { role: 'user', content: userQ }]);
+    setQuery('');
+    askMutation.mutate(userQ);
+  };
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden">
+      {/* Left Sidebar - Navigation */}
+      {/* Left Sidebar - Navigation */}
+      <aside className="w-16 flex flex-col items-center py-6 glass-panel border-r z-20">
+        <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-10 shadow-[0_0_20px_rgba(0,128,255,0.4)]">
+          <Activity className="text-primary-foreground w-6 h-6" />
+        </div>
         
-        {!loading && !error && results.length === 0 && query && (
-          <div className="empty-state">No matching bricks found</div>
-        )}
+        <nav className="flex flex-col gap-6">
+          <button 
+            onClick={() => setMode('ask')}
+            className={`p-3 rounded-xl transition-all ${mode === 'ask' ? 'bg-white/10 text-white shadow-inner' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+            title="Ask & Recall"
+          >
+            <MessageSquare className="w-6 h-6" />
+          </button>
+          <button 
+            onClick={() => setMode('explore')}
+            className={`p-3 rounded-xl transition-all ${mode === 'explore' ? 'bg-white/10 text-white shadow-inner' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+            title="Explore Graph"
+          >
+            <Share2 className="w-6 h-6" />
+          </button>
+        </nav>
 
-        <div className="brick-list">
-          {results.map((brick, index) => (
-            <div 
-              key={brick.brick_id} 
-              className={`brick-item ${selectedBrick?.brick_id === brick.brick_id ? 'selected' : ''}`}
-              onClick={() => handleBrickClick(brick)}
-            >
-              <div className="brick-header">
-                <span className="rank">#{index + 1}</span>
-                <span className="brick-id" title={brick.brick_id}>
-                  {brick.brick_id.substring(0, 8)}...
-                </span>
-              </div>
-              <div className="confidence-bar-container">
-                <div 
-                  className="confidence-bar" 
-                  style={{ width: `${brick.confidence * 100}%` }}
-                  title={`Confidence: ${brick.confidence}`}
-                />
-              </div>
-            </div>
-          ))}
+        <div className="mt-auto">
+           <button className="p-3 text-white/40 hover:text-white">
+             <BookOpen className="w-6 h-6" />
+           </button>
         </div>
-      </div>
+      </aside>
 
-      {/* RIGHT / BOTTOM: Brick Detail */}
-      <div className="panel right-panel">
-        <h3>Brick Detail</h3>
-        {selectedBrick ? (
-          <div className="detail-content">
-            <div className="field">
-              <label>Brick ID</label>
-              <div className="value copyable">{selectedBrick.brick_id}</div>
-            </div>
-            <div className="field">
-              <label>Source File</label>
-              <div className="value">{selectedBrick.source_file}</div>
-            </div>
-            <div className="field">
-              <label>Source Span</label>
-              <pre className="value">{JSON.stringify(selectedBrick.source_span, null, 2)}</pre>
-            </div>
-            <div className="field">
-              <label>Text Sample</label>
-              <div className="value sample">{selectedBrick.text_sample}</div>
-            </div>
-            
-            <div className="brick-actions">
-              <button onClick={() => loadFullBrick(selectedBrick.brick_id)}>
-                Show
-              </button>
-
-              <button onClick={handleGraphView} title="Enhanced AI View">
-                Enhanced AI View
-              </button>
-            </div>
+      {/* Main Stage */}
+      <main className="flex-1 flex flex-col relative bg-background">
+        <header className="h-16 border-b border-white/5 flex items-center justify-between px-8 glass-panel sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <h1 className="font-bold text-lg tracking-tighter uppercase">
+              {mode === 'ask' ? 'Ask & Recall' : 'Knowledge Browser'}
+            </h1>
+            <span className="px-2 py-0.5 rounded text-[10px] bg-primary/20 text-primary uppercase font-bold tracking-widest">Nexus v1</span>
           </div>
-        ) : (
-          <div className="empty-state">Select a brick to view details</div>
+          
+          <div className="flex items-center gap-4">
+            <div className="relative group">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20 group-focus-within:text-primary transition-colors" />
+              <input 
+                type="text" 
+                placeholder="Quick search..." 
+                className="bg-black/40 border border-white/5 rounded-md py-1.5 pl-10 pr-4 text-xs w-64 focus:outline-none focus:border-primary/50 transition-all font-mono-data uppercase tracking-widest"
+              />
+            </div>
+            <button 
+              onClick={() => toggleRightPanel()}
+              className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/60"
+            >
+              {rightPanelOpen ? <ChevronRight /> : <ChevronLeft />}
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-hidden relative">
+          <AnimatePresence mode="wait">
+            {mode === 'ask' ? (
+              <motion.div 
+                key="chat"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="h-full flex flex-col max-w-4xl mx-auto w-full px-6"
+              >
+                <div className="flex-1 overflow-y-auto py-8 no-scrollbar">
+                  {messages.map((msg, i) => (
+                    <ChatMessage key={i} {...msg} />
+                  ))}
+                </div>
+                
+                <div className="p-8">
+                  <div className="relative glass-panel rounded-lg p-2 shadow-2xl border-white/5">
+                    <textarea 
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="CONSULT KNOWLEDGE ENGINE..."
+                      className="w-full bg-transparent p-4 pr-16 focus:outline-none resize-none text-white/90 text-sm font-mono-data tracking-tight"
+                      rows={2}
+                      onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
+                    />
+                    <button 
+                      onClick={handleSend}
+                      className="absolute right-4 bottom-4 p-3 bg-primary rounded-md text-primary-foreground hover:scale-105 active:scale-95 transition-all shadow-[0_0_15px_rgba(0,128,255,0.5)]"
+                    >
+                      <Send className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <p className="text-center text-white/20 text-[10px] mt-3 uppercase tracking-[0.2em]">
+                    Powered by Nexus Agentic Cognition
+                  </p>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div 
+                key="graph"
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.02 }}
+                className="h-full w-full"
+              >
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={onConnect}
+                  nodeTypes={nodeTypes}
+                  onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+                  fitView
+                >
+                  <Background color="#222" gap={20} />
+                  <Controls />
+                </ReactFlow>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </main>
+
+      {/* Right Panel - Context & Evidence */}
+      <AnimatePresence>
+        {rightPanelOpen && (
+          <motion.aside 
+            initial={{ x: 300, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 300, opacity: 0 }}
+            transition={panelTransition}
+            className="glass-panel border-l border-white/10 w-[400px] flex flex-col overflow-hidden relative z-10"
+          >
+            <div className="p-6 border-b border-white/5 flex items-center justify-between">
+               <h3 className="font-semibold uppercase text-xs tracking-[0.2em] text-white/40">Context & Evidence</h3>
+               <button className="text-white/20 hover:text-white transition-colors">
+                  <Maximize2 className="w-4 h-4" />
+               </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-8 no-scrollbar">
+               <section>
+                 <h4 className="text-xs font-bold mb-4 text-primary flex items-center gap-2 uppercase tracking-widest">
+                   <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+                   Thinking Process
+                 </h4>
+                 <div className="bg-black/40 rounded-lg p-4 border border-white/5 shadow-inner">
+                   <p className="text-xs text-white/60 leading-relaxed italic font-mono-data">
+                     "Analyzing 12 relevant bricks across 3 architectural plans. Identifying override chain for Intent #892..."
+                   </p>
+                 </div>
+               </section>
+
+               <section>
+                 <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-white/40">Recalled Evidence</h4>
+                    <span className="text-[10px] bg-white/5 px-2 py-0.5 rounded text-white/40">
+                      {[...messages].reverse().find(m => m.bricks)?.bricks?.length || 0} Total
+                    </span>
+                 </div>
+                 
+                 <div className="space-y-3">
+                   {[...messages].reverse().find(m => m.bricks)?.bricks?.map((brick: any) => (
+                     <motion.div 
+                        key={brick.brick_id}
+                        onClick={() => setSelectedBrickId(brick.brick_id)}
+                        whileHover={{ x: 2, backgroundColor: 'rgba(255,255,255,0.02)' }}
+                        whileTap={{ scale: 0.98 }}
+                        className={`p-4 rounded-lg border transition-all cursor-pointer ${
+                          selectedBrickId === brick.brick_id ? 'border-primary bg-primary/5 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)]' : 'border-white/5'
+                        }`}
+                     >
+                       <div className="flex items-center justify-between mb-3">
+                         <span className="text-[10px] font-mono-data text-primary font-bold">{brick.brick_id.substring(0, 16)}</span>
+                         <div className="w-16">
+                            <SegmentedBar confidence={brick.confidence} />
+                         </div>
+                       </div>
+                       
+                       {selectedBrickId === brick.brick_id && brickMeta && (
+                         <motion.div 
+                          initial={{ height: 0, opacity: 0 }} 
+                          animate={{ height: 'auto', opacity: 1 }}
+                          className="overflow-hidden"
+                         >
+                           <p className="text-[11px] text-white/50 mb-3 leading-relaxed border-l border-white/10 pl-3 italic">{brickMeta.text_sample}</p>
+                           <div className="flex items-center gap-2 opacity-20 hover:opacity-50 transition-opacity">
+                              <ExternalLink className="w-3 h-3" />
+                              <span className="text-[9px] font-mono-data truncate">{brickMeta.source_file}</span>
+                           </div>
+                         </motion.div>
+                       )}
+                     </motion.div>
+                   ))}
+                 </div>
+               </section>
+
+               <section>
+                 <h4 className="text-xs font-bold mb-4 text-white/40 uppercase tracking-widest">Mini-Graph Path</h4>
+                 <div className="h-40 bg-secondary/20 rounded-xl border border-white/5 flex items-center justify-center">
+                    <Share2 className="w-6 h-6 text-white/10" />
+                 </div>
+               </section>
+            </div>
+          </motion.aside>
         )}
-      </div>
-
-      {/* Expanded Brick Modal */}
-      {expandedBrick && (
-        <>
-          <div className="modal-backdrop" onClick={() => setExpandedBrick(null)} />
-          <div className="brick-full-view">
-            <h4>Full Brick Content</h4>
-            <div className="meta-row">
-              <div><b>Role:</b> {expandedBrick.role}</div>
-              <div><b>Message ID:</b> {expandedBrick.message_id}</div>
-              <div><b>Index:</b> {expandedBrick.block_index}</div>
-            </div>
-            <pre>{expandedBrick.full_text}</pre>
-            <button className="close-btn" onClick={() => setExpandedBrick(null)}>Close</button>
-          </div>
-        </>
-      )}
-
-      {/* Enhanced AI View (Graph Index) Modal */}
-      {showGraph && graphData && (
-        <>
-          <div className="modal-backdrop" onClick={() => setShowGraph(false)} />
-          <div className="brick-full-view graph-view" style={{ maxWidth: '800px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                 <h3>Human-curated Concept Index (Preview)</h3>
-                 <button className="close-btn" onClick={() => setShowGraph(false)}>Close</button>
-            </div>
-            
-            <div className="graph-content" style={{ overflowY: 'auto', maxHeight: '70vh' }}>
-                <div className="markdown-content" style={{ marginBottom: '2rem', padding: '1rem', background: '#f5f5f5', borderRadius: '4px' }}>
-                    <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0 }}>{graphData.index_content}</pre>
-                </div>
-
-                <div className="graph-section">
-                    <h4>Concepts ({nodes.length})</h4>
-                    
-                    <div className="concept-legend">
-                      <span className="legend-strong">■ Strong (Hard Anchor Match)</span>
-                      <span className="legend-weak">■ Weak (Soft Anchor Match)</span>
-                      <span className="legend-none">■ Neutral</span>
-                    </div>
-
-                    <div style={{ marginTop: '1rem' }}>
-                        {nodes.map(node => {
-                            const highlight = getHighlightLevel(node, recalledBrickIds);
-                            return (
-                                <div
-                                    key={node.id}
-                                    className={`concept-card concept-${highlight}`}
-                                >
-                                    <div className="concept-title">{node.label}</div>
-                                    <div className="concept-meta">
-                                        <div>ID: {node.id}</div>
-                                        
-                                        {/* Traversal Controls */}
-                                        <div className="traversal-controls" style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                                            <button onClick={() => toggleNeighbors(node.id)}>
-                                                {expandedNeighbors.has(node.id) ? 'Collapse Neighbors' : 'Expand Neighbors'}
-                                            </button>
-                                            <button onClick={() => toggleAnchors(node.id)}>
-                                                {showAnchorsFor.has(node.id) ? 'Hide Anchors' : 'Show Anchored Bricks'}
-                                            </button>
-                                        </div>
-
-                                        {/* Anchors Drawer */}
-                                        {showAnchorsFor.has(node.id) && (
-                                            <div className="anchors-drawer" style={{ marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '0.5rem' }}>
-                                                {/* Logic to show anchors (hard/soft) or bricks (as soft) */}
-                                                {(() => {
-                                                    const hardAnchors = node.anchors?.hard || [];
-                                                    const softAnchors = node.anchors?.soft || node.bricks || []; // Fallback to bricks as soft
-                                                    
-                                                    return (
-                                                        <>
-                                                            <div className="anchors-section">
-                                                                <strong>Hard Anchors ({hardAnchors.length})</strong>
-                                                                <div className="anchors-list">
-                                                                    {hardAnchors.map(brickId => (
-                                                                        <div key={brickId} className="anchor-row read-only">
-                                                                            <span className="brick-id">{brickId.substring(0, 8)}...</span>
-                                                                            <span className="locked-badge">Locked</span>
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            </div>
-                                                            <div className="anchors-section">
-                                                                <strong>Soft Anchors ({softAnchors.length})</strong>
-                                                                <div className="anchors-list">
-                                                                    {softAnchors.map(brickId => {
-                                                                        const key = `${node.id}:${brickId}`;
-                                                                        const intent = anchorIntents[key];
-                                                                        
-                                                                        return (
-                                                                            <div key={brickId} className="anchor-row">
-                                                                                <span 
-                                                                                    className="brick-id link" 
-                                                                                    style={{ cursor: 'pointer', textDecoration: 'underline', color: 'blue' }}
-                                                                                    onClick={() => { setShowGraph(false); handleBrickClick({ brick_id: brickId, confidence: 0 }); }}
-                                                                                >
-                                                                                    {brickId.substring(0, 8)}...
-                                                                                </span>
-
-                                                                                {!intent && (
-                                                                                    <div className="anchor-actions">
-                                                                                        <button className="action-btn promote" onClick={() => logPromote(node.id, brickId)}>Promote → Hard</button>
-                                                                                        <button className="action-btn reject" onClick={() => logReject(node.id, brickId)}>Reject</button>
-                                                                                    </div>
-                                                                                )}
-
-                                                                                {intent?.action === "promote" && <span className="intent-badge promote">Promotion Intended</span>}
-                                                                                {intent?.action === "reject" && <span className="intent-badge reject">Rejection Intended</span>}
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            </div>
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
-                                        )}
-                                        
-                                        {/* Neighbors Expansion */}
-                                        {expandedNeighbors.has(node.id) && (
-                                            <div className="neighbors-list" style={{ marginLeft: '1rem', borderLeft: '1px dashed #ccc', paddingLeft: '1rem', marginTop: '0.5rem' }}>
-                                                {edges.filter(e => e.source === node.id || e.target === node.id).map((edge, i) => {
-                                                    const neighborId = edge.source === node.id ? edge.target : edge.source;
-                                                    const neighborNode = nodes.find(n => n.id === neighborId);
-                                                    return (
-                                                        <div key={i} className="neighbor-item" style={{ background: '#f9f9f9', padding: '0.25rem', marginBottom: '0.25rem' }}>
-                                                            <div>{neighborNode?.label || neighborId} <span style={{fontSize: '0.8em', color: '#666'}}>({edge.type})</span></div>
-                                                            <div style={{fontSize: '0.8em', fontStyle: 'italic', color: '#888'}}>Contextual — not recalled</div>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        )}
-
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                <div className="graph-section" style={{ marginTop: '2rem' }}>
-                    <h4>Relations ({edges.length})</h4>
-                     <ul style={{ listStyle: 'none', padding: 0 }}>
-                        {edges.map((edge, i) => (
-                            <li key={i} style={{ padding: '0.25rem 0' }}>
-                                {edge.source} {"--["}{edge.type}{"]-->"} {edge.target}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            </div>
-          </div>
-        </>
-      )}
+      </AnimatePresence>
     </div>
   );
 }
