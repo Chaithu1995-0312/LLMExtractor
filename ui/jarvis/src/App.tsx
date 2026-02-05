@@ -15,7 +15,7 @@ import {
   LayoutGrid,
   Network
 } from 'lucide-react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -38,6 +38,7 @@ import 'reactflow/dist/style.css';
 import { NexusNode, NexusNodeProps, Lifecycle } from './components/NexusNode';
 import { WallView } from './components/WallView';
 import { Panel } from './components/Panel';
+import { ControlStrip } from './components/ControlStrip';
 
 // --- Adapters ---
 
@@ -144,6 +145,7 @@ export default function App() {
     { role: 'assistant', content: 'Welcome to the **Nexus Workbench**. How can I help you explore the knowledge base today?' }
   ]);
   const [viewMode, setViewMode] = useState<'wall' | 'graph'>('wall'); // Default to Wall
+  const queryClient = useQueryClient();
 
   // React Flow State
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -188,6 +190,21 @@ export default function App() {
     }
   });
 
+  const anchorMutation = useMutation({
+    mutationFn: async ({ brickId, action }: { brickId: string, action: 'promote' | 'reject' }) => {
+      const res = await fetch('/jarvis/anchor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brick_id: brickId, action })
+      });
+      if (!res.ok) throw new Error('Anchor failed');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['graph-index'] });
+    }
+  });
+
   // Prepare data for WallView
   const wallBricks = useMemo<NexusNodeProps[]>(() => {
     if (!graphData || !graphData.nodes) return [];
@@ -205,6 +222,22 @@ export default function App() {
       onSelect: () => {}, // Handled by WallView wrapper
     }));
   }, [graphData]);
+
+  // Find selected brick data including lifecycle
+  const selectedBrickData = useMemo(() => {
+    return wallBricks.find(b => b.id === selectedBrickId);
+  }, [wallBricks, selectedBrickId]);
+
+  const handleLifecycleAction = (action: 'promote' | 'kill' | 'freeze') => {
+    if (!selectedBrickId) return;
+
+    // Map UI actions to backend actions
+    // promote -> promote (Forming)
+    // freeze  -> promote (Frozen/Anchored)
+    // kill    -> reject
+    const backendAction = action === 'kill' ? 'reject' : 'promote';
+    anchorMutation.mutate({ brickId: selectedBrickId, action: backendAction });
+  };
 
   useEffect(() => {
     if (graphData && graphData.nodes) {
@@ -404,16 +437,29 @@ export default function App() {
                </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-0 no-scrollbar">
+            <div className="flex-1 overflow-y-auto p-0 no-scrollbar flex flex-col">
                {brickMeta ? (
-                 <Panel
-                   title={brickMeta.title || `Brick ${selectedBrickId.substring(0, 8)}`}
-                   fullText={brickMeta.fullText || brickMeta.text_sample || 'No content available.'}
-                   sources={brickMeta.sources || [brickMeta.source_file || 'Unknown source']}
-                   conflicts={brickMeta.conflicts || []}
-                   supersededBy={brickMeta.superseded_by}
-                   history={brickMeta.history || [{ timestamp: 'Now', note: 'Viewed' }]}
-                 />
+                 <>
+                   <div className="flex-1">
+                     <Panel
+                       title={brickMeta.title || `Brick ${selectedBrickId.substring(0, 8)}`}
+                       fullText={brickMeta.fullText || brickMeta.text_sample || 'No content available.'}
+                       sources={brickMeta.sources || [brickMeta.source_file || 'Unknown source']}
+                       conflicts={brickMeta.conflicts || []}
+                       supersededBy={brickMeta.superseded_by}
+                       history={brickMeta.history || [{ timestamp: 'Now', note: 'Viewed' }]}
+                     />
+                   </div>
+                   
+                   {/* Authority Control Strip */}
+                   <div className="p-6 bg-black/20">
+                     <ControlStrip 
+                       lifecycle={selectedBrickData?.lifecycle || 'LOOSE'} 
+                       onAction={handleLifecycleAction}
+                       isUpdating={anchorMutation.isPending}
+                     />
+                   </div>
+                 </>
                ) : (
                  <div className="p-8 text-center text-white/30 text-xs uppercase tracking-widest">
                    Loading Brick Data...

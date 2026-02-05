@@ -21,7 +21,7 @@ export const Panel: React.FC<PanelProps> = ({
   history,
 }) => {
   return (
-    <div className="nexus-panel">
+    <div className="nexus-panel panel-focused">
       <h2 className="panel-title">{title}</h2>
 
       <section className="panel-section">

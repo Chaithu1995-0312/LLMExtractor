@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { NexusNode, NexusNodeProps, Lifecycle } from "./NexusNode";
+import { NexusNode, NexusNodeProps } from "./NexusNode";
 
 interface WallViewProps {
   bricks: NexusNodeProps[];
@@ -7,106 +7,74 @@ interface WallViewProps {
   onSelect: (id: string) => void;
 }
 
-const lifecycleRank: Record<Lifecycle, number> = {
-  FROZEN: 0,
-  FORMING: 1,
-  LOOSE: 2,
-  KILLED: 3,
-};
-
-const lifecycleZ: Record<Lifecycle, number> = {
-  FROZEN: 0,
-  FORMING: -40,
-  LOOSE: -80,
-  KILLED: -140,
-};
-
-const lifecycleOpacity: Record<Lifecycle, number> = {
-  FROZEN: 1,
-  FORMING: 0.9,
-  LOOSE: 0.8,
-  KILLED: 0.5,
-};
-
-export function orderBricks(bricks: NexusNodeProps[]): NexusNodeProps[] {
-  return [...bricks].sort((a, b) => {
-    const r = lifecycleRank[a.lifecycle] - lifecycleRank[b.lifecycle];
-    if (r !== 0) return r;
-    // tie-breaker: confidence (higher first)
-    return b.confidence - a.confidence;
-  });
-}
-
 export const WallView: React.FC<WallViewProps> = ({ bricks, selectedId, onSelect }) => {
   const [killedExpanded, setKilledExpanded] = useState(false);
 
-  // Filter and Sort
-  const { visibleBricks, killedBricks } = useMemo(() => {
-    const sorted = orderBricks(bricks);
-    const killed = sorted.filter(b => b.lifecycle === 'KILLED');
-    const visible = sorted.filter(b => b.lifecycle !== 'KILLED');
-    return { visibleBricks: visible, killedBricks: killed };
+  const { frozen, forming, loose, killed } = useMemo(() => {
+    return {
+      frozen: bricks.filter(b => b.lifecycle === 'FROZEN'),
+      forming: bricks.filter(b => b.lifecycle === 'FORMING'),
+      loose: bricks.filter(b => b.lifecycle === 'LOOSE'),
+      killed: bricks.filter(b => b.lifecycle === 'KILLED'),
+    };
   }, [bricks]);
 
-  return (
-    <div 
-      className="w-full h-full overflow-y-auto overflow-x-hidden p-8"
-      style={{ perspective: '1000px' }}
-    >
-      <div 
-        className="w-full max-w-4xl mx-auto space-y-4"
-        style={{ transformStyle: 'preserve-3d' }}
-      >
-        {/* Active Wall (Frozen, Forming, Loose) */}
-        {visibleBricks.map((brick) => (
-          <div
-            key={brick.id}
-            style={{
-              transform: `translateZ(${lifecycleZ[brick.lifecycle]}px)`,
-              opacity: lifecycleOpacity[brick.lifecycle],
-              transition: 'transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.5s',
-            }}
-          >
-            <NexusNode
-              {...brick}
-              isFocused={brick.id === selectedId}
-              onSelect={onSelect}
-            />
-          </div>
+  const Lane = ({ title, colorClass, data }: { title: string, colorClass: string, data: NexusNodeProps[] }) => (
+    <div className="flex flex-col h-full min-w-[300px] flex-1 relative">
+      <div className="mb-6 flex items-center gap-4">
+        <h2 className={`text-lg font-bold tracking-widest uppercase ${colorClass} drop-shadow-md`}>{title}</h2>
+        <div className={`h-[1px] flex-1 bg-gradient-to-r from-${colorClass.split('-')[1]}-500/50 to-transparent`} />
+      </div>
+      
+      <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-4 pb-20">
+        {data.map(b => (
+          <NexusNode key={b.id} {...b} isFocused={b.id === selectedId} onSelect={onSelect} />
         ))}
-
-        {/* Cemetery (Killed) */}
-        {killedBricks.length > 0 && (
-          <div 
-            className="mt-12 border-t border-white/10 pt-8"
-            style={{ 
-              transform: `translateZ(${lifecycleZ.KILLED}px)`,
-              opacity: killedExpanded ? 1 : 0.6,
-              transition: 'all 0.3s'
-            }}
-          >
-            <button
-              onClick={() => setKilledExpanded(!killedExpanded)}
-              className="flex items-center gap-2 text-xs uppercase tracking-widest text-white/40 hover:text-white mb-4 transition-colors"
-            >
-              <span>☠ {killedBricks.length} Killed Ideas</span>
-              <span>{killedExpanded ? '−' : '+'}</span>
-            </button>
-
-            {killedExpanded && (
-              <div className="space-y-4 pl-4 border-l-2 border-red-900/30">
-                {killedBricks.map((brick) => (
-                  <NexusNode
-                    key={brick.id}
-                    {...brick}
-                    isFocused={brick.id === selectedId}
-                    onSelect={onSelect}
-                  />
-                ))}
-              </div>
-            )}
+        {data.length === 0 && (
+          <div className="p-6 border border-dashed border-white/10 rounded-lg text-center opacity-30 text-xs font-mono uppercase">
+            No Data
           </div>
         )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="h-full w-full flex flex-col p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#05080a] to-black">
+      
+      {/* Main Swimlanes */}
+      <div className="flex-1 grid grid-cols-3 gap-8 overflow-hidden">
+        <Lane title="FROZEN" colorClass="text-emerald-400" data={frozen} />
+        <Lane title="FORMING" colorClass="text-amber-400" data={forming} />
+        <Lane title="LOOSE" colorClass="text-cyan-400" data={loose} />
+      </div>
+
+      {/* Killed Floor - Matching the red bar in image */}
+      <div className="mt-4 relative group">
+        <div 
+          onClick={() => setKilledExpanded(!killedExpanded)}
+          className={`
+            cursor-pointer border border-red-900/40 bg-red-950/20 rounded-md p-3 flex items-center gap-4 transition-all
+            ${killedExpanded ? 'h-48' : 'h-12 hover:bg-red-900/10'}
+          `}
+        >
+          <div className="flex items-center gap-3">
+             <div className="text-red-500">☠</div>
+             <span className="text-red-500 font-bold uppercase tracking-widest text-xs">{killed.length} Killed Ideas</span>
+          </div>
+          
+          {!killedExpanded && <div className="h-[1px] flex-1 bg-red-900/30" />}
+
+          {killedExpanded && (
+             <div className="flex-1 overflow-x-auto flex gap-4 p-2 h-full items-center">
+                {killed.map(k => (
+                  <div key={k.id} className="min-w-[200px] opacity-70 hover:opacity-100">
+                    <NexusNode {...k} isFocused={selectedId === k.id} onSelect={onSelect} />
+                  </div>
+                ))}
+             </div>
+          )}
+        </div>
       </div>
     </div>
   );
