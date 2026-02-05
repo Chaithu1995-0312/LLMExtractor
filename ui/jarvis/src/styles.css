@@ -19,7 +19,18 @@
     --secondary: 222 47% 11%;
     --secondary-foreground: 213 31% 91%;
 
-    --muted: 222 47% 11%;
+    /* Nexus Doctrine Colors */
+    --bg: #0b0f14;
+    --tile: #121821;
+    --panel: #0f1620;
+    --text: #e6edf3;
+    --muted: #8b949e;
+
+    --loose: #6e7681;
+    --forming: #d29922;
+    --frozen: #2ea043;
+    --killed: #f85149;
+
     --muted-foreground: 215.4 16.3% 46.9%;
 
     --accent: 222 47% 11%;
@@ -86,6 +97,118 @@
 
   .chat-bubble-ai {
     @apply glass-panel shadow-2xl;
+  }
+
+  /* Nexus Doctrine Components */
+
+  .nexus-brick {
+    background: var(--tile);
+    padding: 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    user-select: none;
+    transition: all 0.3s ease-out; /* Smooth transition for hover/focus */
+  }
+
+  .nexus-brick.focused {
+    outline: 2px solid rgba(255,255,255,0.08);
+  }
+
+  .brick-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .brick-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text);
+  }
+
+  .brick-lifecycle-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .brick-summary {
+    font-size: 13px;
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .brick-confidence {
+    height: 4px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .brick-confidence-fill {
+    height: 100%;
+    background: var(--text);
+    opacity: 0.6;
+  }
+
+  .brick-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* Lifecycle colors */
+  .lifecycle-loose   { opacity: 0.6; }
+  .lifecycle-forming { opacity: 0.85; }
+  .lifecycle-frozen  { opacity: 1; }
+  .lifecycle-killed  { opacity: 0.4; }
+
+  .brick-lifecycle-dot.loose   { background: var(--loose); }
+  .brick-lifecycle-dot.forming { background: var(--forming); }
+  .brick-lifecycle-dot.frozen  { background: var(--frozen); }
+  .brick-lifecycle-dot.killed  { background: var(--killed); }
+
+  /* Nexus Panel */
+  .nexus-panel {
+    background: var(--panel);
+    padding: 16px;
+    border-radius: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .panel-title {
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .panel-section h4 {
+    font-size: 12px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .panel-text {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .panel-section.warning {
+    border-left: 3px solid var(--forming);
+    padding-left: 10px;
+  }
+
+  .panel-section.muted {
+    opacity: 0.7;
   }
 }
 

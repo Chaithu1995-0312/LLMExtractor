@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo, memo } from 'react';
 import { useNexusStore } from './store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -11,7 +11,9 @@ import {
   BookOpen, 
   Activity,
   Maximize2,
-  ExternalLink
+  ExternalLink,
+  LayoutGrid,
+  Network
 } from 'lucide-react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -29,13 +31,34 @@ import ReactFlow, {
   NodeChange,
   EdgeChange,
   Connection,
-  addEdge
+  addEdge,
+  NodeProps
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { NexusNode } from './components/NexusNode';
+import { NexusNode, NexusNodeProps, Lifecycle } from './components/NexusNode';
+import { WallView } from './components/WallView';
+import { Panel } from './components/Panel';
+
+// --- Adapters ---
+
+const GraphNodeWrapper = memo(({ data, id, selected }: NodeProps) => {
+  // Map ReactFlow data to NexusNodeProps
+  const props: NexusNodeProps = {
+    id: id,
+    title: data.label || 'Untitled',
+    summary: data.summary || 'No summary available.',
+    lifecycle: (data.status as Lifecycle) || 'LOOSE',
+    confidence: data.confidence || 0.5,
+    sourceCount: data.sourceCount || 0,
+    lastUpdatedAt: data.lastUpdatedAt || 'Unknown',
+    isFocused: selected,
+    onSelect: () => {}, // Selection handled by ReactFlow's onNodeClick
+  };
+  return <div style={{ minWidth: '200px' }}><NexusNode {...props} /></div>;
+});
 
 const nodeTypes = {
-  nexus: NexusNode,
+  nexus: GraphNodeWrapper,
 };
 
 // Initialize mermaid
@@ -114,28 +137,13 @@ const panelTransition = {
   damping: 30,
 };
 
-const SegmentedBar = ({ confidence }: { confidence: number }) => {
-  const segments = 10;
-  const activeSegments = Math.round(confidence * segments);
-  
-  return (
-    <div className="segmented-bar">
-      {Array.from({ length: segments }).map((_, i) => (
-        <div 
-          key={i} 
-          className={`segmented-bar-item ${i < activeSegments ? 'active' : ''}`}
-        />
-      ))}
-    </div>
-  );
-};
-
 export default function App() {
   const { mode, setMode, rightPanelOpen, toggleRightPanel, selectedBrickId, setSelectedBrickId, selectedNodeId, setSelectedNodeId } = useNexusStore();
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'Welcome to the **Nexus Workbench**. How can I help you explore the knowledge base today?' }
   ]);
+  const [viewMode, setViewMode] = useState<'wall' | 'graph'>('wall'); // Default to Wall
 
   // React Flow State
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -180,12 +188,30 @@ export default function App() {
     }
   });
 
+  // Prepare data for WallView
+  const wallBricks = useMemo<NexusNodeProps[]>(() => {
+    if (!graphData || !graphData.nodes) return [];
+    const rawNodes = Array.isArray(graphData.nodes) ? graphData.nodes : graphData.nodes.nodes;
+    
+    return rawNodes.map((n: any) => ({
+      id: n.id,
+      title: n.label || 'Untitled Brick',
+      summary: n.summary || 'No summary available.',
+      lifecycle: (n.status as Lifecycle) || 'LOOSE',
+      confidence: n.confidence || 0.5,
+      sourceCount: n.sourceCount || 1,
+      lastUpdatedAt: n.lastUpdatedAt || 'Today',
+      isFocused: false, // Handled by WallView wrapper
+      onSelect: () => {}, // Handled by WallView wrapper
+    }));
+  }, [graphData]);
+
   useEffect(() => {
     if (graphData && graphData.nodes) {
       const initialNodes = (Array.isArray(graphData.nodes) ? graphData.nodes : graphData.nodes.nodes).map((n: any, i: number) => ({
         id: n.id,
         type: 'nexus',
-        position: { x: Math.random() * 400, y: i * 100 },
+        position: { x: Math.random() * 800, y: Math.random() * 600 },
         data: { ...n, type: n.type || 'Fact' }
       }));
       const initialEdges = (Array.isArray(graphData.edges) ? graphData.edges : graphData.edges.edges).map((e: any) => ({
@@ -211,7 +237,6 @@ export default function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden">
       {/* Left Sidebar - Navigation */}
-      {/* Left Sidebar - Navigation */}
       <aside className="w-16 flex flex-col items-center py-6 glass-panel border-r z-20">
         <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-10 shadow-[0_0_20px_rgba(0,128,255,0.4)]">
           <Activity className="text-primary-foreground w-6 h-6" />
@@ -228,9 +253,9 @@ export default function App() {
           <button 
             onClick={() => setMode('explore')}
             className={`p-3 rounded-xl transition-all ${mode === 'explore' ? 'bg-white/10 text-white shadow-inner' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
-            title="Explore Graph"
+            title="Explore Wall"
           >
-            <Share2 className="w-6 h-6" />
+            <LayoutGrid className="w-6 h-6" />
           </button>
         </nav>
 
@@ -246,12 +271,32 @@ export default function App() {
         <header className="h-16 border-b border-white/5 flex items-center justify-between px-8 glass-panel sticky top-0 z-10">
           <div className="flex items-center gap-3">
             <h1 className="font-bold text-lg tracking-tighter uppercase">
-              {mode === 'ask' ? 'Ask & Recall' : 'Knowledge Browser'}
+              {mode === 'ask' ? 'Ask & Recall' : 'Knowledge Wall'}
             </h1>
-            <span className="px-2 py-0.5 rounded text-[10px] bg-primary/20 text-primary uppercase font-bold tracking-widest">Nexus v1</span>
+            <span className="px-2 py-0.5 rounded text-[10px] bg-primary/20 text-primary uppercase font-bold tracking-widest">Nexus v3</span>
           </div>
           
           <div className="flex items-center gap-4">
+             {/* View Toggle for Explore Mode */}
+             {mode === 'explore' && (
+              <div className="flex bg-black/40 rounded-lg p-1 border border-white/10">
+                <button
+                  onClick={() => setViewMode('wall')}
+                  className={`p-1.5 rounded-md transition-all ${viewMode === 'wall' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}
+                  title="Wall View"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('graph')}
+                  className={`p-1.5 rounded-md transition-all ${viewMode === 'graph' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}
+                  title="Graph View (Legacy)"
+                >
+                  <Network className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20 group-focus-within:text-primary transition-colors" />
               <input 
@@ -309,25 +354,33 @@ export default function App() {
               </motion.div>
             ) : (
               <motion.div 
-                key="graph"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.02 }}
+                key="explore"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 className="h-full w-full"
               >
-                <ReactFlow
-                  nodes={nodes}
-                  edges={edges}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
-                  onConnect={onConnect}
-                  nodeTypes={nodeTypes}
-                  onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-                  fitView
-                >
-                  <Background color="#222" gap={20} />
-                  <Controls />
-                </ReactFlow>
+                {viewMode === 'wall' ? (
+                  <WallView 
+                    bricks={wallBricks} 
+                    selectedId={selectedBrickId} 
+                    onSelect={setSelectedBrickId} 
+                  />
+                ) : (
+                  <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={onConnect}
+                    nodeTypes={nodeTypes}
+                    onNodeClick={(_, node) => setSelectedBrickId(node.id)}
+                    fitView
+                  >
+                    <Background color="#222" gap={20} />
+                    <Controls />
+                  </ReactFlow>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -336,7 +389,7 @@ export default function App() {
 
       {/* Right Panel - Context & Evidence */}
       <AnimatePresence>
-        {rightPanelOpen && (
+        {rightPanelOpen && selectedBrickId && (
           <motion.aside 
             initial={{ x: 300, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
@@ -346,74 +399,26 @@ export default function App() {
           >
             <div className="p-6 border-b border-white/5 flex items-center justify-between">
                <h3 className="font-semibold uppercase text-xs tracking-[0.2em] text-white/40">Context & Evidence</h3>
-               <button className="text-white/20 hover:text-white transition-colors">
+               <button onClick={() => toggleRightPanel(false)} className="text-white/20 hover:text-white transition-colors">
                   <Maximize2 className="w-4 h-4" />
                </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-8 no-scrollbar">
-               <section>
-                 <h4 className="text-xs font-bold mb-4 text-primary flex items-center gap-2 uppercase tracking-widest">
-                   <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                   Thinking Process
-                 </h4>
-                 <div className="bg-black/40 rounded-lg p-4 border border-white/5 shadow-inner">
-                   <p className="text-xs text-white/60 leading-relaxed italic font-mono-data">
-                     "Analyzing 12 relevant bricks across 3 architectural plans. Identifying override chain for Intent #892..."
-                   </p>
+            <div className="flex-1 overflow-y-auto p-0 no-scrollbar">
+               {brickMeta ? (
+                 <Panel
+                   title={brickMeta.title || `Brick ${selectedBrickId.substring(0, 8)}`}
+                   fullText={brickMeta.fullText || brickMeta.text_sample || 'No content available.'}
+                   sources={brickMeta.sources || [brickMeta.source_file || 'Unknown source']}
+                   conflicts={brickMeta.conflicts || []}
+                   supersededBy={brickMeta.superseded_by}
+                   history={brickMeta.history || [{ timestamp: 'Now', note: 'Viewed' }]}
+                 />
+               ) : (
+                 <div className="p-8 text-center text-white/30 text-xs uppercase tracking-widest">
+                   Loading Brick Data...
                  </div>
-               </section>
-
-               <section>
-                 <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-xs font-bold uppercase tracking-widest text-white/40">Recalled Evidence</h4>
-                    <span className="text-[10px] bg-white/5 px-2 py-0.5 rounded text-white/40">
-                      {[...messages].reverse().find(m => m.bricks)?.bricks?.length || 0} Total
-                    </span>
-                 </div>
-                 
-                 <div className="space-y-3">
-                   {[...messages].reverse().find(m => m.bricks)?.bricks?.map((brick: any) => (
-                     <motion.div 
-                        key={brick.brick_id}
-                        onClick={() => setSelectedBrickId(brick.brick_id)}
-                        whileHover={{ x: 2, backgroundColor: 'rgba(255,255,255,0.02)' }}
-                        whileTap={{ scale: 0.98 }}
-                        className={`p-4 rounded-lg border transition-all cursor-pointer ${
-                          selectedBrickId === brick.brick_id ? 'border-primary bg-primary/5 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)]' : 'border-white/5'
-                        }`}
-                     >
-                       <div className="flex items-center justify-between mb-3">
-                         <span className="text-[10px] font-mono-data text-primary font-bold">{brick.brick_id.substring(0, 16)}</span>
-                         <div className="w-16">
-                            <SegmentedBar confidence={brick.confidence} />
-                         </div>
-                       </div>
-                       
-                       {selectedBrickId === brick.brick_id && brickMeta && (
-                         <motion.div 
-                          initial={{ height: 0, opacity: 0 }} 
-                          animate={{ height: 'auto', opacity: 1 }}
-                          className="overflow-hidden"
-                         >
-                           <p className="text-[11px] text-white/50 mb-3 leading-relaxed border-l border-white/10 pl-3 italic">{brickMeta.text_sample}</p>
-                           <div className="flex items-center gap-2 opacity-20 hover:opacity-50 transition-opacity">
-                              <ExternalLink className="w-3 h-3" />
-                              <span className="text-[9px] font-mono-data truncate">{brickMeta.source_file}</span>
-                           </div>
-                         </motion.div>
-                       )}
-                     </motion.div>
-                   ))}
-                 </div>
-               </section>
-
-               <section>
-                 <h4 className="text-xs font-bold mb-4 text-white/40 uppercase tracking-widest">Mini-Graph Path</h4>
-                 <div className="h-40 bg-secondary/20 rounded-xl border border-white/5 flex items-center justify-center">
-                    <Share2 className="w-6 h-6 text-white/10" />
-                 </div>
-               </section>
+               )}
             </div>
           </motion.aside>
         )}
