@@ -38,7 +38,6 @@ import 'reactflow/dist/style.css';
 import { NexusNode, NexusNodeProps, Lifecycle } from './components/NexusNode';
 import { WallView } from './components/WallView';
 import { Panel } from './components/Panel';
-import { ControlStrip } from './components/ControlStrip';
 
 // --- Adapters ---
 
@@ -175,6 +174,16 @@ export default function App() {
     enabled: !!selectedBrickId
   });
 
+  const { data: brickFull } = useQuery({
+    queryKey: ['brick-full', selectedBrickId],
+    queryFn: async () => {
+      const res = await fetch(`/jarvis/brick-full?brick_id=${selectedBrickId}`);
+      if (!res.ok) return null; // Fail silently/gracefully for full text
+      return res.json();
+    },
+    enabled: !!selectedBrickId
+  });
+
   const askMutation = useMutation({
     mutationFn: async (q: string) => {
       const res = await fetch(`/jarvis/ask-preview?query=${encodeURIComponent(q)}`);
@@ -190,14 +199,53 @@ export default function App() {
     }
   });
 
-  const anchorMutation = useMutation({
-    mutationFn: async ({ brickId, action }: { brickId: string, action: 'promote' | 'reject' }) => {
-      const res = await fetch('/jarvis/anchor', {
+  const promoteMutation = useMutation({
+    mutationFn: async ({ nodeId }: { nodeId: string }) => {
+      const res = await fetch('/jarvis/node/promote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brick_id: brickId, action })
+        body: JSON.stringify({ node_id: nodeId, promote_bricks: [], actor: 'user' })
       });
-      if (!res.ok) throw new Error('Anchor failed');
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Promote failed');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['graph-index'] });
+    }
+  });
+
+  const killMutation = useMutation({
+    mutationFn: async ({ nodeId }: { nodeId: string }) => {
+      const res = await fetch('/jarvis/node/kill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ node_id: nodeId, reason: 'Killed via UI', actor: 'user' })
+      });
+      if (!res.ok) {
+         const err = await res.json();
+         throw new Error(err.error || 'Kill failed');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['graph-index'] });
+    }
+  });
+
+  const supersedeMutation = useMutation({
+    mutationFn: async ({ oldNodeId, newNodeId, reason }: { oldNodeId: string, newNodeId: string, reason: string }) => {
+      const res = await fetch('/jarvis/node/supersede', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old_node_id: oldNodeId, new_node_id: newNodeId, reason, actor: 'user' })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Supersede failed');
+      }
       return res.json();
     },
     onSuccess: () => {
@@ -209,18 +257,30 @@ export default function App() {
   const wallBricks = useMemo<NexusNodeProps[]>(() => {
     if (!graphData || !graphData.nodes) return [];
     const rawNodes = Array.isArray(graphData.nodes) ? graphData.nodes : graphData.nodes.nodes;
-    
-    return rawNodes.map((n: any) => ({
-      id: n.id,
-      title: n.label || 'Untitled Brick',
-      summary: n.summary || 'No summary available.',
-      lifecycle: (n.status as Lifecycle) || 'LOOSE',
-      confidence: n.confidence || 0.5,
-      sourceCount: n.sourceCount || 1,
-      lastUpdatedAt: n.lastUpdatedAt || 'Today',
-      isFocused: false, // Handled by WallView wrapper
-      onSelect: () => {}, // Handled by WallView wrapper
-    }));
+    const rawEdges = Array.isArray(graphData.edges) ? graphData.edges : (graphData.edges?.edges || []);
+
+    return rawNodes.map((n: any) => {
+      // Calculate source count from edges (Intent -> Source via DERIVED_FROM)
+      const sourceCount = rawEdges.filter((e: any) => 
+        e.source === n.id && e.type === 'derived_from'
+      ).length;
+
+      // Use statement as title/summary if available
+      const title = n.statement ? (n.statement.length > 50 ? n.statement.substring(0, 50) + '...' : n.statement) : (n.label || n.id);
+      const summary = n.statement || n.summary || 'No content available.';
+
+      return {
+        id: n.id,
+        title: title,
+        summary: summary,
+        lifecycle: ((n.status || n.lifecycle || 'loose').toUpperCase() as Lifecycle),
+        confidence: n.confidence || 0.5,
+        sourceCount: sourceCount,
+        lastUpdatedAt: n.updated_at || n.created_at ? new Date(n.updated_at || n.created_at).toLocaleDateString() : 'Today',
+        isFocused: false, // Handled by WallView wrapper
+        onSelect: () => {}, // Handled by WallView wrapper
+      };
+    });
   }, [graphData]);
 
   // Find selected brick data including lifecycle
@@ -228,15 +288,16 @@ export default function App() {
     return wallBricks.find(b => b.id === selectedBrickId);
   }, [wallBricks, selectedBrickId]);
 
-  const handleLifecycleAction = (action: 'promote' | 'kill' | 'freeze') => {
-    if (!selectedBrickId) return;
+  const handlePromote = () => {
+    if (selectedBrickId) {
+      promoteMutation.mutate({ nodeId: selectedBrickId });
+    }
+  };
 
-    // Map UI actions to backend actions
-    // promote -> promote (Forming)
-    // freeze  -> promote (Frozen/Anchored)
-    // kill    -> reject
-    const backendAction = action === 'kill' ? 'reject' : 'promote';
-    anchorMutation.mutate({ brickId: selectedBrickId, action: backendAction });
+  const handleKill = () => {
+    if (selectedBrickId) {
+      killMutation.mutate({ nodeId: selectedBrickId });
+    }
   };
 
   useEffect(() => {
@@ -439,27 +500,20 @@ export default function App() {
 
             <div className="flex-1 overflow-y-auto p-0 no-scrollbar flex flex-col">
                {brickMeta ? (
-                 <>
-                   <div className="flex-1">
-                     <Panel
-                       title={brickMeta.title || `Brick ${selectedBrickId.substring(0, 8)}`}
-                       fullText={brickMeta.fullText || brickMeta.text_sample || 'No content available.'}
-                       sources={brickMeta.sources || [brickMeta.source_file || 'Unknown source']}
-                       conflicts={brickMeta.conflicts || []}
-                       supersededBy={brickMeta.superseded_by}
-                       history={brickMeta.history || [{ timestamp: 'Now', note: 'Viewed' }]}
-                     />
-                   </div>
-                   
-                   {/* Authority Control Strip */}
-                   <div className="p-6 bg-black/20">
-                     <ControlStrip 
-                       lifecycle={selectedBrickData?.lifecycle || 'LOOSE'} 
-                       onAction={handleLifecycleAction}
-                       isUpdating={anchorMutation.isPending}
-                     />
-                   </div>
-                 </>
+                 <div className="flex-1 h-full p-6">
+                   <Panel
+                     nodeId={selectedBrickId}
+                     lifecycle={selectedBrickData?.lifecycle || 'LOOSE'}
+                     title={brickMeta.title || `Brick ${selectedBrickId.substring(0, 8)}`}
+                     fullText={brickFull?.full_text || brickMeta.fullText || brickMeta.text_sample || 'No content available.'}
+                     sources={brickMeta.sources || [brickMeta.source_file || 'Unknown source']}
+                     conflicts={brickMeta.conflicts || []}
+                     supersededBy={brickMeta.superseded_by}
+                     history={brickMeta.history || [{ timestamp: 'Now', note: 'Viewed' }]}
+                     onPromote={handlePromote}
+                     onKill={handleKill}
+                   />
+                 </div>
                ) : (
                  <div className="p-8 text-center text-white/30 text-xs uppercase tracking-widest">
                    Loading Brick Data...

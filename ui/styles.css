@@ -72,3 +72,75 @@ header {
   opacity: 0.5;
   font-style: italic;
 }
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 224 71% 2%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 11%;
+    --popover: 222 47% 11%;
+    --primary: 199 89% 48%; /* Cyan */
+    --secondary: 217 19% 27%;
+    --muted: 217 19% 27%;
+    --accent: 217 19% 27%;
+    --destructive: 0 62.8% 30.6%;
+    --border: 217 19% 27%;
+    --input: 217 19% 27%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+  
+  body {
+    @apply bg-[#05080a] text-slate-200 selection:bg-cyan-500/30;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+@layer components {
+  /* The core glass effect used in the image */
+  .glass-panel {
+    @apply bg-[#0f1218]/80 backdrop-blur-md border border-white/10 shadow-xl;
+  }
+
+  /* Custom Scrollbar to match the dark theme */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.2);
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+  }
+
+  /* Text Styles */
+  .font-mono-data {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+  }
+}
+
+@layer utilities {
+  /* Holographic Glows matching the image statuses */
+  .shadow-glow-frozen {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.2), inset 0 0 10px rgba(16, 185, 129, 0.1);
+  }
+  .shadow-glow-forming {
+    box-shadow: 0 0 20px rgba(234, 179, 8, 0.25), inset 0 0 10px rgba(234, 179, 8, 0.1);
+  }
+  .shadow-glow-loose {
+    box-shadow: 0 0 20px rgba(56, 189, 248, 0.15), inset 0 0 10px rgba(56, 189, 248, 0.05);
+  }
+  .shadow-glow-killed {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.15);
+  }
+  
+  /* The bright scanline effect */
+  .scanline {
+    background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2));
+    background-size: 100% 4px;
+    pointer-events: none;
+  }
+}

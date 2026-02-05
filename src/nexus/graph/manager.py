@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from datetime import datetime, timezone
 from typing import Dict, Any, Tuple, List, Optional
 from nexus.graph.schema import Intent, Source, ScopeNode, Edge, EdgeType, IntentLifecycle, IntentType, GraphNode
 
@@ -192,6 +193,156 @@ class GraphManager:
         if row:
             return (row[0], json.loads(row[1]))
         return None
+
+    def _log_audit_event(self, event_type: str, payload: Dict[str, Any]):
+        """
+        Log an audit event. For now, we print to console.
+        In Phase 3, this will append to phase3_audit_trace.jsonl.
+        """
+        # ISO8601 timestamp
+        ts = datetime.now(timezone.utc).isoformat()
+        event = {
+            "timestamp": ts,
+            "event": event_type,
+            **payload
+        }
+        print(f"[AUDIT] {json.dumps(event)}")
+        # TODO: Append to services/cortex/phase3_audit_trace.jsonl if needed by strict requirements
+
+    def kill_node(self, node_id: str, reason: str, actor: str):
+        """
+        Explicitly reject a node, moving it to KILLED lifecycle.
+        Preserves history (no delete).
+        """
+        data = self._get_node_data(node_id)
+        if not data:
+            raise ValueError(f"Node {node_id} not found")
+
+        current_state = IntentLifecycle(data.get("lifecycle", "loose"))
+        if current_state == IntentLifecycle.KILLED:
+            # Idempotent success
+            return
+
+        # Update node data
+        data["lifecycle"] = IntentLifecycle.KILLED.value
+        data["kill_reason"] = reason
+        data["killed_at"] = datetime.now(timezone.utc).isoformat()
+        data["killed_by"] = actor
+        
+        # Persist
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(data), node_id))
+        conn.commit()
+        conn.close()
+
+        # Audit
+        self._log_audit_event("NODE_KILLED", {
+            "node_id": node_id,
+            "reason": reason,
+            "actor": actor,
+            "previous_state": current_state.value
+        })
+
+    def promote_node_to_frozen(self, node_id: str, promote_bricks: List[str], actor: str):
+        """
+        Promote a FORMING node to FROZEN.
+        Converts specified soft anchors to hard anchors.
+        """
+        data = self._get_node_data(node_id)
+        if not data:
+            raise ValueError(f"Node {node_id} not found")
+
+        current_state = IntentLifecycle(data.get("lifecycle", "loose"))
+        
+        # Validate lifecycle
+        if current_state != IntentLifecycle.FORMING:
+             raise ValueError(f"Cannot freeze node {node_id}: State is {current_state}, must be FORMING")
+
+        # Logic for anchors would go here. 
+        # For now we just update the lifecycle as the brick/anchor model in `data` might vary.
+        # Assuming `data` has lists for anchors if we were fully rigorous, but Schema is loose JSON.
+        # We will set the lifecycle and log the promotion.
+        
+        data["lifecycle"] = IntentLifecycle.FROZEN.value
+        data["promoted_at"] = datetime.now(timezone.utc).isoformat()
+        data["promoted_by"] = actor
+        # Store which bricks were the 'reason' for promotion if we want
+        data["hard_anchors"] = list(set(data.get("hard_anchors", []) + promote_bricks))
+
+        # Persist
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(data), node_id))
+        conn.commit()
+        conn.close()
+
+        self._log_audit_event("NODE_FROZEN", {
+            "node_id": node_id,
+            "promoted_bricks": promote_bricks,
+            "actor": actor
+        })
+
+    def supersede_node(self, old_node_id: str, new_node_id: str, reason: str, actor: str):
+        """
+        Declare that one node replaces another.
+        Both must be FROZEN.
+        """
+        old_data = self._get_node_data(old_node_id)
+        if not old_data:
+             raise ValueError(f"Old node {old_node_id} not found")
+        
+        new_data = self._get_node_data(new_node_id)
+        if not new_data:
+             raise ValueError(f"New node {new_node_id} not found")
+
+        # Validate lifecycles
+        old_lifecycle = IntentLifecycle(old_data.get("lifecycle", "loose"))
+        new_lifecycle = IntentLifecycle(new_data.get("lifecycle", "loose"))
+
+        if old_lifecycle != IntentLifecycle.FROZEN:
+            raise ValueError(f"Old node {old_node_id} is not FROZEN ({old_lifecycle})")
+        # Strictness: New node should also be FROZEN or being frozen? 
+        # Requirement says "Both nodes exist... both lifecycle == FROZEN".
+        if new_lifecycle != IntentLifecycle.FROZEN:
+            raise ValueError(f"New node {new_node_id} is not FROZEN ({new_lifecycle})")
+
+        if old_node_id == new_node_id:
+            raise ValueError("Cannot supersede a node with itself")
+
+        # 1. Create Edge
+        edge = Edge(
+            source_id=old_node_id,
+            target_id=new_node_id,
+            edge_type=EdgeType.SUPERSEDED_BY,
+            metadata={
+                "reason": reason,
+                "actor": actor,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        )
+        self.add_typed_edge(edge)
+
+        # 2. Update Node Metadata (Old)
+        old_data["superseded_by"] = new_node_id
+        
+        # 3. Update Node Metadata (New)
+        new_data["supersedes"] = list(set(new_data.get("supersedes", []) + [old_node_id]))
+
+        # Persist Nodes
+        conn = self._get_conn()
+        c = conn.cursor()
+        c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(old_data), old_node_id))
+        c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(new_data), new_node_id))
+        conn.commit()
+        conn.close()
+
+        self._log_audit_event("NODE_SUPERSEDED", {
+            "old_node": old_node_id,
+            "new_node": new_node_id,
+            "reason": reason,
+            "actor": actor
+        })
 
     def promote_intent(self, intent_id: str, new_lifecycle: IntentLifecycle):
         """

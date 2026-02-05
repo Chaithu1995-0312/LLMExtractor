@@ -97,6 +97,88 @@ def jarvis_anchor():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/jarvis/node/promote", methods=["POST"])
+def jarvis_node_promote():
+    data = request.json
+    node_id = data.get("node_id")
+    promote_bricks = data.get("promote_bricks", [])
+    actor = data.get("actor", "user") # Default actor
+
+    if not node_id:
+        return jsonify({"error": "node_id required"}), 400
+
+    try:
+        graph_manager = GraphManager()
+        graph_manager.promote_node_to_frozen(node_id, promote_bricks, actor)
+        
+        # Return updated node state
+        node_type, node_data = graph_manager.get_node(node_id)
+        return jsonify({
+            "status": "success",
+            "node": {
+                "id": node_id,
+                "type": node_type,
+                **node_data
+            }
+        })
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/jarvis/node/kill", methods=["POST"])
+def jarvis_node_kill():
+    data = request.json
+    node_id = data.get("node_id")
+    reason = data.get("reason", "No reason provided")
+    actor = data.get("actor", "user")
+
+    if not node_id:
+        return jsonify({"error": "node_id required"}), 400
+
+    try:
+        graph_manager = GraphManager()
+        graph_manager.kill_node(node_id, reason, actor)
+        
+        node_type, node_data = graph_manager.get_node(node_id)
+        return jsonify({
+            "status": "success",
+            "node": {
+                "id": node_id,
+                "type": node_type,
+                **node_data
+            }
+        })
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/jarvis/node/supersede", methods=["POST"])
+def jarvis_node_supersede():
+    data = request.json
+    old_node_id = data.get("old_node_id")
+    new_node_id = data.get("new_node_id")
+    reason = data.get("reason", "Superseded")
+    actor = data.get("actor", "user")
+
+    if not old_node_id or not new_node_id:
+        return jsonify({"error": "old_node_id and new_node_id required"}), 400
+
+    try:
+        graph_manager = GraphManager()
+        graph_manager.supersede_node(old_node_id, new_node_id, reason, actor)
+        
+        return jsonify({
+            "status": "success",
+            "old_node_id": old_node_id,
+            "new_node_id": new_node_id
+        })
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/jarvis/brick-meta", methods=["GET"])
 def jarvis_brick_meta():
     brick_id = request.args.get("brick_id")

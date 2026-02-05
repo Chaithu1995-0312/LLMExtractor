@@ -70,3 +70,77 @@
     pointer-events: none;
   }
 }
+* {
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #0f1115;
+  color: #e6e6e6;
+}
+
+header {
+  padding: 12px 20px;
+  background: #161a22;
+  border-bottom: 1px solid #222;
+}
+
+.container {
+  display: flex;
+  height: calc(100vh - 56px);
+}
+
+/* LEFT PANEL */
+.tree-panel {
+  width: 300px;
+  border-right: 1px solid #222;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.tree-panel ul {
+  list-style: none;
+  padding-left: 12px;
+}
+
+.tree-panel li {
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+}
+
+.tree-panel li:hover {
+  background: #1e2430;
+}
+
+/* RIGHT PANEL */
+.message-panel {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.message {
+  max-width: 700px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  line-height: 1.4;
+}
+
+.message.user {
+  background: #2a5bd7;
+  margin-left: auto;
+}
+
+.message.assistant {
+  background: #1c1f26;
+  border: 1px solid #2a2f3a;
+}
+
+.placeholder {
+  opacity: 0.5;
+  font-style: italic;
+}

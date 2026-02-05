@@ -28,6 +28,7 @@ class EdgeType(Enum):
     REFINES = "refines"               # Intent -> Intent
     DEPENDS_ON = "depends_on"         # Intent -> Intent
     ASSEMBLED_IN = "assembled_in"     # Topic -> Artifact or Topic -> Intent
+    SUPERSEDED_BY = "superseded_by"   # Intent -> Intent (Versioning)
 
 @dataclass
 class GraphNode:
