@@ -3,6 +3,7 @@ import json
 import numpy as np
 import faiss
 import os
+from datetime import datetime, timezone
 from typing import List, Dict
 from nexus.config import INDEX_PATH, BRICK_IDS_PATH
 from nexus.vector.embedder import get_embedder
@@ -18,7 +19,7 @@ class LocalVectorIndex:
 
         if self.index_file.exists() and self.meta_file.exists():
             self.load()
-        print("DEBUG FAISS index ntotal =", self.index.ntotal)
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [INDEX] FAISS index initialized with {self.index.ntotal} vectors.")
 
 
     def load(self):
@@ -37,6 +38,7 @@ class LocalVectorIndex:
         if not pending:
             return
 
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [INDEX] Embedding {len(pending)} pending bricks...")
         texts = [b["content"] for b in pending]
 
         # Real embeddings via Singleton Embedder
@@ -44,6 +46,7 @@ class LocalVectorIndex:
         embeddings = embedder.embed_texts(texts)
 
         self.index.add(embeddings)
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [INDEX] Added {len(embeddings)} vectors to FAISS.")
         for b in pending:
             self.brick_ids.append(b["brick_id"])
             b["status"] = "EMBEDDED"

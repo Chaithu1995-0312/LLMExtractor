@@ -44,13 +44,13 @@ def _normalize_distance_to_confidence(distance: float) -> float:
     confidence = 1.0 - (distance / 2.0)
     return max(0.0, min(1.0, confidence))
 
-def recall_bricks(query: str, k: int = 10, allowed_scopes: List[str] = ["global"]) -> List[Dict]:
+def recall_bricks(query: str, k: int = 10, allowed_scopes: List[str] = ["global"], use_genai: bool = False) -> List[Dict]:
     if _local_index.index.ntotal == 0:
         print("DEBUG FAISS index empty — skipping recall")
         return []
         
     embedder = get_embedder()
-    query_vec = embedder.embed_query(query)
+    query_vec = embedder.embed_query(query, use_genai=use_genai)
     # Oversampling for post-filtering ACLs
     oversample_k = k * 5
     
@@ -114,13 +114,13 @@ def recall_bricks(query: str, k: int = 10, allowed_scopes: List[str] = ["global"
             
     return results[:k]
 
-def recall_bricks_readonly(query: str, k: int = 10, allowed_scopes: List[str] = ["global"]) -> List[Dict]:
+def recall_bricks_readonly(query: str, k: int = 10, allowed_scopes: List[str] = ["global"], use_genai: bool = False) -> List[Dict]:
     # print("DEBUG recall invoked, query =", query)
     
     # This is essentially the same as recall_bricks, but explicitly marked as read-only
     # and intended for use by Cortex to prevent direct Nexus imports.
     # It ensures no mutation or side effects occur.
-    return recall_bricks(query, k, allowed_scopes)
+    return recall_bricks(query, k, allowed_scopes, use_genai=use_genai)
 
 def get_recall_brick_metadata(brick_id: str) -> Dict | None:
     """

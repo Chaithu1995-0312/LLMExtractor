@@ -49,6 +49,7 @@ def build_walls(tree_files: List[str], output_dir: str, target_size: int = 32000
         return wall_filename
 
     for tree_file in tree_files:
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [WALLS] Adding {os.path.basename(tree_file)} to wall...")
         with open(tree_file, "r", encoding="utf-8") as f:
             tree_data = json.load(f)
         

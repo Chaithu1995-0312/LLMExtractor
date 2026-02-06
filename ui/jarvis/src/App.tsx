@@ -140,6 +140,7 @@ const panelTransition = {
 export default function App() {
   const { mode, setMode, rightPanelOpen, toggleRightPanel, selectedBrickId, setSelectedBrickId, selectedNodeId, setSelectedNodeId } = useNexusStore();
   const [query, setQuery] = useState('');
+  const [useGenAI, setUseGenAI] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'Welcome to the **Nexus Workbench**. How can I help you explore the knowledge base today?' }
   ]);
@@ -186,7 +187,7 @@ export default function App() {
 
   const askMutation = useMutation({
     mutationFn: async (q: string) => {
-      const res = await fetch(`/jarvis/ask-preview?query=${encodeURIComponent(q)}`);
+      const res = await fetch(`/jarvis/ask-preview?query=${encodeURIComponent(q)}&use_genai=${useGenAI}`);
       if (!res.ok) throw new Error('Query failed');
       return res.json();
     },
@@ -425,6 +426,26 @@ export default function App() {
                 </div>
                 
                 <div className="p-8">
+                  {/* GenAI Toggle */}
+                  <div className="flex items-center gap-6 mb-4 px-2">
+                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Query Mode:</span>
+                    <div className="flex bg-black/40 rounded-md p-1 border border-white/5">
+                      <button
+                        onClick={() => setUseGenAI(false)}
+                        className={`px-3 py-1 rounded text-[10px] font-bold transition-all uppercase tracking-widest ${!useGenAI ? 'bg-white/10 text-white shadow-inner' : 'text-white/30 hover:text-white/50'}`}
+                      >
+                        Standard
+                      </button>
+                      <button
+                        onClick={() => setUseGenAI(true)}
+                        className={`px-3 py-1 rounded text-[10px] font-bold transition-all uppercase tracking-widest flex items-center gap-2 ${useGenAI ? 'bg-primary/20 text-primary shadow-[0_0_10px_rgba(59,130,246,0.3)]' : 'text-white/30 hover:text-white/50'}`}
+                      >
+                        <Activity className="w-3 h-3" />
+                        GenAI Enhanced
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="relative glass-panel rounded-lg p-2 shadow-2xl border-white/5">
                     <textarea 
                       value={query}

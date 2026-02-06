@@ -35,18 +35,21 @@ def _save_sync_state(state: Dict[str, str]):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
-    print(f"[{datetime.now(timezone.utc).isoformat()}] Starting Sync (rebuild_index={rebuild_index})...")
+    print(f"[{datetime.now(timezone.utc).isoformat()}] [START] Starting Sync (rebuild_index={rebuild_index})...")
     
     try:
         # 0. Load Components
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [INIT] Loading sync state and indices...")
         sync_state = _load_sync_state()
         conv_index = ConversationIndex(output_dir)
         
         # 1. Load Conversations
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [LOAD] Reading conversations from {input_json}...")
         conversations = load_conversations(input_json)
-        print(f"[{datetime.now(timezone.utc).isoformat()}] Loaded {len(conversations)} conversations.")
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [LOAD] Loaded {len(conversations)} conversations.")
 
         # 2. Incremental Processing
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [PROCESS] Starting incremental processing...")
         processed_count = 0
         skipped_count = 0
         all_new_bricks = []
@@ -61,8 +64,9 @@ def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
 
         for conv in conversations:
             conv_id = conv.get("id") or conv.get("conversation_id")
+            title = conv.get("title", "Untitled")
             if not conv_id:
-                print("WARN: Skipping conversation without ID")
+                print(f"[{datetime.now(timezone.utc).isoformat()}] [WARN] Skipping conversation without ID: {title}")
                 continue
                 
             current_hash = _calculate_hash(conv)
@@ -72,9 +76,11 @@ def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
                 skipped_count += 1
                 continue
 
+            print(f"[{datetime.now(timezone.utc).isoformat()}] [SYNC] Processing: {title} ({conv_id})")
             # Process this conversation
             try:
                 # A. Extract Trees
+                print(f"[{datetime.now(timezone.utc).isoformat()}] [EXTRACT] Splitting conversation into trees...")
                 tree_files = process_conversation(conv, output_dir)
                 all_tree_files.extend(tree_files)
                 
@@ -90,12 +96,14 @@ def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
                 )
 
                 # C. Extract Bricks
+                print(f"[{datetime.now(timezone.utc).isoformat()}] [BRICKS] Extracting knowledge bricks from {len(tree_files)} trees...")
                 conv_bricks = []
                 for tree_file in tree_files:
                     brick_file = extract_bricks_from_file(tree_file, output_dir)
                     if brick_file:
                         with open(brick_file, "r", encoding="utf-8") as f:
                             conv_bricks.extend(json.load(f))
+                print(f"[{datetime.now(timezone.utc).isoformat()}] [BRICKS] Extracted {len(conv_bricks)} bricks.")
                 
                 # Mark new bricks as PENDING
                 for b in conv_bricks:
@@ -129,15 +137,17 @@ def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
         # This implies Walls are incremental or just local. 
         # Assuming Walls are local aggregations.)
         if all_tree_files:
+            print(f"[{datetime.now(timezone.utc).isoformat()}] [WALLS] Building topic walls from {len(all_tree_files)} tree files...")
             wall_count = build_walls(all_tree_files, os.path.join(output_dir, "walls"))
-            print(f"[{datetime.now(timezone.utc).isoformat()}] Walls built: {wall_count}")
+            print(f"[{datetime.now(timezone.utc).isoformat()}] [WALLS] Success: {wall_count} walls built/updated.")
         
         # 4. Vector Embedding (only new bricks)
         if all_new_bricks:
+            print(f"[{datetime.now(timezone.utc).isoformat()}] [INDEX] Embedding {len(all_new_bricks)} new bricks into vector index...")
             index = LocalVectorIndex()
             index.add_bricks(all_new_bricks)
             index.save()
-            print(f"[{datetime.now(timezone.utc).isoformat()}] EVENT: vector_embedded. {len(all_new_bricks)} new bricks indexed.")
+            print(f"[{datetime.now(timezone.utc).isoformat()}] [INDEX] Success: Vector index updated.")
         
         print(f"[{datetime.now(timezone.utc).isoformat()}] Sync Complete.")
         

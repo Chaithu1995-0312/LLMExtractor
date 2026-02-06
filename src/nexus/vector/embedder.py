@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from typing import List, Optional
 import logging
@@ -27,12 +28,47 @@ class VectorEmbedder:
                 raise
         return self._model
 
-    def embed_query(self, query: str) -> np.ndarray:
+    def _rewrite_with_llm(self, original_query: str) -> str:
+        """
+        Optional GENAI call to expand or refine the query.
+        """
+        try:
+            # Use a sensible default for context_text if not available in this scope
+            context_text = "No additional context available for query expansion."
+            prompt = f"Context from memory:\n{context_text}\n\nUser: {original_query}\nAssistant:"
+            
+            # Check for OpenAI Key
+            openai_key = os.environ.get("OPENAI_API_KEY")
+            if openai_key:
+                print(f"DEBUG: OpenAI API Key found. Calling GPT-4o for rewrite...")
+                from openai import OpenAI
+                client = OpenAI(api_key=openai_key)
+                completion = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0
+                )
+                response_text = completion.choices[0].message.content
+                print(f"DEBUG: LLM Rewrote query to: '{response_text}'")
+                return response_text
+            
+            print(f"DEBUG: Rewriting query '{original_query}' (Fallback)...")
+            return f"{original_query} including related nexus prompts and brick documentation"
+        except Exception as e:
+            print(f"LLM Rewrite failed: {e}")
+            return original_query # Fallback to original
+
+    def embed_query(self, query: str, use_genai: bool = False) -> np.ndarray:
         """
         Embeds a single query string into a 1x384 vector.
+        If use_genai is True, it first modifies the query using an LLM.
         """
+        search_text = query
+        if use_genai:
+            search_text = self._rewrite_with_llm(query)
+
         model = self._get_model()
-        embedding = model.encode([query], convert_to_numpy=True)
+        embedding = model.encode([search_text], convert_to_numpy=True)
         return embedding.astype("float32")
 
     

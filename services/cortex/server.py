@@ -271,11 +271,13 @@ def jarvis_brick_full():
 @app.route("/jarvis/ask-preview", methods=["GET"])
 def jarvis_ask_preview():
     query = request.args.get("query")
+    use_genai = request.args.get("use_genai", "false").lower() == "true"
+    
     if not query:
         return jsonify({"error": "Query parameter is required"}), 400
 
     # Use the read-only recall adapter
-    recalled_bricks = recall_bricks_readonly(query)
+    recalled_bricks = recall_bricks_readonly(query, use_genai=use_genai)
 
     top_bricks_output = [
         {"brick_id": brick["brick_id"], "confidence": round(brick["confidence"], 4)}

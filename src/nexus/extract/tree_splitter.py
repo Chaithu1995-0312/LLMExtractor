@@ -58,6 +58,8 @@ def process_conversation(conv: Dict, output_dir: str):
     for root in roots:
         dfs_paths(mapping, root, [], all_paths)
 
+    print(f"[{datetime.now(timezone.utc).isoformat()}] [EXTRACT] Found {len(all_paths)} conversation paths.")
+
     # Output path-stable JSON
     conv_dir = os.path.join(output_dir, "trees", conv_id)
     os.makedirs(conv_dir, exist_ok=True)

@@ -2,6 +2,7 @@ import json
 import os
 import hashlib
 from typing import List, Dict, Optional
+from datetime import datetime, timezone
 from unstructured.partition.auto import partition
 from unstructured.cleaners.core import clean, clean_extra_whitespace, group_broken_paragraphs
 
@@ -16,6 +17,7 @@ def extract_bricks_from_file(tree_file_path: str, output_dir: str):
     Goal: No summaries, only atomic units with noise removed.
     Uses Unstructured.io to strip noise and keep context.
     """
+    print(f"[{datetime.now(timezone.utc).isoformat()}] [BRICKS] Extracting from {os.path.basename(tree_file_path)}")
     # 1. Load raw data to get message metadata
     with open(tree_file_path, "r", encoding="utf-8") as f:
         tree_data = json.load(f)
