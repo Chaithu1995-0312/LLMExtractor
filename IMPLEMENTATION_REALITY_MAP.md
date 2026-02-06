@@ -1,46 +1,64 @@
-# Implementation Reality Map
+# IMPLEMENTATION_REALITY_MAP
 
-## 1. Core Graph Engine (`src/nexus/graph`)
-| Component | Status | Implementation Details |
-| :--- | :---: | :--- |
-| **Storage Backend** | ✅ | SQLite (`graph.db`). Tables: `nodes`, `edges`. |
-| **Schema Definition** | ✅ | Dataclasses + Enums (`schema.py`). Supports Intents, Scopes, Sources. |
-| **Manager API** | ✅ | `GraphManager` handles CRUD, constraints, and transactions. |
-| **Lifecycle Logic** | ✅ | State machine enforced in `promote_intent` (Monotonicity checks). |
-| **Projections** | 🟡 | `projection.py` exists but integration with full pipeline is manual. |
+This document maps the implementation status of the NEXUS architecture.
 
-## 2. Ingestion & Sync (`src/nexus/sync`, `src/nexus/bricks`)
-| Component | Status | Implementation Details |
-| :--- | :---: | :--- |
-| **History Ingestion** | ✅ | `ingest_history.py` parses `conversations.json` efficiently. |
-| **Brick Extraction** | ✅ | Splits messages by double newlines. Simple heuristic. |
-| **Vector Embedding** | ✅ | `LocalVectorIndex` uses FAISS + `sentence-transformers`. |
-| **Incremental Sync** | 🟡 | Logic exists but robustness on large updates is unverified. |
+## 1. System-Wide Layer Status
+| Layer | Status | Primary Authority |
+| :--- | :--- | :--- |
+| Ingestion | ✅ | `NexusIngestor` |
+| Graph | ✅ | `GraphManager` |
+| Vector | ✅ | `LocalVectorIndex` |
+| Cognition | 🟡 | `CognitiveExtractor` (In-Progress Refinement) |
+| Service | ✅ | `CortexAPI` |
+| UI | 🟡 | `WallView` (Partial Interactive Controls) |
 
-## 3. Cognition & Intelligence (`src/nexus/cognition`)
-| Component | Status | Implementation Details |
-| :--- | :---: | :--- |
-| **DSPy Integration** | 🧪 | `dspy_modules.py` defines signatures for Facts/Diagrams. |
-| **Topic Assembly** | 🟡 | `assembler.py` orchestrates extraction but lacks complex reasoning loops. |
-| **Reranking** | 🟡 | `cross_encoder.py` exists; integration in recall pipeline is partial. |
+## 2. Method-Level Reality
 
-## 4. Service Layer (`services/cortex`)
-| Component | Status | Implementation Details |
-| :--- | :---: | :--- |
-| **REST API** | ✅ | Flask server exposing Graph, Anchor, and Assembly endpoints. |
-| **MCP Server** | 🧪 | `nexus_server.py` implements Model Context Protocol (experimental). |
-| **Orchestration** | 🟡 | Basic task running; no full job queue system. |
+### 2.1 Graph Layer (`src/nexus/graph`)
+| Class | Method | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| `GraphManager` | `register_node` | ✅ | Full SQLite persistence |
+| `GraphManager` | `register_edge` | ✅ | Supports multi-typed relationships |
+| `GraphManager` | `promote_node_to_frozen` | ✅ | Enforces lifecycle transitions |
+| `GraphManager` | `supersede_node` | ✅ | Manages version history / replacements |
+| `GraphManager` | `kill_node` | ✅ | Soft-delete with tombstone reasoning |
+| `GraphManager` | `_log_audit_event` | ✅ | Internal persistence logging |
 
-## 5. User Interface (`ui/jarvis`)
-| Component | Status | Implementation Details |
-| :--- | :---: | :--- |
-| **Visualization** | 🟡 | React + generic node rendering. |
-| **Interaction** | 🟡 | Basic "Promote/Reject" actions wired to API. |
-| **State Management** | 🟡 | Simple local store; no robust real-time sync. |
+### 2.2 Cognition Layer (`src/nexus/cognition`)
+| Class | Method | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| `CognitiveExtractor` | `forward` | ✅ | DSPy implementation |
+| `CognitiveExtractor` | `extract_facts` | 🧪 | Mocked via FactSignature |
+| `CognitiveExtractor` | `generate_diagram` | 🧪 | Mocked via DiagramSignature |
+| `Assembler` | `assemble_topic` | 🟡 | Implemented but lacks robust conflict resolution |
 
-## 6. Infrastructure & Testing
-| Component | Status | Implementation Details |
-| :--- | :---: | :--- |
-| **Unit Tests** | ✅ | `tests/unit` covers core logic. |
-| **Invariant Tests** | ✅ | `tests/invariants` covers lifecycle and graph integrity. |
-| **CI/CD** | 🔴 | No visible GitHub Actions or CI configuration. |
+### 2.3 Service Layer (`services/cortex`)
+| Class | Method | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| `CortexAPI` | `route` | ✅ | Main decision logic for queries |
+| `CortexAPI` | `generate` | ✅ | Multi-brick context assembly |
+| `CortexAPI` | `_audit_trace` | ✅ | JSONL logging implementation |
+| `Orchestration` | `verifier_node` | 🔴 | Planned for Phase 4 quality checks |
+| `Orchestration` | `self_correction_node` | 🔴 | Planned for Phase 4 feedback loops |
+
+### 2.4 Vector Layer (`src/nexus/vector`)
+| Class | Method | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| `VectorEmbedder` | `embed_query` | ✅ | HuggingFace integration |
+| `VectorEmbedder` | `_rewrite_with_llm` | ✅ | Query expansion logic |
+| `LocalVectorIndex` | `search` | ✅ | FAISS k-NN search |
+
+### 2.5 Ingestion Layer (`src/nexus/sync`)
+| Class | Method | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| `NexusIngestor` | `brickify` | ✅ | Atomization logic |
+| `NexusIngestor` | `ingest_history` | ✅ | Batch processing loop |
+
+## 3. Layer Interactions Status
+| Source Layer | Target Layer | Status | Flow Type |
+| :--- | :--- | :--- | :--- |
+| Ingestion | Vector | ✅ | Direct Embedding push |
+| Ingestion | Graph | ✅ | Node/Source registration |
+| Service | Graph | ✅ | Read/Write (Lifecycle) |
+| Service | Cognition | 🟡 | Sync call, lacks async worker queue |
+| UI | Service | ✅ | REST API |

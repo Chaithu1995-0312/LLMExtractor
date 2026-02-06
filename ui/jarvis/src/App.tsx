@@ -13,7 +13,9 @@ import {
   Maximize2,
   ExternalLink,
   LayoutGrid,
-  Network
+  Network,
+  Menu,
+  X
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -38,11 +40,11 @@ import 'reactflow/dist/style.css';
 import { NexusNode, NexusNodeProps, Lifecycle } from './components/NexusNode';
 import { WallView } from './components/WallView';
 import { Panel } from './components/Panel';
+import { CortexVisualizer } from './components/CortexVisualizer';
 
 // --- Adapters ---
 
 const GraphNodeWrapper = memo(({ data, id, selected }: NodeProps) => {
-  // Map ReactFlow data to NexusNodeProps
   const props: NexusNodeProps = {
     id: id,
     title: data.label || 'Untitled',
@@ -52,9 +54,9 @@ const GraphNodeWrapper = memo(({ data, id, selected }: NodeProps) => {
     sourceCount: data.sourceCount || 0,
     lastUpdatedAt: data.lastUpdatedAt || 'Unknown',
     isFocused: selected,
-    onSelect: () => {}, // Selection handled by ReactFlow's onNodeClick
+    onSelect: () => {},
   };
-  return <div style={{ minWidth: '200px' }}><NexusNode {...props} /></div>;
+  return <div style={{ minWidth: '180px' }}><NexusNode {...props} /></div>;
 });
 
 const nodeTypes = {
@@ -81,7 +83,7 @@ const Mermaid = ({ content }: { content: string }) => {
     <motion.div 
       whileHover={{ scale: 1.01 }}
       ref={ref} 
-      className="my-4 bg-secondary/30 glass border border-white/5 p-4 rounded-lg overflow-auto cursor-zoom-in shadow-inner" 
+      className="my-4 bg-secondary/30 glass border border-white/5 p-4 rounded-lg overflow-auto cursor-zoom-in shadow-inner max-w-full" 
     />
   );
 };
@@ -97,12 +99,12 @@ const ChatMessage = ({ role, content }: Message) => {
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'} mb-8`}
+      className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'} mb-6 md:mb-8`}
     >
-      <div className={`max-w-[85%] p-5 rounded-xl ${
+      <div className={`max-w-[90%] md:max-w-[85%] p-4 md:p-5 rounded-xl ${
         role === 'user' 
-        ? 'bg-primary text-primary-foreground ml-12 shadow-[0_0_20px_-5px_rgba(59,130,246,0.3)]' 
-        : 'glass-panel mr-12 shadow-2xl'
+        ? 'bg-primary text-primary-foreground md:ml-12 shadow-[0_0_20px_-5px_rgba(59,130,246,0.3)]' 
+        : 'glass-panel md:mr-12 shadow-2xl'
       }`}>
         <ReactMarkdown
           remarkPlugins={[remarkMath]}
@@ -114,12 +116,12 @@ const ChatMessage = ({ role, content }: Message) => {
                 return <Mermaid content={String(children).replace(/\n$/, '')} />;
               }
               return (
-                <code className={`${className} bg-black/30 px-1 rounded`} {...props}>
+                <code className={`${className} bg-black/30 px-1 rounded break-all whitespace-pre-wrap`} {...props}>
                   {children}
                 </code>
               );
             },
-            p: ({ children }) => <p className="mb-4 last:mb-0 leading-relaxed">{children}</p>,
+            p: ({ children }) => <p className="mb-4 last:mb-0 leading-relaxed text-sm md:text-base">{children}</p>,
           }}
         >
           {content}
@@ -141,13 +143,13 @@ export default function App() {
   const { mode, setMode, rightPanelOpen, toggleRightPanel, selectedBrickId, setSelectedBrickId, selectedNodeId, setSelectedNodeId } = useNexusStore();
   const [query, setQuery] = useState('');
   const [useGenAI, setUseGenAI] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'Welcome to the **Nexus Workbench**. How can I help you explore the knowledge base today?' }
   ]);
-  const [viewMode, setViewMode] = useState<'wall' | 'graph'>('wall'); // Default to Wall
+  const [viewMode, setViewMode] = useState<'wall' | 'graph'>('wall'); 
   const queryClient = useQueryClient();
 
-  // React Flow State
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
 
@@ -161,8 +163,7 @@ export default function App() {
       const res = await fetch('/jarvis/graph-index');
       if (!res.ok) throw new Error('Failed to fetch graph');
       return res.json();
-    },
-    enabled: mode === 'explore'
+    }
   });
 
   const { data: brickMeta } = useQuery({
@@ -179,7 +180,7 @@ export default function App() {
     queryKey: ['brick-full', selectedBrickId],
     queryFn: async () => {
       const res = await fetch(`/jarvis/brick-full?brick_id=${selectedBrickId}`);
-      if (!res.ok) return null; // Fail silently/gracefully for full text
+      if (!res.ok) return null;
       return res.json();
     },
     enabled: !!selectedBrickId
@@ -236,24 +237,6 @@ export default function App() {
     }
   });
 
-  const supersedeMutation = useMutation({
-    mutationFn: async ({ oldNodeId, newNodeId, reason }: { oldNodeId: string, newNodeId: string, reason: string }) => {
-      const res = await fetch('/jarvis/node/supersede', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ old_node_id: oldNodeId, new_node_id: newNodeId, reason, actor: 'user' })
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Supersede failed');
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['graph-index'] });
-    }
-  });
-
   // Prepare data for WallView
   const wallBricks = useMemo<NexusNodeProps[]>(() => {
     if (!graphData || !graphData.nodes) return [];
@@ -261,12 +244,10 @@ export default function App() {
     const rawEdges = Array.isArray(graphData.edges) ? graphData.edges : (graphData.edges?.edges || []);
 
     return rawNodes.map((n: any) => {
-      // Calculate source count from edges (Intent -> Source via DERIVED_FROM)
       const sourceCount = rawEdges.filter((e: any) => 
         e.source === n.id && e.type === 'derived_from'
       ).length;
 
-      // Use statement as title/summary if available
       const title = n.statement ? (n.statement.length > 50 ? n.statement.substring(0, 50) + '...' : n.statement) : (n.label || n.id);
       const summary = n.statement || n.summary || 'No content available.';
 
@@ -278,13 +259,12 @@ export default function App() {
         confidence: n.confidence || 0.5,
         sourceCount: sourceCount,
         lastUpdatedAt: n.updated_at || n.created_at ? new Date(n.updated_at || n.created_at).toLocaleDateString() : 'Today',
-        isFocused: false, // Handled by WallView wrapper
-        onSelect: () => {}, // Handled by WallView wrapper
+        isFocused: false,
+        onSelect: () => {},
       };
     });
   }, [graphData]);
 
-  // Find selected brick data including lifecycle
   const selectedBrickData = useMemo(() => {
     return wallBricks.find(b => b.id === selectedBrickId);
   }, [wallBricks, selectedBrickId]);
@@ -329,29 +309,31 @@ export default function App() {
     askMutation.mutate(userQ);
   };
 
+  const navItems = [
+    { id: 'ask', label: 'Ask & Recall', icon: MessageSquare },
+    { id: 'explore', label: 'Explore Wall', icon: LayoutGrid },
+    { id: 'visualize', label: 'Cortex Visualizer', icon: Maximize2 },
+  ];
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
-      {/* Left Sidebar - Navigation */}
-      <aside className="w-16 flex flex-col items-center py-6 glass-panel border-r z-20">
+    <div className="flex h-screen w-screen overflow-hidden flex-col md:flex-row">
+      {/* Sidebar - Desktop */}
+      <aside className="hidden md:flex w-16 flex-col items-center py-6 glass-panel border-r z-20">
         <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-10 shadow-[0_0_20px_rgba(0,128,255,0.4)]">
           <Activity className="text-primary-foreground w-6 h-6" />
         </div>
         
         <nav className="flex flex-col gap-6">
-          <button 
-            onClick={() => setMode('ask')}
-            className={`p-3 rounded-xl transition-all ${mode === 'ask' ? 'bg-white/10 text-white shadow-inner' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
-            title="Ask & Recall"
-          >
-            <MessageSquare className="w-6 h-6" />
-          </button>
-          <button 
-            onClick={() => setMode('explore')}
-            className={`p-3 rounded-xl transition-all ${mode === 'explore' ? 'bg-white/10 text-white shadow-inner' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
-            title="Explore Wall"
-          >
-            <LayoutGrid className="w-6 h-6" />
-          </button>
+          {navItems.map((item) => (
+            <button 
+              key={item.id}
+              onClick={() => setMode(item.id as any)}
+              className={`p-3 rounded-xl transition-all ${mode === item.id ? 'bg-white/10 text-white shadow-inner' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+              title={item.label}
+            >
+              <item.icon className="w-6 h-6" />
+            </button>
+          ))}
         </nav>
 
         <div className="mt-auto">
@@ -361,18 +343,51 @@ export default function App() {
         </div>
       </aside>
 
+      {/* Mobile Top Nav */}
+      <div className="md:hidden h-14 glass-panel border-b flex items-center justify-between px-4 z-30">
+        <div className="flex items-center gap-2">
+           <Activity className="text-primary w-5 h-5" />
+           <span className="font-bold tracking-tighter uppercase text-sm">Nexus Workbench</span>
+        </div>
+        <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+          {mobileMenuOpen ? <X /> : <Menu />}
+        </button>
+      </div>
+
+      {/* Mobile Dropdown Menu */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="md:hidden absolute top-14 left-0 w-full glass-panel border-b z-20 flex flex-col p-4 gap-4"
+          >
+            {navItems.map((item) => (
+               <button 
+                key={item.id}
+                onClick={() => { setMode(item.id as any); setMobileMenuOpen(false); }}
+                className={`flex items-center gap-4 p-3 rounded-lg ${mode === item.id ? 'bg-primary/20 text-white' : 'text-white/60'}`}
+               >
+                 <item.icon className="w-5 h-5" />
+                 <span className="font-semibold uppercase text-xs tracking-widest">{item.label}</span>
+               </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Main Stage */}
-      <main className="flex-1 flex flex-col relative bg-background">
-        <header className="h-16 border-b border-white/5 flex items-center justify-between px-8 glass-panel sticky top-0 z-10">
+      <main className="flex-1 flex flex-col relative bg-background overflow-hidden">
+        <header className="hidden md:flex h-16 border-b border-white/5 items-center justify-between px-8 glass-panel sticky top-0 z-10">
           <div className="flex items-center gap-3">
             <h1 className="font-bold text-lg tracking-tighter uppercase">
-              {mode === 'ask' ? 'Ask & Recall' : 'Knowledge Wall'}
+              {mode === 'ask' ? 'Ask & Recall' : mode === 'explore' ? 'Knowledge Wall' : 'Visualizer'}
             </h1>
             <span className="px-2 py-0.5 rounded text-[10px] bg-primary/20 text-primary uppercase font-bold tracking-widest">Nexus v3</span>
           </div>
           
           <div className="flex items-center gap-4">
-             {/* View Toggle for Explore Mode */}
              {mode === 'explore' && (
               <div className="flex bg-black/40 rounded-lg p-1 border border-white/10">
                 <button
@@ -409,39 +424,77 @@ export default function App() {
           </div>
         </header>
 
+        {/* Mobile Subheader */}
+        <div className="md:hidden flex items-center justify-between px-4 py-2 border-b border-white/5 glass-panel">
+            <h1 className="font-bold text-[10px] tracking-tighter uppercase text-white/60">
+               {mode === 'ask' ? 'Ask & Recall' : mode === 'explore' ? 'Wall' : 'Visualizer'}
+            </h1>
+            <button 
+              onClick={() => toggleRightPanel()}
+              className="p-1 hover:bg-white/5 rounded transition-colors text-white/60"
+            >
+               <Activity className={`w-4 h-4 ${selectedBrickId ? 'text-primary' : 'opacity-20'}`} />
+            </button>
+        </div>
+
         <div className="flex-1 overflow-hidden relative">
           <AnimatePresence mode="wait">
-            {mode === 'ask' ? (
+            {mode === 'visualize' ? (
+              <motion.div 
+                key="visualize"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full p-4 md:p-8"
+              >
+                <div className="flex flex-col h-full gap-4 md:gap-6">
+                  <div className="hidden md:block">
+                    <h2 className="text-2xl font-bold glitch-text uppercase tracking-widest" data-text="Cortex Visualizer">Cortex Visualizer</h2>
+                    <p className="text-xs text-white/40 font-mono-data mt-1">LOCKED RULES: MODE-1 ACTIVE // NON-GENAI TOPIC LINKING</p>
+                  </div>
+                  
+                  <div className="flex-1 min-h-0">
+                    <CortexVisualizer 
+                      data={{
+                        nodes: graphData?.nodes || [],
+                        edges: graphData?.edges || [],
+                        type: 'graph'
+                      }} 
+                    />
+                  </div>
+                </div>
+              </motion.div>
+            ) : mode === 'ask' ? (
               <motion.div 
                 key="chat"
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
-                className="h-full flex flex-col max-w-4xl mx-auto w-full px-6"
+                className="h-full flex flex-col max-w-4xl mx-auto w-full px-4 md:px-6"
               >
-                <div className="flex-1 overflow-y-auto py-8 no-scrollbar">
+                <div className="flex-1 overflow-y-auto py-4 md:py-8 no-scrollbar">
                   {messages.map((msg, i) => (
                     <ChatMessage key={i} {...msg} />
                   ))}
                 </div>
                 
-                <div className="p-8">
+                <div className="pb-6 md:p-8">
                   {/* GenAI Toggle */}
-                  <div className="flex items-center gap-6 mb-4 px-2">
-                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Query Mode:</span>
+                  <div className="flex items-center gap-4 md:gap-6 mb-4 px-2">
+                    <span className="text-[9px] md:text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Mode:</span>
                     <div className="flex bg-black/40 rounded-md p-1 border border-white/5">
                       <button
                         onClick={() => setUseGenAI(false)}
-                        className={`px-3 py-1 rounded text-[10px] font-bold transition-all uppercase tracking-widest ${!useGenAI ? 'bg-white/10 text-white shadow-inner' : 'text-white/30 hover:text-white/50'}`}
+                        className={`px-2 md:px-3 py-1 rounded text-[9px] md:text-[10px] font-bold transition-all uppercase tracking-widest ${!useGenAI ? 'bg-white/10 text-white shadow-inner' : 'text-white/30'}`}
                       >
-                        Standard
+                        STD
                       </button>
                       <button
                         onClick={() => setUseGenAI(true)}
-                        className={`px-3 py-1 rounded text-[10px] font-bold transition-all uppercase tracking-widest flex items-center gap-2 ${useGenAI ? 'bg-primary/20 text-primary shadow-[0_0_10px_rgba(59,130,246,0.3)]' : 'text-white/30 hover:text-white/50'}`}
+                        className={`px-2 md:px-3 py-1 rounded text-[9px] md:text-[10px] font-bold transition-all uppercase tracking-widest flex items-center gap-2 ${useGenAI ? 'bg-primary/20 text-primary shadow-[0_0_10px_rgba(59,130,246,0.3)]' : 'text-white/30'}`}
                       >
                         <Activity className="w-3 h-3" />
-                        GenAI Enhanced
+                        AI+
                       </button>
                     </div>
                   </div>
@@ -451,20 +504,17 @@ export default function App() {
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder="CONSULT KNOWLEDGE ENGINE..."
-                      className="w-full bg-transparent p-4 pr-16 focus:outline-none resize-none text-white/90 text-sm font-mono-data tracking-tight"
+                      className="w-full bg-transparent p-3 md:p-4 pr-12 md:pr-16 focus:outline-none resize-none text-white/90 text-sm font-mono-data tracking-tight"
                       rows={2}
                       onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
                     />
                     <button 
                       onClick={handleSend}
-                      className="absolute right-4 bottom-4 p-3 bg-primary rounded-md text-primary-foreground hover:scale-105 active:scale-95 transition-all shadow-[0_0_15px_rgba(0,128,255,0.5)]"
+                      className="absolute right-3 bottom-3 md:right-4 md:bottom-4 p-2 md:p-3 bg-primary rounded-md text-primary-foreground hover:scale-105 active:scale-95 transition-all shadow-[0_0_15px_rgba(0,128,255,0.5)]"
                     >
-                      <Send className="w-5 h-5" />
+                      <Send className="w-4 h-4 md:w-5 md:h-5" />
                     </button>
                   </div>
-                  <p className="text-center text-white/20 text-[10px] mt-3 uppercase tracking-[0.2em]">
-                    Powered by Nexus Agentic Cognition
-                  </p>
                 </div>
               </motion.div>
             ) : (
@@ -502,26 +552,29 @@ export default function App() {
         </div>
       </main>
 
-      {/* Right Panel - Context & Evidence */}
+      {/* Right Panel - Context & Evidence (Desktop Sidebar / Mobile Overlay) */}
       <AnimatePresence>
         {rightPanelOpen && selectedBrickId && (
           <motion.aside 
-            initial={{ x: 300, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: 300, opacity: 0 }}
+            initial={window.innerWidth < 768 ? { y: '100%' } : { x: 300, opacity: 0 }}
+            animate={window.innerWidth < 768 ? { y: 0 } : { x: 0, opacity: 1 }}
+            exit={window.innerWidth < 768 ? { y: '100%' } : { x: 300, opacity: 0 }}
             transition={panelTransition}
-            className="glass-panel border-l border-white/10 w-[400px] flex flex-col overflow-hidden relative z-10"
+            className={`
+               glass-panel border-white/10 flex flex-col overflow-hidden relative z-40
+               ${window.innerWidth < 768 ? 'fixed bottom-0 left-0 w-full h-[80vh] rounded-t-3xl border-t' : 'border-l w-[400px]'}
+            `}
           >
-            <div className="p-6 border-b border-white/5 flex items-center justify-between">
-               <h3 className="font-semibold uppercase text-xs tracking-[0.2em] text-white/40">Context & Evidence</h3>
-               <button onClick={() => toggleRightPanel(false)} className="text-white/20 hover:text-white transition-colors">
-                  <Maximize2 className="w-4 h-4" />
+            <div className="p-4 md:p-6 border-b border-white/5 flex items-center justify-between">
+               <h3 className="font-semibold uppercase text-xs tracking-[0.2em] text-white/40">Evidence_Viewer</h3>
+               <button onClick={() => toggleRightPanel(false)} className="p-2 text-white/20 hover:text-white transition-colors">
+                  <X className="w-5 h-5" />
                </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-0 no-scrollbar flex flex-col">
                {brickMeta ? (
-                 <div className="flex-1 h-full p-6">
+                 <div className="flex-1 h-full p-4 md:p-6 pb-20 md:pb-6">
                    <Panel
                      nodeId={selectedBrickId}
                      lifecycle={selectedBrickData?.lifecycle || 'LOOSE'}
@@ -537,7 +590,7 @@ export default function App() {
                  </div>
                ) : (
                  <div className="p-8 text-center text-white/30 text-xs uppercase tracking-widest">
-                   Loading Brick Data...
+                   Loading Data Stream...
                  </div>
                )}
             </div>

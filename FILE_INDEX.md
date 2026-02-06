@@ -1,60 +1,81 @@
-# File Index
+# FILE_INDEX
 
-## Source Code (`src/nexus`)
+## 1. Graph Layer (`src/nexus/graph`)
 
-### Core Graph (`src/nexus/graph`)
-- `schema.py`: Core data models (Intent, Source, Scope, Edge) and Enums.
-- `manager.py`: SQLite-backed GraphManager for CRUD and lifecycle operations.
-- `projection.py`: Logic for projecting graph views.
-- `validation.py`: Invariant validation logic.
-- `graph.db`: SQLite database file (runtime artifact).
+### `manager.py`
+Contains the primary authority for graph persistence and state.
+- **`GraphManager`**: Central SQLite-backed manager for knowledge nodes.
+  - `register_node`: Persists or updates nodes with attribute merging.
+  - `promote_node_to_frozen`: Lifecycle gate for knowledge validation.
+  - `kill_node`: Logical deletion with audit reasoning.
+  - `supersede_node`: Version control for replacing old knowledge.
+  - `get_intents_by_topic`: Relational retrieval for cognitive assembly.
 
-### Ingestion (`src/nexus/sync`, `src/nexus/bricks`)
-- `sync/ingest_history.py`: Parses `conversations.json` into Bricks.
-- `sync/runner.py`: CLI runner for sync operations.
-- `bricks/extractor.py`: Logic for splitting messages into Bricks.
-- `bricks/brick_store.py`: Storage interface for raw Bricks.
+### `projection.py`
+Transforms raw graph data into specific views.
+- `project_intent`: Calculates layout/state for UI lanes.
+- `has_conflict`: Logic to detect overlapping intent claims.
 
-### Vector & Indexing (`src/nexus/vector`, `src/nexus/index`)
-- `vector/local_index.py`: FAISS-based vector storage implementation.
-- `vector/embedder.py`: Embedding model wrapper.
-- `index/conversation_index.py`: Metadata indexing for conversations.
+### `schema.py`
+Defines the structural types for the system.
+- `Intent`, `Source`, `ScopeNode`: Core node entities.
+- `Edge`: Relationship entity with `EdgeType` classification.
 
-### Cognition (`src/nexus/cognition`)
-- `assembler.py`: Orchestrates Topic assembly from Bricks.
-- `dspy_modules.py`: DSPy signatures and modules for information extraction.
-- `dspy_config.py` (Implied/Pending): Configuration for LLM backends.
+### `validation.py`
+Ensures graph integrity.
+- `validate_no_cycles`: Invariant enforcement for hierarchical scopes.
 
-### Retrieval (`src/nexus/ask`, `src/nexus/rerank`)
-- `ask/recall.py`: Semantic search and recall logic.
-- `rerank/cross_encoder.py`: Re-ranking logic using cross-encoders.
+---
 
-## Services (`services`)
+## 2. Cognition Layer (`src/nexus/cognition`)
 
-### Cortex API (`services/cortex`)
-- `server.py`: Flask application entry point.
-- `api.py`: API route definitions and logic.
-- `orchestration.py`: Background task management.
+### `dspy_modules.py`
+Defines the LLM interaction signatures.
+- **`CognitiveExtractor`**: DSPy module for structured knowledge extraction.
+  - `forward`: Orchestrates the context-to-fact flow.
+- `FactSignature`: Schema for atomic fact extraction.
+- `DiagramSignature`: Schema for visual architectural generation.
 
-### MCP (`services/mcp`)
-- `nexus_server.py`: Model Context Protocol server implementation.
+### `assembler.py`
+Synthesizes high-level topics from low-level data.
+- `assemble_topic`: Collates related bricks into a unified topic summary.
 
-## User Interface (`ui/jarvis`)
-- `src/App.tsx`: Main application component.
-- `src/components/NexusNode.tsx`: Graph node visualization component.
-- `src/store.ts`: Local state management.
-- `vite.config.ts`: Build configuration.
+---
 
-## Tests (`tests`)
-- `unit/`: Unit tests for individual components.
-- `invariants/`: System invariant tests (Lifecycle, Graph Integrity).
-- `test_server_graph.py`: Integration tests for API.
+## 3. Service Layer (`services/cortex`)
 
-## Scripts (`scripts`)
-- `migrate_to_intents.py`: Database migration utilities.
-- `maintenance/prune_bricks.py`: Cleanup utilities.
-- `test_assemble_topic.py`: Testing script for cognitive assembly.
+### `api.py`
+Main entry point for external interaction.
+- **`CortexAPI`**: Orchestrates search, retrieval, and generation.
+  - `route`: Logic to dispatch queries to specific handlers.
+  - `generate`: Synthesizes final LLM responses using graph context.
+  - `_audit_trace`: Logs operations for human audit.
 
-## Configuration & Root
-- `pyproject.toml`: Python project dependencies and metadata.
-- `conversations.json`: Input data source (conversation history).
+### `server.py`
+Flask-based REST interface.
+- Maps internal methods to endpoints (e.g., `/jarvis/node/promote`).
+
+---
+
+## 4. Vector & Search Layer (`src/nexus/vector`, `src/nexus/ask`)
+
+### `src/nexus/vector/embedder.py`
+- **`VectorEmbedder`**: Manages embedding model lifecycle and query rewriting.
+
+### `src/nexus/vector/local_index.py`
+- **`LocalVectorIndex`**: FAISS wrapper for brick persistence.
+
+### `src/nexus/ask/recall.py`
+- `recall_bricks`: Orchestrates multi-stage retrieval (Semantic search + Scoping).
+
+---
+
+## 5. UI Layer (`ui/jarvis/src/components`)
+
+### `NexusNode.tsx`
+- **`NexusNode`**: React component for individual knowledge nodes.
+  - Renders lifecycle state, confidence, and telemetry.
+
+### `WallView.tsx`
+- **`WallView`**: Layout engine for lifecycle lanes (Frozen/Forming/Loose).
+  - Organizes nodes into vertical swimlanes.

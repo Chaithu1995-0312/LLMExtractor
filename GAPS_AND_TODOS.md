@@ -1,36 +1,33 @@
-# Gaps and TODOs
+# GAPS_AND_TODOS
 
-## Critical Path
+## 1. Explicit Code TODOs
+Items identified directly from file comments.
 
-### 🔴 Infrastructure & CI/CD
-- [ ] **GitHub Actions Workflow**: No automated testing or linting on push.
-- [ ] **Dockerization**: Service runs on bare metal; needs a `Dockerfile` and `docker-compose.yml` for Cortex + UI + DB.
-- [ ] **Environment Config**: Hardcoded paths (e.g., `d:/chatgptdocs`) in environment details need to be fully configurable via `.env`.
+| File | Item | Status |
+| :--- | :--- | :--- |
+| `services/cortex/api.py` | Implementation of `verifier_node` for result validation | 🔴 |
+| `services/cortex/api.py` | Implementation of `self_correction_node` for iterative refinement | 🔴 |
+| `src/nexus/cognition/assembler.py` | Robust conflict resolution in `assemble_topic` | 🟡 |
+| `src/nexus/sync/runner.py` | Async worker queue for long-running sync tasks | 🔴 |
 
-### 🟡 Cognitive Pipeline Maturity
-- [ ] **DSPy Optimization**: `FactSignature` is too generic. Needs specialized signatures for Code, Architecture, and Definitions.
-- [ ] **Reranking Integration**: `cross_encoder.py` exists but isn't wired into the `recall_bricks` hot path in `nexus.ask`.
-- [ ] **Hallucination Check**: No self-correction loop to verify if extracted facts are actually supported by the source Bricks.
+## 2. Implied Method Gaps
+Behavior described in architecture or requested by constraints, but missing from implementation.
 
-### 🟡 User Interface Experience
-- [ ] **Real-time Updates**: UI likely polls or refreshes manually. Needs WebSocket or SSE for graph updates.
-- [ ] **Complex Editing**: Can only "Promote/Reject". Cannot edit Intent statements or merge nodes via UI.
-- [ ] **Scope Management**: No UI to create or assign Scopes to Intents.
+| Class | Implied Method | Expected Responsibility | Status |
+| :--- | :--- | :--- | :--- |
+| `GraphManager` | `detect_conflicts` | Scan edges for contradictory claims between nodes. | 🧪 |
+| `CortexAPI` | `enforce_governance` | Block mutations that lack valid actor/reason metadata. | 🔴 |
+| `CognitiveExtractor`| `extract_facts` | Actual DSPy implementation of the FactSignature. | 🧪 |
+| `WallView` | `handle_drag_promotion` | UI capability to drag a node from Forming to Frozen. | 🔴 |
 
-## Technical Debt
+## 3. Structural Gaps
+- **Concurrent Writes**: `GraphManager` currently uses standard SQLite; may face locking issues under high concurrent write load from multiple agents.
+- **Audit Visualization**: `phase3_audit_trace.jsonl` exists, but there is no UI component to view or filter these logs.
+- **Model Agnostic Embeddings**: `VectorEmbedder` is tightly coupled to HuggingFace; needs an adapter pattern for OpenAI/Azure/Ollama.
+- **Garbage Collection**: No mechanism to purge `KILLED` nodes after a certain retention period (if required).
 
-### 🧪 Vector Storage Scalability
-- **Current**: `IndexFlatL2` (Brute force).
-- **Risk**: Performance degradation > 100k vectors.
-- **Fix**: Switch to `IndexIVFFlat` or migrate to Qdrant/Chroma.
-
-### 🧪 Graph Projections
-- **Current**: `projection.py` has logic but isn't exposed via API.
-- **Risk**: API returns raw graph; frontend has to do heavy lifting to filter views.
-- **Fix**: Expose projection endpoints (e.g., `/graph/view?scope=python`).
-
-## Missing Features
-
-- **Auth**: No authentication on Cortex API.
-- **Multi-user**: No user isolation in Graph or History.
-- **Backup**: No automated backup for `graph.db`.
+## 4. Phase 4 Roadmap Items
+1. [ ] Transition from `🧪 Mocked` signatures to `✅ Implemented` DSPy modules.
+2. [ ] Connect `WallView` interactive buttons (Promote/Kill) to the `server.py` endpoints.
+3. [ ] Implement the `Orchestration` verifier nodes to ensure fact consistency.
+4. [ ] Build the "Audit View" for human oversight of LLM decisions.

@@ -1,69 +1,63 @@
-# Module Deep Dives
+# MODULE_DEEP_DIVES
 
-## 1. Nexus Graph Core (`src/nexus/graph`)
+## 1. Graph Manager (`src/nexus/graph/manager.py`)
+The `GraphManager` is the system's **Transactional Source of Truth**. It encapsulates all SQLite operations, ensuring that the graph state remains consistent across cognitive operations.
 
-### Data Model (`schema.py`)
-The graph is built on four primary node types and strict edge typing:
+### Method Intelligence Table: `GraphManager`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `register_node` | Core node persistence | type, id, attrs, merge | Writes to SQL; updates `nodes.json` | Node ID uniqueness |
+| `promote_node_to_frozen` | Lifecycle advancement | node_id, promote_bricks, actor | Updates state to `FROZEN`; creates audit link | Only `FORMING` can become `FROZEN` |
+| `kill_node` | Soft deletion | node_id, reason, actor | State -> `KILLED`; prevents further retrieval | Requires valid `reason` string |
+| `supersede_node` | Versioning | old_id, new_id, reason, actor | Old -> `SUPERSEDED`; New -> active | Preserves edge history |
+| `add_intent` | Intent registration | Intent object | Direct SQL insert | Enforces schema validation |
 
-- **Intents**: Represents assertions or knowledge units.
-    - Fields: `statement`, `lifecycle` (Enum), `intent_type` (Enum).
-    - Invariant: Must track `lifecycle` state.
-- **Scopes**: Represents context or domains (e.g., "Architecture").
-    - Fields: `name`, `description`.
-- **Sources**: Represents raw provenance.
-    - Fields: `content`, `origin_file`, `origin_span`.
-- **Edges**: Directed relationships.
-    - Types: `DERIVED_FROM`, `APPLIES_TO`, `OVERRIDES`, `CONFLICTS_WITH`, `REFINES`, `DEPENDS_ON`.
+### Method Usage Graph
+- `register_node` is called by `NexusIngestor` during discovery.
+- `promote_node_to_frozen` is called by `CortexAPI` via `server.py` endpoints.
+- `kill_node` is triggered by UI actions via `server.py`.
 
-### Manager Logic (`manager.py`)
-The `GraphManager` acts as the persistence and logic layer over SQLite.
+---
 
-- **Persistence**: Flat tables `nodes` (JSON blob) and `edges` (JSON blob).
-- **Lifecycle Management**: `promote_intent` enforces monotonic transitions:
-    - `LOOSE` $\rightarrow$ `FORMING` $\rightarrow$ `FROZEN` $\rightarrow$ `SUPERSEDED` / `KILLED`.
-    - **Critical Invariant**: A generic `FROZEN` intent MUST have an `APPLIES_TO` edge pointing to a `ScopeNode`.
-- **Edge Logic**: `add_typed_edge` enforces write-time invariants (e.g., `OVERRIDES` requires source to be `FROZEN`).
+## 2. Cortex API (`services/cortex/api.py`)
+`CortexAPI` serves as the **Operational Orchestrator**. It bridges the gap between semantic retrieval and cognitive synthesis.
 
-## 2. Cognition Layer (`src/nexus/cognition`)
+### Method Intelligence Table: `CortexAPI`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `route` | Query dispatching | query | Specific handler response | None (Heuristic branch) |
+| `generate` | Final answer synthesis | query, brick_ids | Structured LLM response | Requires at least 1 brick |
+| `_audit_trace` | Governance logging | IDs, model, tokens | Appends to `phase3_audit_trace.jsonl` | Write-authoritative for audit |
+| `_fetch_graph_context` | Context assembly | brick_ids | Formatted string for LLM | Must respect scope boundaries |
 
-### DSPy Integration (`dspy_modules.py`)
-Uses the DSPy framework to programmatically extract structured data from unstructured text.
+### Control Flow and Authority
+`CortexAPI` holds the authority for **Cognitive Spend**. No LLM call is made without passing through `CortexAPI`, ensuring every token used is logged in the Audit Trace. It enforces the "Human-in-the-loop" requirement by prioritizing `FROZEN` nodes in context assembly.
 
-- **Fact Extraction**:
-    - Signature: `context` $\rightarrow$ `facts` (List of atomic statements).
-    - Module: `dspy.ChainOfThought(FactSignature)`.
-- **Diagram Extraction**:
-    - Signature: `context` $\rightarrow$ `latex_formulas`, `mermaid_diagrams`.
-    - Module: `dspy.ChainOfThought(DiagramSignature)`.
+---
 
-### Assembler (`assembler.py`)
-Orchestrates the raw-to-structured pipeline:
-1.  Receives a `topic` or query.
-2.  Recalls relevant Bricks via Vector Store.
-3.  Passes Bricks to `CognitiveExtractor`.
-4.  Projects extracted Facts into `Intent` candidates (`LOOSE` state).
+## 3. Cognitive Extractor (`src/nexus/cognition/dspy_modules.py`)
+This module represents the **Inference Authority**. It defines how raw text is distilled into structured knowledge.
 
-## 3. Cortex Service (`services/cortex`)
+### Method Intelligence Table: `CognitiveExtractor`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `forward` | Primary inference loop | context | Facts, Diagrams | DSPy-governed output |
+| `extract_facts` (IMPLIED) | Atomic fact detection | context | List of Fact objects | No contradictory facts |
+| `generate_diagram` (IMPLIED)| Architectural mapping | context | Mermaid/DSL code | Valid syntax |
 
-### API Architecture (`server.py`)
-Flask-based wrapper exposing internal Managers to the outer world (UI/MCP).
+### Layer Assignment: Cognition
+This layer is **Stateful** in terms of prompt optimization (DSPy compiled states) but **Pure** in its execution—it does not write directly to the graph; it returns structured objects to the Service layer for registration.
 
-- **Endpoints**:
-    - `GET /jarvis/graph-index`: Dumps full graph state for visualization.
-    - `POST /jarvis/anchor`: Handles "Promote" (Anchor) and "Reject" actions from UI.
-    - `GET /jarvis/brick-meta`: Retrieves raw text context for a Brick ID.
-    - `POST /cognition/assemble`: Triggers on-demand topic assembly.
-- **Error Handling**: Standard HTTP codes (400 for bad input, 404 for missing resources, 500 for internal errors).
-- **Dependency Injection**: Instantiates `GraphManager` and `LocalVectorIndex` per request (or singleton via module scope).
+---
 
-## 4. Ingestion Pipeline (`src/nexus/sync`)
+## 4. Nexus Ingestor (`src/nexus/sync/ingest_history.py`)
+The **Ingestion Boundary**. It is responsible for the "First Contact" with raw data.
 
-### History Ingestion (`ingest_history.py`)
-- **Source**: `conversations.json` (Exported chat logs).
-- **Process**:
-    1.  Load JSON tree.
-    2.  Traverse messages.
-    3.  `Extractor` splits content by double newlines (`\n\n`).
-    4.  Generate stable IDs (UUID or Hash).
-    5.  Embed text via `Embedder`.
-    6.  Upsert to `LocalVectorIndex`.
+### Method Intelligence Table: `NexusIngestor`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `brickify` | Text atomization | content, source | List of Bricks | Semantic integrity of atoms |
+| `ingest_history` | Batch processing | input_path | Mass registration in Graph & Vector | Idempotency via content hash |
+
+### Usage Graph
+`NexusIngestor` is a standalone CLI tool or scheduled task. It is the primary writer for `LOOSE` nodes and Source records in the `GraphManager`.

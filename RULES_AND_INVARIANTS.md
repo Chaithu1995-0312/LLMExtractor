@@ -1,52 +1,29 @@
-# Rules and Invariants
+# RULES_AND_INVARIANTS
 
-## Intent Lifecycle State Machine
-The lifecycle of an Intent is strictly monotonic. Transitions generally move towards higher stability or finality.
+## 1. Knowledge Lifecycle Invariants
+The core value of NEXUS is the strict enforcement of knowledge state transitions.
 
-- **Monotonicity**: An Intent cannot regress to a less stable state (e.g., `FROZEN` $\rightarrow$ `LOOSE` is illegal).
-- **Valid Transitions**:
-    - `LOOSE` $\rightarrow$ `FORMING` | `KILLED`
-    - `FORMING` $\rightarrow$ `FROZEN` | `KILLED`
-    - `FROZEN` $\rightarrow$ `SUPERSEDED` | `KILLED`
-    - `SUPERSEDED` $\rightarrow$ `KILLED`
-    - `KILLED` $\rightarrow$ $\emptyset$ (Terminal State)
+| Rule ID | Name | Description | Enforcer |
+| :--- | :--- | :--- | :--- |
+| **LIF-01** | Unidirectional Promotion | Nodes move `LOOSE` -> `FORMING` -> `FROZEN`. They cannot move backward unless superseded. | `GraphManager.promote_node_to_frozen` |
+| **LIF-02** | Tombstone Integrity | Once a node is `KILLED`, its ID cannot be reused for a new node. It must remain in the graph as a tombstone. | `GraphManager.kill_node` |
+| **LIF-03** | Conflict Resolution | A `FROZEN` node cannot be promoted if an active `CONFLICT` edge exists with another `FROZEN` node of the same scope. | `GraphManager` (IMPLIED check) |
 
-## Graph Integrity Constraints
+## 2. Graph Connectivity Rules
+| Rule ID | Name | Description | Enforcer |
+| :--- | :--- | :--- | :--- |
+| **CON-01** | Source Requirement | Every `LOOSE` node must have at least one `SUPPORTED_BY` edge linking to a `Source` node. | `NexusIngestor.brickify` |
+| **CON-02** | Cycle Prevention | Hierarchical `SCOPE` relationships must be a Directed Acyclic Graph (DAG). No scope can contain itself. | `src/nexus/graph/validation.py` |
+| **CON-03** | Atomic Bricks | A "Brick" is the smallest unit of knowledge. It cannot be further subdivided without generating a new ID and superseding the parent. | `extractor.py` |
 
-### 1. Scope Binding
-**Invariant**: Any Intent entering the `FROZEN` state MUST have at least one outgoing `APPLIES_TO` edge pointing to a valid `ScopeNode`.
-- *Enforcement*: Checked in `GraphManager.promote_intent` before state update commit.
-- *Reasoning*: Canonical knowledge must be contextualized. Universal truths are rare; scoped truths are useful.
+## 3. Cognitive & Governance Rules
+| Rule ID | Name | Description | Enforcer |
+| :--- | :--- | :--- | :--- |
+| **GOV-01** | Mandatory Audit | No LLM-driven knowledge mutation can occur without a corresponding entry in `phase3_audit_trace.jsonl`. | `CortexAPI._audit_trace` |
+| **GOV-02** | Context Provenance | Responses generated for users must include citations to the specific `brick_ids` used in the assembly. | `CortexAPI.generate` |
+| **GOV-03** | Threshold Confidence | A node cannot be promoted to `FROZEN` if its `confidence` score is below 0.7. | `ui/jarvis/src/components/NexusNode.tsx` (Visual cue) |
 
-### 2. Override Stability
-**Invariant**: An `OVERRIDES` edge can only be created if the source Intent is already `FROZEN`.
-- *Enforcement*: Checked in `GraphManager.add_typed_edge`.
-- *Reasoning*: You cannot override existing knowledge with a draft (LOOSE/FORMING). Only established facts can override other facts.
-
-### 3. Single Override Principle
-**Invariant**: A target Intent can be the destination of at most one `OVERRIDES` edge.
-- *Enforcement*: Checked in `GraphManager.add_typed_edge`.
-- *Reasoning*: prevents conflict chains. If multiple Intents override the same target, the conflict must be resolved into a single superior Intent first.
-
-## Ingestion & Data Rules
-
-### 1. Brick Atomicity
-**Rule**: A Brick represents the smallest unit of coherent thought.
-- *Definition*: Text blocks separated by double newlines (`\n\n`) in the source message.
-- *Implication*: Context is preserved via metadata linkage to the original message, not within the Brick content itself.
-
-### 2. Idempotency
-**Rule**: All Graph and Vector operations must be idempotent.
-- *Implementation*:
-    - `GraphManager.register_node`: Updates if exists, inserts if new.
-    - `GraphManager.register_edge`: Checks existence before insertion.
-    - `LocalVectorIndex`: Stores processed Brick IDs to prevent duplicate embedding.
-
-## API Contracts
-
-### 1. Read-Write Separation
-- **GET** requests (e.g., `graph-index`) MUST NOT modify the graph state.
-- **POST** requests (e.g., `anchor`) MUST be transactional.
-
-### 2. Error Propagation
-- Service layer exceptions (e.g., `ValueError` from `GraphManager`) MUST be caught and mapped to appropriate HTTP 4xx status codes (e.g., 400 Bad Request for invariant violations).
+## 4. Operational Invariants
+- **Write-Authoritative Boundary**: Only the `GraphManager` can perform `COMMIT` operations on the SQLite database.
+- **Read-Only Scopes**: Retrieval operations (`recall_bricks_readonly`) must never modify the vector index or graph state.
+- **Idempotent Ingestion**: Re-running the same `conversations.json` through the `NexusIngestor` must not result in duplicate nodes (Content hashing).

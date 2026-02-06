@@ -1,12 +1,12 @@
 import { create } from 'zustand';
 
 interface NexusState {
-  mode: 'ask' | 'explore';
+  mode: 'ask' | 'explore' | 'visualize';
   selectedBrickId: string | null;
   selectedNodeId: string | null;
   rightPanelOpen: boolean;
   
-  setMode: (mode: 'ask' | 'explore') => void;
+  setMode: (mode: 'ask' | 'explore' | 'visualize') => void;
   setSelectedBrickId: (id: string | null) => void;
   setSelectedNodeId: (id: string | null) => void;
   toggleRightPanel: (force?: boolean) => void;
