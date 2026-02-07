@@ -27,25 +27,71 @@ def dfs_paths(mapping: Dict, node_id: str, path: List[str], paths: List[List[str
     for child_id in children:
         dfs_paths(mapping, child_id, new_path, paths)
 
-def extract_message(node_id: str, node: Dict):
+def extract_message(node_id: str, node: Dict, conversation_id: str = "unknown", path_id: str = "unknown", depth: int = 0):
     msg = node.get("message")
     if not msg or not msg.get("content"):
         return None
 
-    parts = msg["content"].get("parts", [])
-    text = "\n".join(p for p in parts if isinstance(p, str))
+    raw_parts = msg["content"].get("parts", [])
+    content_type = msg["content"].get("content_type", "text")
+    
+    rich_ingest = os.getenv("NEXUS_RICH_INGEST", "false").lower() == "true"
+    
+    text_parts = []
+    content_blocks = []
+    
+    for part in raw_parts:
+        if isinstance(part, str):
+            text_parts.append(part)
+            if rich_ingest:
+                block_type = "text"
+                # Heuristic: if content_type is code, this part is likely code
+                if content_type == "code":
+                    block_type = "code"
+                content_blocks.append({"type": block_type, "value": part})
+        elif isinstance(part, dict) and rich_ingest:
+            # Handle rich parts (tool outputs, etc.)
+            part_type = part.get("type", "unknown")
+            text_parts.append(f"[{part_type.upper()}]")
+            content_blocks.append({"type": part_type, "value": part})
+    
+    text = "\n".join(text_parts)
     
     author = msg.get("author", {})
     role = author.get("role", "unknown")
-    model_name = msg.get("metadata", {}).get("model_slug", "unknown")
+    metadata = msg.get("metadata", {}) or {}
+    model_name = metadata.get("model_slug", metadata.get("model", "unknown"))
 
-    return {
+    result = {
         "message_id": msg.get("id", node_id),
         "role": role,
         "content": text,
         "model_name": model_name,
         "created_at": get_utc_timestamp(msg.get("create_time"))
     }
+
+    if rich_ingest:
+        # Add additive rich fields
+        result["content_blocks"] = content_blocks
+        result["provenance"] = {
+            "conversation_id": conversation_id,
+            "mapping_id": node_id,
+            "path_id": path_id,
+            "branch_depth": depth
+        }
+        # Tiered Metadata
+        result["metadata"] = {
+            "tier1": {
+                "content_type": content_type,
+                "recipient": msg.get("recipient", "all"),
+                "finish_details": metadata.get("finish_details"),
+                "citations": metadata.get("citations", []),
+                "update_time": get_utc_timestamp(msg.get("update_time"))
+            },
+            "tier2": metadata # Store raw for future-proofing
+        }
+
+    return result
 
 def process_conversation(conv: Dict, output_dir: str):
     conv_id = conv["id"]
@@ -66,9 +112,13 @@ def process_conversation(conv: Dict, output_dir: str):
 
     extracted_paths = []
     for idx, path in enumerate(all_paths, start=1):
+        path_id = hashlib.sha256(">".join(path).encode()).hexdigest()[:16]
         messages = []
-        for node_id in path:
-            msg = extract_message(node_id, mapping[node_id])
+        for depth, node_id in enumerate(path):
+            msg = extract_message(node_id, mapping[node_id], 
+                                  conversation_id=conv_id, 
+                                  path_id=path_id, 
+                                  depth=depth)
             if msg:
                 messages.append(msg)
 

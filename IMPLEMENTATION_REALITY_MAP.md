@@ -1,64 +1,99 @@
 # IMPLEMENTATION_REALITY_MAP
 
-This document maps the implementation status of the NEXUS architecture.
+## 1. Overview
+This document maps the architectural ideal to the current codebase reality.
 
-## 1. System-Wide Layer Status
-| Layer | Status | Primary Authority |
-| :--- | :--- | :--- |
-| Ingestion | ✅ | `NexusIngestor` |
-| Graph | ✅ | `GraphManager` |
-| Vector | ✅ | `LocalVectorIndex` |
-| Cognition | 🟡 | `CognitiveExtractor` (In-Progress Refinement) |
-| Service | ✅ | `CortexAPI` |
-| UI | 🟡 | `WallView` (Partial Interactive Controls) |
+**Legend:**
+- ✅ **Implemented:** Fully functional and aligned with architecture.
+- 🟡 **Partial:** Implemented but missing features or refinement.
+- 🔴 **Missing:** Not present in the codebase.
+- 🧪 **Mocked/Experimental:** Present but not production-ready.
 
-## 2. Method-Level Reality
+## 2. Component Status
 
-### 2.1 Graph Layer (`src/nexus/graph`)
-| Class | Method | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| `GraphManager` | `register_node` | ✅ | Full SQLite persistence |
-| `GraphManager` | `register_edge` | ✅ | Supports multi-typed relationships |
-| `GraphManager` | `promote_node_to_frozen` | ✅ | Enforces lifecycle transitions |
-| `GraphManager` | `supersede_node` | ✅ | Manages version history / replacements |
-| `GraphManager` | `kill_node` | ✅ | Soft-delete with tombstone reasoning |
-| `GraphManager` | `_log_audit_event` | ✅ | Internal persistence logging |
+### 2.1 Ingestion Layer
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `TreeSplitter` | ✅ | Splits conversation JSONs into trees. |
+| `BrickExtractor` | ✅ | Context-aware chunking works. |
+| `PromptExtractor` | 🟡 | Basic regex/logic, needs more sophistication. |
 
-### 2.2 Cognition Layer (`src/nexus/cognition`)
-| Class | Method | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| `CognitiveExtractor` | `forward` | ✅ | DSPy implementation |
-| `CognitiveExtractor` | `extract_facts` | 🧪 | Mocked via FactSignature |
-| `CognitiveExtractor` | `generate_diagram` | 🧪 | Mocked via DiagramSignature |
-| `Assembler` | `assemble_topic` | 🟡 | Implemented but lacks robust conflict resolution |
+### 2.2 Vector Layer
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `Embedder` | ✅ | Uses `SentenceTransformers` (all-MiniLM-L6-v2). |
+| `LocalIndex` | ✅ | FAISS implementation is solid for local usage. |
+| `Recall` | ✅ | `recall_bricks_readonly` functional. |
 
-### 2.3 Service Layer (`services/cortex`)
-| Class | Method | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| `CortexAPI` | `route` | ✅ | Main decision logic for queries |
-| `CortexAPI` | `generate` | ✅ | Multi-brick context assembly |
-| `CortexAPI` | `_audit_trace` | ✅ | JSONL logging implementation |
-| `Orchestration` | `verifier_node` | 🔴 | Planned for Phase 4 quality checks |
-| `Orchestration` | `self_correction_node` | 🔴 | Planned for Phase 4 feedback loops |
+### 2.3 Cognition Layer
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `Assembler` | ✅ | Orchestrates recall, extraction, and graph updates. |
+| `CognitiveExtractor` | 🟡 | DSPy modules exist but error handling is basic. |
+| `TopicResolution` | 🟡 | Simple slug-based resolution, needs semantic clustering. |
 
-### 2.4 Vector Layer (`src/nexus/vector`)
-| Class | Method | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| `VectorEmbedder` | `embed_query` | ✅ | HuggingFace integration |
-| `VectorEmbedder` | `_rewrite_with_llm` | ✅ | Query expansion logic |
-| `LocalVectorIndex` | `search` | ✅ | FAISS k-NN search |
+### 2.4 Graph Layer
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `GraphManager` | ✅ | SQLite-based, handles nodes and edges. |
+| `Schema` | ✅ | `IntentLifecycle`, `EdgeType` defined. |
+| `ConflictResolution` | 🟡 | Basic monotonic logic (Frozen vs Forming) exists but needs rigorous testing. |
+| `Auditing` | 🟡 | `_log_audit_event` prints to console, needs persistent log file. |
 
-### 2.5 Ingestion Layer (`src/nexus/sync`)
-| Class | Method | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| `NexusIngestor` | `brickify` | ✅ | Atomization logic |
-| `NexusIngestor` | `ingest_history` | ✅ | Batch processing loop |
+### 2.5 Service Layer
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `CortexAPI` | ✅ | Wrapper around backend logic. |
+| `Server` | ✅ | Flask routes for graph, anchoring, and assembly. |
+| `Authentication` | 🔴 | No auth on API endpoints. |
 
-## 3. Layer Interactions Status
-| Source Layer | Target Layer | Status | Flow Type |
-| :--- | :--- | :--- | :--- |
-| Ingestion | Vector | ✅ | Direct Embedding push |
-| Ingestion | Graph | ✅ | Node/Source registration |
-| Service | Graph | ✅ | Read/Write (Lifecycle) |
-| Service | Cognition | 🟡 | Sync call, lacks async worker queue |
-| UI | Service | ✅ | REST API |
+### 2.6 UI Layer
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `CortexVisualizer` | ✅ | D3.js force-directed graph works. |
+| `ControlStrip` | ✅ | Lifecycle actions (Promote, Kill) wired to API. |
+| `NexusNode` | ✅ | Visual styling for lifecycles (`LOOSE`, `FORMING`, `FROZEN`) implemented. |
+| `WallView` | 🟡 | Basic implementation, likely needs more features. |
+
+## 3. Class -> Method Intelligence
+
+### 3.1 `nexus.graph.manager.GraphManager`
+| Method | Status | Responsibility |
+|--------|--------|----------------|
+| `register_node` | ✅ | Upserts nodes into SQLite. |
+| `register_edge` | ✅ | Upserts edges, checks duplicates. |
+| `promote_node_to_frozen` | ✅ | Transitions `FORMING` -> `FROZEN`, logs audit. |
+| `kill_node` | ✅ | Transitions any -> `KILLED`, logs audit. |
+| `supersede_node` | ✅ | Links old `FROZEN` to new `FROZEN` via `SUPERSEDED_BY`. |
+| `get_intents_by_topic` | ✅ | Retrieves intents for a topic slug. |
+| `_log_audit_event` | 🟡 | Currently just prints to stdout. |
+
+### 3.2 `nexus.cognition.assembler` (Module Level)
+| Method | Status | Responsibility |
+|--------|--------|----------------|
+| `assemble_topic` | ✅ | Main pipeline: Recall -> Extract -> Graph Linkage. |
+| `_calculate_content_hash` | ✅ | Content-addressable hashing. |
+| `_get_slug` | ✅ | Simple string slugification. |
+
+### 3.3 `nexus.cognition.dspy_modules.CognitiveExtractor`
+| Method | Status | Responsibility |
+|--------|--------|----------------|
+| `forward` | 🟡 | Runs DSPy ChainOfThought for Facts and Diagrams. Needs retry logic. |
+
+## 4. Method Usage Graph
+
+```mermaid
+graph TD
+    API[api.jarvis_assemble_topic] --> Assembler[assemble_topic]
+    Assembler --> Recall[recall_bricks_readonly]
+    Assembler --> Extractor[CognitiveExtractor.forward]
+    Assembler --> GraphMgr[GraphManager]
+    
+    GraphMgr --> SQL[SQLite DB]
+    
+    API[api.jarvis_node_promote] --> GraphMgr[promote_node_to_frozen]
+    API[api.jarvis_node_kill] --> GraphMgr[kill_node]
+    API[api.jarvis_node_supersede] --> GraphMgr[supersede_node]
+    
+    UI[ControlStrip] -- POST --> API[api.jarvis_node_*]
+```

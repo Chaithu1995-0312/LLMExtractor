@@ -34,13 +34,16 @@ import ReactFlow, {
   EdgeChange,
   Connection,
   addEdge,
-  NodeProps
+  NodeProps,
+  Handle,
+  Position
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { NexusNode, NexusNodeProps, Lifecycle } from './components/NexusNode';
 import { WallView } from './components/WallView';
 import { Panel } from './components/Panel';
 import { CortexVisualizer } from './components/CortexVisualizer';
+import dagre from 'dagre';
 
 // --- Adapters ---
 
@@ -56,11 +59,52 @@ const GraphNodeWrapper = memo(({ data, id, selected }: NodeProps) => {
     isFocused: selected,
     onSelect: () => {},
   };
-  return <div style={{ minWidth: '180px' }}><NexusNode {...props} /></div>;
+  return (
+    <div style={{ minWidth: '180px', position: 'relative' }}>
+      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-white/50" />
+      <NexusNode {...props} />
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-primary" />
+    </div>
+  );
 });
 
 const nodeTypes = {
   nexus: GraphNodeWrapper,
+};
+
+const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => {
+  const dagreGraph = new dagre.graphlib.Graph();
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+  // Node dimensions (approximate width/height of NexusNode)
+  const nodeWidth = 220;
+  const nodeHeight = 200;
+
+  dagreGraph.setGraph({ rankdir: direction });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const layoutedNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    return {
+      ...node,
+      // Shift anchor from center (dagre) to top-left (reactflow)
+      position: {
+        x: nodeWithPosition.x - nodeWidth / 2,
+        y: nodeWithPosition.y - nodeHeight / 2,
+      },
+    };
+  });
+
+  return { nodes: layoutedNodes, edges };
 };
 
 // Initialize mermaid
@@ -141,6 +185,14 @@ const panelTransition = {
 
 export default function App() {
   const { mode, setMode, rightPanelOpen, toggleRightPanel, selectedBrickId, setSelectedBrickId, selectedNodeId, setSelectedNodeId } = useNexusStore();
+  const [chatMapping, setChatMapping] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    fetch('/chat_mapping.json')
+      .then(res => res.json())
+      .then(data => setChatMapping(data))
+      .catch(err => console.error('Failed to load chat mapping:', err));
+  }, []);
   const [query, setQuery] = useState('');
   const [useGenAI, setUseGenAI] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -251,6 +303,11 @@ export default function App() {
       const title = n.statement ? (n.statement.length > 50 ? n.statement.substring(0, 50) + '...' : n.statement) : (n.label || n.id);
       const summary = n.statement || n.summary || 'No content available.';
 
+      // Try to resolve chat name from ID
+      // Brick ID format usually contains the conversation UUID
+      const conversationId = n.id.split('_')[0]; 
+      const chatName = chatMapping[conversationId] || chatMapping[n.id];
+
       return {
         id: n.id,
         title: title,
@@ -261,9 +318,10 @@ export default function App() {
         lastUpdatedAt: n.updated_at || n.created_at ? new Date(n.updated_at || n.created_at).toLocaleDateString() : 'Today',
         isFocused: false,
         onSelect: () => {},
+        chatName: chatName
       };
     });
-  }, [graphData]);
+  }, [graphData, chatMapping]);
 
   const selectedBrickData = useMemo(() => {
     return wallBricks.find(b => b.id === selectedBrickId);
@@ -283,21 +341,47 @@ export default function App() {
 
   useEffect(() => {
     if (graphData && graphData.nodes) {
-      const initialNodes = (Array.isArray(graphData.nodes) ? graphData.nodes : graphData.nodes.nodes).map((n: any, i: number) => ({
+      const rawNodes = Array.isArray(graphData.nodes) ? graphData.nodes : graphData.nodes.nodes;
+      const rawEdges = Array.isArray(graphData.edges) ? graphData.edges : (graphData.edges?.edges || []);
+
+      // 1. Create Initial Nodes (using temp positions)
+      const initialNodes = rawNodes.map((n: any) => ({
         id: n.id,
         type: 'nexus',
-        position: { x: Math.random() * 800, y: Math.random() * 600 },
-        data: { ...n, type: n.type || 'Fact' }
+        data: { ...n, type: n.type || 'Fact' },
+        position: { x: 0, y: 0 } 
       }));
-      const initialEdges = (Array.isArray(graphData.edges) ? graphData.edges : graphData.edges.edges).map((e: any) => ({
+
+      const initialEdges = rawEdges.map((e: any) => ({
         id: `${e.source}-${e.target}`,
         source: e.source,
         target: e.target,
         label: e.type,
         animated: e.type === 'OVERRIDES'
       }));
-      setNodes(initialNodes);
-      setEdges(initialEdges);
+
+      // 2. Calculate the Ideal Layout (Structure the graph)
+      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+        initialNodes,
+        initialEdges
+      );
+
+      // 3. Set State with Preservation Logic
+      setNodes((prevNodes) => {
+        // Compare new layout against existing state
+        return layoutedNodes.map((newNode) => {
+          const existingNode = prevNodes.find((pn) => pn.id === newNode.id);
+          
+          return {
+            ...newNode,
+            // IF node exists, keep user's current position. 
+            // IF new, use the calculated dagre position.
+            position: existingNode ? existingNode.position : newNode.position
+          };
+        });
+      });
+
+      setEdges(layoutedEdges);
     }
   }, [graphData]);
 
@@ -532,19 +616,22 @@ export default function App() {
                     onSelect={setSelectedBrickId} 
                   />
                 ) : (
-                  <ReactFlow
-                    nodes={nodes}
-                    edges={edges}
-                    onNodesChange={onNodesChange}
-                    onEdgesChange={onEdgesChange}
-                    onConnect={onConnect}
-                    nodeTypes={nodeTypes}
-                    onNodeClick={(_, node) => setSelectedBrickId(node.id)}
-                    fitView
-                  >
-                    <Background color="#222" gap={20} />
-                    <Controls />
-                  </ReactFlow>
+                  <div style={{ width: '100%', height: '100%' }}> {/* Wrapper Fixed */}
+                    <ReactFlow
+                      nodes={nodes}
+                      edges={edges}
+                      onNodesChange={onNodesChange}
+                      onEdgesChange={onEdgesChange}
+                      onConnect={onConnect}
+                      nodeTypes={nodeTypes}
+                      onNodeClick={(_, node) => setSelectedBrickId(node.id)}
+                      fitView
+                      minZoom={0.1}
+                    >
+                      <Background color="#222" gap={20} />
+                      <Controls />
+                    </ReactFlow>
+                  </div>
                 )}
               </motion.div>
             )}

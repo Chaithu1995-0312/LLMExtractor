@@ -12,6 +12,8 @@ export interface NexusNodeProps {
   lastUpdatedAt: string;
   isFocused: boolean;
   onSelect: (id: string) => void;
+  chatName?: string;
+  projectName?: string;
 }
 
 export const NexusNode: React.FC<NexusNodeProps> = ({
@@ -24,6 +26,8 @@ export const NexusNode: React.FC<NexusNodeProps> = ({
   lastUpdatedAt,
   isFocused,
   onSelect,
+  chatName,
+  projectName,
 }) => {
   
   // Visual Configuration based on Image
@@ -69,9 +73,18 @@ export const NexusNode: React.FC<NexusNodeProps> = ({
       {/* Top Decorator Line */}
       <div className={`absolute top-0 left-2 right-2 h-[1px] ${currentVar.indicator} opacity-50 shadow-[0_0_10px_currentColor]`} />
 
-      <div className="flex justify-between items-start mb-3">
-        <h3 className="font-bold text-sm tracking-wide leading-tight drop-shadow-md">{title}</h3>
-        <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] ${currentVar.indicator}`} />
+      <div className="flex flex-col gap-1 mb-3">
+        {chatName && (
+          <div className="text-[10px] font-bold tracking-widest opacity-40 uppercase truncate">
+            {chatName}
+          </div>
+        )}
+        <div className="flex justify-between items-start">
+          <h3 className="font-bold text-sm tracking-wide leading-tight drop-shadow-md truncate">
+            {title}
+          </h3>
+          <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] ${currentVar.indicator} shrink-0 ml-2`} />
+        </div>
       </div>
 
       <p className="text-[11px] leading-relaxed opacity-80 mb-4 line-clamp-3 font-mono-data text-white/70">

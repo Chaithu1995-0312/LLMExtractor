@@ -13,12 +13,11 @@ def generate_brick_id(source_file: str, content: str, index: int) -> str:
 
 def extract_bricks_from_file(tree_file_path: str, output_dir: str):
     """
-    Extract atomic bricks from a tree path file using Semantic Distillation.
-    Goal: No summaries, only atomic units with noise removed.
-    Uses Unstructured.io to strip noise and keep context.
+    Extract atomic bricks from a tree path file using Block-Aware Semantic Distillation.
+    Goal: No summaries, only atomic units with structural integrity (code/tools).
     """
     print(f"[{datetime.now(timezone.utc).isoformat()}] [BRICKS] Extracting from {os.path.basename(tree_file_path)}")
-    # 1. Load raw data to get message metadata
+    # 1. Load raw data
     with open(tree_file_path, "r", encoding="utf-8") as f:
         tree_data = json.load(f)
 
@@ -26,44 +25,53 @@ def extract_bricks_from_file(tree_file_path: str, output_dir: str):
     
     # We iterate over messages in the tree path
     for msg in tree_data.get("messages", []):
-        content = msg.get("content", "")
-        if not content.strip():
-            continue
-
-        # 2. Semantic Distillation via Unstructured.io
-        # We treat each message as a mini-document to preserve context per message
-        try:
-            # Clean content before partitioning
-            cleaned_content = clean(content, extra_whitespace=True, dashes=True, bullets=True)
-            cleaned_content = group_broken_paragraphs(cleaned_content)
-            
-            # Use simple split for now as partition(text=...) has issues in this version
-            blocks = [b.strip() for b in cleaned_content.split("\n\n") if b.strip() and len(b.strip()) > 20]
-        except Exception as e:
-            # Fallback to simple split if Unstructured fails
-            print(f"Unstructured distillation failed for message {msg.get('message_id')}: {e}")
-            blocks = [b.strip() for b in content.split("\n\n") if b.strip()]
+        content_blocks = msg.get("content_blocks")
         
-        for idx, block in enumerate(blocks):
-            brick_id = generate_brick_id(tree_file_path, block, idx)
+        if content_blocks:
+            # NEW: Block-Aware Processing
+            for b_idx, block in enumerate(content_blocks):
+                b_type = block.get("type", "text")
+                b_val = block.get("value", "")
+                
+                if not b_val:
+                    continue
+
+                if b_type == "text":
+                    # For text blocks, use semantic distillation (splitting only)
+                    candidates = [c.strip() for c in b_val.split("\n\n") if c.strip()]
+                    for c_idx, candidate in enumerate(candidates):
+                        bricks.append(_create_brick(
+                            tree_file_path, candidate, msg["message_id"], 
+                            b_idx, b_type, sub_index=c_idx
+                        ))
+                else:
+                    # For non-text blocks (code, tool_output), 1:1 mapping
+                    # b_val might be a dict for tool outputs, stringify it
+                    if isinstance(b_val, dict):
+                        b_val = json.dumps(b_val, ensure_ascii=False)
+                    
+                    bricks.append(_create_brick(
+                        tree_file_path, b_val, msg["message_id"], 
+                        b_idx, b_type
+                    ))
+        else:
+            # LEGACY: Fallback to concatenated content string
+            content = msg.get("content", "")
+            if not content.strip():
+                continue
+
+            try:
+                cleaned_content = clean(content, extra_whitespace=True, dashes=True, bullets=True)
+                cleaned_content = group_broken_paragraphs(cleaned_content)
+                candidates = [c.strip() for c in cleaned_content.split("\n\n") if c.strip() and len(c.strip()) > 20]
+            except Exception:
+                candidates = [c.strip() for c in content.split("\n\n") if c.strip()]
             
-            # Brick schema (LOCKED)
-            brick = {
-                "brick_id": brick_id,
-                "source_file": os.path.abspath(tree_file_path),
-                "source_span": {
-                    "message_id": msg["message_id"],
-                    "block_index": idx,
-                    "text_sample": block[:50] + "..." if len(block) > 50 else block
-                },
-                "intent": "atomic_content", # Placeholder for lightweight classification if needed
-                "tags": [],
-                "scope": "PRIVATE", # Default
-                "status": "PENDING",
-                "content": block, # We store content for embedding, but reload from source in MODE-1
-                "hash": hashlib.sha256(block.encode()).hexdigest()
-            }
-            bricks.append(brick)
+            for c_idx, candidate in enumerate(candidates):
+                bricks.append(_create_brick(
+                    tree_file_path, candidate, msg["message_id"], 
+                    0, "text", sub_index=c_idx
+                ))
 
     # Save bricks
     if bricks:
@@ -83,3 +91,29 @@ def extract_bricks_from_file(tree_file_path: str, output_dir: str):
         return output_path
     
     return None
+
+def _create_brick(file_path: str, content: str, msg_id: str, b_idx: int, b_type: str, sub_index: int = 0) -> Dict:
+    """Helper to construct a standardized Brick object."""
+    # Ensure stable ID even with sub-indexing
+    seed = f"{os.path.basename(file_path)}:{msg_id}:{b_idx}:{sub_index}:{content}"
+    brick_id = hashlib.sha256(seed.encode()).hexdigest()[:32]
+    
+    return {
+        "brick_id": brick_id,
+        "brick_kind": b_type,
+        "intent": "unknown", # Compiler-owned
+        "source_file": os.path.abspath(file_path),
+        "source_span": {
+            "message_id": msg_id,
+            "block_index": b_idx,
+            "block_type": b_type,
+            "sub_index": sub_index,
+            "text_sample": content[:50] + "..." if len(content) > 50 else content
+        },
+        "tags": [f"kind:{b_type}"],
+        "scope": "PRIVATE",
+        "status": "PENDING",
+        "content": content,
+        "hash": hashlib.sha256(content.encode()).hexdigest(),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }

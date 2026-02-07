@@ -1,63 +1,78 @@
 # MODULE_DEEP_DIVES
 
-## 1. Graph Manager (`src/nexus/graph/manager.py`)
-The `GraphManager` is the system's **Transactional Source of Truth**. It encapsulates all SQLite operations, ensuring that the graph state remains consistent across cognitive operations.
+## 1. Cognition Engine: `Assembler`
 
-### Method Intelligence Table: `GraphManager`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
-| :--- | :--- | :--- | :--- | :--- |
-| `register_node` | Core node persistence | type, id, attrs, merge | Writes to SQL; updates `nodes.json` | Node ID uniqueness |
-| `promote_node_to_frozen` | Lifecycle advancement | node_id, promote_bricks, actor | Updates state to `FROZEN`; creates audit link | Only `FORMING` can become `FROZEN` |
-| `kill_node` | Soft deletion | node_id, reason, actor | State -> `KILLED`; prevents further retrieval | Requires valid `reason` string |
-| `supersede_node` | Versioning | old_id, new_id, reason, actor | Old -> `SUPERSEDED`; New -> active | Preserves edge history |
-| `add_intent` | Intent registration | Intent object | Direct SQL insert | Enforces schema validation |
+### 1.1 Overview
+The `Assembler` (`src/nexus/cognition/assembler.py`) is the engine responsible for synthesizing scattered "Bricks" into coherent "Topics". It bridges the gap between raw vector retrieval and structured knowledge graph updates.
 
-### Method Usage Graph
-- `register_node` is called by `NexusIngestor` during discovery.
-- `promote_node_to_frozen` is called by `CortexAPI` via `server.py` endpoints.
-- `kill_node` is triggered by UI actions via `server.py`.
+### 1.2 The `assemble_topic` Pipeline
 
----
+1. **Recall Phase (Read-Only)**
+   - Inputs: `topic_query` (string)
+   - Action: Calls `recall_bricks_readonly(topic_query, k=15)`.
+   - Output: List of candidate bricks with similarity scores.
+   - *Note:* If no bricks are found, it creates an empty "NO_RECALL_MATCHES" artifact.
 
-## 2. Cortex API (`services/cortex/api.py`)
-`CortexAPI` serves as the **Operational Orchestrator**. It bridges the gap between semantic retrieval and cognitive synthesis.
+2. **Expansion & Deduplication Phase**
+   - Goal: Contextualize bricks.
+   - Action: Loads full conversation trees for each brick. Deduplicates multiple bricks coming from the same conversation to avoid redundancy.
+   - Result: `unique_docs` map containing full context window.
 
-### Method Intelligence Table: `CortexAPI`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
-| :--- | :--- | :--- | :--- | :--- |
-| `route` | Query dispatching | query | Specific handler response | None (Heuristic branch) |
-| `generate` | Final answer synthesis | query, brick_ids | Structured LLM response | Requires at least 1 brick |
-| `_audit_trace` | Governance logging | IDs, model, tokens | Appends to `phase3_audit_trace.jsonl` | Write-authoritative for audit |
-| `_fetch_graph_context` | Context assembly | brick_ids | Formatted string for LLM | Must respect scope boundaries |
+3. **Cognitive Extraction Phase**
+   - Tool: `CognitiveExtractor` (DSPy).
+   - Inputs: Aggregated text from all unique docs.
+   - Action: 
+     - Extracts **Atomic Facts** (`FactSignature`).
+     - Extracts **Visuals** (`DiagramSignature`: Latex, Mermaid).
+   - *Error Handling:* Wraps DSPy call in try-except; defaults to empty lists on failure.
 
-### Control Flow and Authority
-`CortexAPI` holds the authority for **Cognitive Spend**. No LLM call is made without passing through `CortexAPI`, ensuring every token used is logged in the Audit Trace. It enforces the "Human-in-the-loop" requirement by prioritizing `FROZEN` nodes in context assembly.
+4. **Persistence Phase**
+   - Action: Saves the full `artifact_payload` (provenance, raw excerpts, extracted facts) to disk (`output/nexus/artifacts/`).
+   - Mechanism: Content-Addressable Storage (SHA256 hash of payload).
 
----
+5. **Graph Linkage & Monotonic Conflict Resolution**
+   - **Nodes:**
+     - Creates `Topic` node (merged by slug).
+     - Creates `Artifact` node (immutable snapshot).
+   - **Edges:**
+     - `Topic` -> `ASSEMBLED_IN` -> `Artifact`.
+     - `Artifact` -> `DERIVED_FROM` -> `Brick`.
+   - **Conflict Logic:**
+     - Iterates over extracted facts.
+     - Compares against existing intents for the topic using `CrossEncoderReranker`.
+     - **Rule:** If new fact is highly similar (>0.85) to an existing `FROZEN` intent, the new fact is **Overridden** (anchor wins).
+     - **Rule:** If new fact is highly similar to an existing `FORMING` intent, the new fact **Supersedes** it (newest forming wins).
 
-## 3. Cognitive Extractor (`src/nexus/cognition/dspy_modules.py`)
-This module represents the **Inference Authority**. It defines how raw text is distilled into structured knowledge.
+## 2. Graph Governance: `GraphManager`
 
-### Method Intelligence Table: `CognitiveExtractor`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
-| :--- | :--- | :--- | :--- | :--- |
-| `forward` | Primary inference loop | context | Facts, Diagrams | DSPy-governed output |
-| `extract_facts` (IMPLIED) | Atomic fact detection | context | List of Fact objects | No contradictory facts |
-| `generate_diagram` (IMPLIED)| Architectural mapping | context | Mermaid/DSL code | Valid syntax |
+### 2.1 Overview
+The `GraphManager` (`src/nexus/graph/manager.py`) is the guardian of the Knowledge Graph. It ensures data integrity, enforces lifecycle transitions, and handles persistence to SQLite.
 
-### Layer Assignment: Cognition
-This layer is **Stateful** in terms of prompt optimization (DSPy compiled states) but **Pure** in its execution—it does not write directly to the graph; it returns structured objects to the Service layer for registration.
+### 2.2 Lifecycle State Machine
 
----
+The system enforces a strict lifecycle for `Intent` nodes:
 
-## 4. Nexus Ingestor (`src/nexus/sync/ingest_history.py`)
-The **Ingestion Boundary**. It is responsible for the "First Contact" with raw data.
+- **LOOSE:** Initial state. A raw idea or fact extracted by AI. Low confidence.
+- **FORMING:** Promoted by user or high-confidence AI aggregation. Gaining structure.
+- **FROZEN:** Authoritative. Immutable. Can only be superseded, never changed.
+- **KILLED:** Explicitly rejected. Dead end.
+- **SUPERSEDED:** Historic. Replaced by a newer FROZEN node.
 
-### Method Intelligence Table: `NexusIngestor`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
-| :--- | :--- | :--- | :--- | :--- |
-| `brickify` | Text atomization | content, source | List of Bricks | Semantic integrity of atoms |
-| `ingest_history` | Batch processing | input_path | Mass registration in Graph & Vector | Idempotency via content hash |
+### 2.3 Key Operations
 
-### Usage Graph
-`NexusIngestor` is a standalone CLI tool or scheduled task. It is the primary writer for `LOOSE` nodes and Source records in the `GraphManager`.
+#### `promote_node_to_frozen`
+- **Pre-condition:** Node must be `FORMING`.
+- **Action:** Sets lifecycle to `FROZEN`. records `promoted_at`, `promoted_by`.
+- **Side Effect:** Logs audit event `NODE_FROZEN`.
+
+#### `supersede_node`
+- **Pre-condition:** Both Old and New nodes must be `FROZEN`.
+- **Action:** 
+  - Creates `SUPERSEDED_BY` edge from Old to New.
+  - Updates metadata on both nodes.
+- **Invariant:** A node cannot supersede itself.
+
+#### `kill_node`
+- **Pre-condition:** None (can kill from any state, unless already killed).
+- **Action:** Sets lifecycle to `KILLED`.
+- **Note:** This is a soft delete; data remains for audit trails.

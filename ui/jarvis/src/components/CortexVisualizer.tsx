@@ -138,7 +138,7 @@ export const CortexVisualizer: React.FC<CortexVisualizerProps> = ({ data }) => {
         height="100%" 
         viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} 
         preserveAspectRatio="xMidYMid meet" 
-        className="cursor-crosshair"
+        className="absolute inset-0 block cursor-crosshair"
       />
       {/* HUD Overlays */}
       <div className="absolute top-4 left-4 font-mono-data text-[10px] text-primary/60 tracking-widest uppercase pointer-events-none select-none">

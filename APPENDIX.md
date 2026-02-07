@@ -1,36 +1,38 @@
 # APPENDIX
 
-## 1. Consolidated Class-Method-Responsibility Reference
+## 1. Class → Method → Responsibility Reference
 
-| Class | Method | Responsibility | Used By | Layer | Type |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **GraphManager** | `register_node` | Persist nodes in SQL | `NexusIngestor` | Graph | Stateful |
-| | `promote_node_to_frozen` | Advance lifecycle state | `CortexAPI` | Graph | Transactional |
-| | `kill_node` | Logical deletion | UI / `CortexAPI` | Graph | Transactional |
-| | `supersede_node` | Knowledge versioning | Admin / CLI | Graph | Transactional |
-| **CortexAPI** | `route` | Query dispatching | `server.py` | Service | Read-only |
-| | `generate` | LLM synthesis | `server.py` | Service | Stateful |
-| | `_audit_trace` | Governance logging | Internal | Service | Write-only |
-| **CognitiveExtractor**| `forward` | Fact extraction | `CortexAPI` | Cognition | Pure |
-| | `extract_facts` (🧪) | Schema detection | Internal | Cognition | Pure |
-| **NexusIngestor** | `brickify` | Text atomization | CLI / Sync | Ingestion | Pure |
-| | `ingest_history` | Batch processing | CLI / Sync | Ingestion | Write-authoritative |
-| **LocalVectorIndex** | `add_bricks` | Vector persistence | `NexusIngestor` | Vector | Stateful |
-| | `search` | Semantic retrieval | `recall_bricks` | Vector | Read-only |
-| **VectorEmbedder** | `embed_query` | Query vectorization | `CortexAPI` | Vector | Pure |
-| **NexusNode** (UI) | `onSelect` | Node focus selection | `WallView` | UI | UI Event |
-| **WallView** (UI) | `render` | Lane layout generation | `App.tsx` | UI | View |
+| Class | Method | Responsibility | Used By |
+|-------|--------|----------------|---------|
+| **GraphManager** | `register_node` | Persist generic node to DB | Internal, `assembler.py` |
+| | `register_edge` | Persist generic edge to DB | Internal, `assembler.py` |
+| | `promote_node_to_frozen` | **Lifecycle Transition:** Forming -> Frozen | `server.py` (API) |
+| | `kill_node` | **Lifecycle Transition:** Any -> Killed | `server.py` (API) |
+| | `supersede_node` | **Lifecycle Transition:** Frozen -> Superseded | `server.py` (API) |
+| | `get_intents_by_topic` | Retrieve intents for conflict check | `assembler.py` |
+| **Assembler** | `assemble_topic` | Orchestrate Topic creation pipeline | `server.py` (API), CLI |
+| **CognitiveExtractor** | `forward` | Run DSPy extraction chains | `assembler.py` |
+| **CortexAPI** | `assemble` | Wrapper for `assemble_topic` | `server.py` |
 
-## 2. Key Terminology Reference
+## 2. Terminology Glossary
 
-- **Brick**: The atomic unit of text/knowledge ingested into the system.
-- **Intent**: A high-level node representing a specific goal or piece of consolidated knowledge.
-- **Lane**: A vertical grouping in the UI representing a lifecycle stage (Frozen, Forming, Loose).
-- **Audit Trace**: A JSONL file recording every cognitive operation for transparency.
-- **Scope**: A boundary (Global or Context-specific) within which an Intent is valid.
+- **Brick:** A raw chunk of conversation.
+- **Intent:** A refined, atomic unit of knowledge (Rule, Fact).
+- **Topic:** A cluster of Bricks and Intents around a subject.
+- **Anchor:** A `FROZEN` intent that overrides conflicting new information.
+- **Supersession:** The act of replacing an old `FROZEN` intent with a new one.
+- **Monotonicity:** The property that `FROZEN` nodes never change, they only get superseded.
 
-## 3. Interaction Boundary Notes
+## 3. Directory Structure
 
-- **The Write Barrier**: No component except `GraphManager` and `LocalVectorIndex` may write to disk. `CortexAPI` must use these classes for all state changes.
-- **The Security Barrier**: `CortexAPI` is the only component allowed to interact with the External LLM (e.g., GPT-4). No direct calls from UI or Ingestion layers are permitted.
-- **The Lifecycle Gate**: Promotion to `FROZEN` is a "one-way" transition in terms of UI visibility; it moves the node into the high-confidence swimlane.
+```
+src/nexus/
+├── ask/            # Retrieval logic
+├── bricks/         # Ingestion & chunking
+├── cognition/      # LLM assembly & extraction
+├── graph/          # Graph database & schema
+├── vector/         # Embeddings & Index
+└── walls/          # (Legacy) Visualization data
+services/cortex/    # Flask API
+ui/jarvis/          # React Frontend
+```

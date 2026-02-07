@@ -49,3 +49,16 @@ class ConversationIndex:
 
     def list_conversations(self) -> List[Dict]:
         return list(self.index.values())
+
+    def export_chat_mapping(self, target_path: str):
+        """
+        Export the index as a simple {chat_id: title} mapping for the UI.
+        """
+        mapping = {chat_id: meta.get("title", "Untitled") for chat_id, meta in self.index.items()}
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(mapping, f, ensure_ascii=False, indent=2)
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [INDEX] Exported chat mapping to {target_path}")

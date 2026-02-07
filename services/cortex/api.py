@@ -153,6 +153,89 @@ class CortexAPI:
             print(f"ERROR: Assembly failed: {e}")
             return {"error": str(e), "status": "failed"}
 
+    def calculate_complexity_score(self, content: str) -> float:
+        """Calculate a complexity score based on structure, directives, and density."""
+        if not content or not isinstance(content, str):
+            return 0.0
+            
+        score = 0.0
+        
+        # 1. Structural Markers (Markdown)
+        score += content.count("#") * 5.0  # Headers
+        score += content.count("---") * 10.0  # Dividers
+        score += content.count("===") * 10.0  # Dividers
+        score += content.count("**") * 2.0   # Bold markers
+        score += content.count("- ") * 1.5   # List items
+        score += content.count("1. ") * 2.0  # Numbered items
+        
+        # 2. Semantic Markers (Directives & Roles)
+        directives = ["MUST", "STRICT", "REQUIREMENTS", "RULE", "FAIL", "QUALITY", "CORE", "DIRECTIVE"]
+        for d in directives:
+            if d in content:
+                score += 15.0
+                
+        roles = ["Architect", "Psychologist", "Linguist", "Analyst", "Synthesizer", "Engineer"]
+        for r in roles:
+            if r.lower() in content.lower():
+                score += 10.0
+                
+        # 3. Text Density & Variation
+        lines = content.split("\n")
+        score += len(lines) * 1.0  # Length bonus
+        
+        # Unique word density
+        words = content.lower().split()
+        if len(words) > 0:
+            unique_ratio = len(set(words)) / len(words)
+            score += unique_ratio * 20.0
+            
+        return min(round(score, 2), 1000.0) # Cap for normalization if needed
+
+    def get_all_prompts(self, min_score: float = 0.0) -> List[Dict]:
+        """Crawl output/nexus/trees/ and return all user/assistant messages with complexity scores."""
+        prompts = []
+        # Relative to project root
+        trees_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "output", "nexus", "trees"))
+        
+        if not os.path.exists(trees_dir):
+            return []
+
+        for root, _, files in os.walk(trees_dir):
+            for file in files:
+                if file.endswith(".json"):
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            
+                        conv_id = data.get("conversation_id")
+                        title = data.get("title")
+                        
+                        for msg in data.get("messages", []):
+                            role = msg.get("role")
+                            if role in ["user", "assistant"]:
+                                content = msg.get("content", "")
+                                if not content: continue
+                                
+                                score = self.calculate_complexity_score(content)
+                                if score >= min_score:
+                                    prompts.append({
+                                        "conversation_id": conv_id,
+                                        "title": title,
+                                        "message_id": msg.get("message_id"),
+                                        "role": role,
+                                        "content": content,
+                                        "model_name": msg.get("model_name"),
+                                        "created_at": msg.get("created_at"),
+                                        "complexity_score": score
+                                    })
+                    except Exception as e:
+                        print(f"WARN: Failed to read tree file {file_path}: {e}")
+        
+        # Sort by complexity score (highest first) then timestamp
+        prompts.sort(key=lambda x: (x.get("complexity_score", 0), x.get("created_at") or ""), reverse=True)
+        return prompts
+
     def _reload_source_text(self, brick_ids: List[str]) -> str:
         """MODE-1 enforcement layer: Reload raw source text from bricks"""
         all_text = []

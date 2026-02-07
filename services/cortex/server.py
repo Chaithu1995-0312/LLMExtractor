@@ -310,6 +310,21 @@ def jarvis_assemble_topic():
     # Alias to the generic endpoint for backward compatibility/UI support
     return cognition_assemble()
 
+@app.route("/jarvis/prompts", methods=["GET"])
+def jarvis_prompts():
+    """Retrieve filtered prompts with complexity scores from processed trees."""
+    try:
+        min_score = request.args.get("min_score", default=0.0, type=float)
+        prompts = cortex_api.get_all_prompts(min_score=min_score)
+        return jsonify({
+            "status": "success",
+            "count": len(prompts),
+            "min_score": min_score,
+            "prompts": prompts
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     print("Prewarming embedder...")
     get_embedder()
