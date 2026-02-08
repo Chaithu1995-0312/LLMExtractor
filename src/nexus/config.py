@@ -6,6 +6,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(PACKAGE_ROOT))
 
 # Data paths
 DATA_DIR = os.path.join(REPO_ROOT, "data")
+LOGS_DIR = os.path.join(REPO_ROOT, "logs")
 INDEX_PATH = os.path.join(DATA_DIR, "index", "index.faiss")
 BRICK_IDS_PATH = os.path.join(DATA_DIR, "brick_ids.json")
 GRAPH_DB_PATH = os.path.join(REPO_ROOT, "src", "nexus", "graph", "graph.db")

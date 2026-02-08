@@ -4,6 +4,7 @@ import json
 import hashlib
 from datetime import datetime, timezone
 from typing import Dict, List, Any
+from nexus.utils_logging import setup_logging
 
 # Import new components
 from nexus.sync.db import SyncDatabase
@@ -15,12 +16,19 @@ from nexus.extract.tree_splitter import load_conversations, process_conversation
 from nexus.config import DEFAULT_OUTPUT_DIR
 
 def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
+    setup_logging("sync")
     print(f"[{datetime.now(timezone.utc).isoformat()}] [START] Starting Deterministic Sync (rebuild={rebuild_index})...")
     
     try:
         # 1. Initialize The Vault & Compiler
         print(f"[{datetime.now(timezone.utc).isoformat()}] [INIT] Connecting to Vault (Database)...")
         db = SyncDatabase()
+
+        # Handle Full Rebuild if requested
+        if rebuild_index:
+            print(f"[{datetime.now(timezone.utc).isoformat()}] [REBUILD] Flag detected. Truncating existing data...")
+            db.truncate_sync_data()
+
         llm = LLMClient() # Will use env var or mock
         compiler = NexusCompiler(db, llm)
 

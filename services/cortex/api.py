@@ -159,11 +159,14 @@ class CortexAPI:
         }
 
     def ask_preview(self, query: str) -> Dict:
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [CortexAPI] Processing ask_preview for query: '{query}'")
         sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "nexus-cli")))
         from nexus.ask.recall import recall_bricks_readonly
 
         # Explicitly enforce global scope for unauthenticated previews
         recalled_bricks = recall_bricks_readonly(query, allowed_scopes=["global"])
+        
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [CortexAPI] ask_preview found {len(recalled_bricks)} bricks.")
 
         top_bricks_output = [
             {"brick_id": brick["brick_id"], "confidence": round(brick["confidence"], 4)}

@@ -105,6 +105,9 @@ def recall_bricks(query: str, k: int = 10, allowed_scopes: List[str] = ["global"
 def recall_bricks_readonly(query: str, k: int = 10, allowed_scopes: List[str] = ["global"], use_genai: bool = False) -> List[Dict]:
     return recall_bricks(query, k, allowed_scopes, use_genai=use_genai)
 
+def get_recall_brick_metadata(brick_id: str) -> Optional[Dict]:
+    return _brick_store.get_brick_metadata(brick_id)
+
 def get_related_intents(brick_ids: List[str]) -> List[str]:
     """Graph Traversal: Find Intents or Artifacts related to these bricks."""
     if not brick_ids:

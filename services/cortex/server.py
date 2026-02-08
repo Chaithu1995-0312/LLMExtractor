@@ -4,6 +4,19 @@ import sys
 import logging
 from datetime import datetime, timezone
 import json
+
+from nexus.utils_logging import setup_logging
+# Initialize logging as early as possible
+setup_logging("cortex")
+
+# Configure standard logging to use our MultiWriter intercepted stdout
+logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(message)s')
+# Explicitly handle Werkzeug (Flask's server) logger
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.handlers = [] # Clear existing
+werkzeug_logger.addHandler(logging.StreamHandler(sys.stdout))
+werkzeug_logger.propagate = False # Prevent double logging if propagate is on
+
 from nexus.vector.embedder import get_embedder
 
 # Suppress transformers architectural warnings and HF Hub warnings
@@ -43,6 +56,37 @@ except ImportError:
 
 app = Flask(__name__)
 cortex_api = CortexAPI()
+
+@app.before_request
+def log_request_info():
+    if request.path.startswith("/jarvis") or request.path.startswith("/api") or request.path.startswith("/cognition"):
+        body = ""
+        if request.is_json:
+            try:
+                body = json.dumps(request.json)
+            except:
+                body = "<invalid json>"
+        
+        # Mask potentially sensitive headers if any (usually not an issue for local development)
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in ['authorization', 'cookie']}
+        
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [API_REQ] {request.method} {request.url}")
+        print(f"   Headers: {headers}")
+        if body:
+            print(f"   Body: {body[:1000]}{'...' if len(body) > 1000 else ''}")
+
+@app.after_request
+def log_response_info(response):
+    if request.path.startswith("/jarvis") or request.path.startswith("/api") or request.path.startswith("/cognition"):
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [API_RES] {request.method} {request.url} -> Status: {response.status_code}")
+        
+        if response.is_json:
+             try:
+                resp_body = response.get_data(as_text=True)
+                print(f"   Response JSON: {resp_body[:500]}{'...' if len(resp_body) > 500 else ''}")
+             except:
+                 pass
+    return response
 
 def get_utc_now():
     return datetime.now(timezone.utc).isoformat()
@@ -290,11 +334,16 @@ def jarvis_ask_preview():
     query = request.args.get("query")
     use_genai = request.args.get("use_genai", "false").lower() == "true"
     
+    print(f"[{get_utc_now()}] [JARVIS_PREVIEW] Processing query: '{query}' (use_genai={use_genai})")
+
     if not query:
+        print(f"[{get_utc_now()}] [JARVIS_PREVIEW] Error: Query parameter is required")
         return jsonify({"error": "Query parameter is required"}), 400
 
     # Use the read-only recall adapter
     recalled_bricks = recall_bricks_readonly(query, use_genai=use_genai)
+    
+    print(f"[{get_utc_now()}] [JARVIS_PREVIEW] Recalled {len(recalled_bricks)} bricks for query: '{query}'")
 
     top_bricks_output = [
         {"brick_id": brick["brick_id"], "confidence": round(brick["confidence"], 4)}

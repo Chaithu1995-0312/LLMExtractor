@@ -143,6 +143,27 @@ class SyncDatabase:
                     brick["source_address"]["checksum"]
                 )
             )
+            
+            # Atomic update to unified nodes to ensure they are visible to external tools
+            state_map = {
+                "IMPROVISE": "loose",
+                "FORMING": "forming",
+                "FINAL": "frozen",
+                "SUPERSEDED": "killed"
+            }
+            node_data = {
+                "statement": brick["content"],
+                "lifecycle": state_map.get(brick["state"], "loose"),
+                "metadata": {
+                    "sync_topic_id": brick["topic_id"],
+                    "sync_topic_name": "Nexus Server Sync Architecture" # Fallback/Mock name
+                }
+            }
+            conn.execute(
+                "INSERT OR REPLACE INTO nodes (id, type, data, created_at) VALUES (?, 'brick', ?, datetime('now'))",
+                (brick["id"], json.dumps(node_data))
+            )
+            
             conn.commit()
         finally:
             conn.close()
@@ -181,3 +202,24 @@ class SyncDatabase:
                 "checksum": row[9]
             }
         } for row in rows]
+
+    def truncate_sync_data(self):
+        """Clears all bricks and resets source runs for a full rebuild."""
+        conn = self._get_conn()
+        try:
+            # Delete all bricks
+            conn.execute("DELETE FROM bricks")
+            # Reset last_processed_index in all runs to allow re-processing
+            conn.execute("UPDATE source_runs SET last_processed_index = -1")
+            
+            # ALSO clear unified nodes to ensure the sync process actually populates them again
+            conn.execute("DELETE FROM nodes")
+            conn.execute("DELETE FROM edges")
+            
+            conn.commit()
+            print("[SyncDB] Data truncated and runs reset for full rebuild (including unified nodes).")
+        except Exception as e:
+            print(f"[SyncDB] Error truncating data: {e}")
+            conn.rollback()
+        finally:
+            conn.close()

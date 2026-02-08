@@ -1,6 +1,6 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 import os
-
+import hashlib
 import time
 from functools import lru_cache
 
@@ -29,7 +29,7 @@ class LlmReranker:
         except Exception as e:
             raise RuntimeError(f"Failed to load Local LLM: {e}")
 
-    @lru_cache(max_size=1000)
+    @lru_cache(maxsize=1000)
     def _get_cached_score(self, query: str, text_hash: str) -> Optional[float]:
         # Logic to call LLM and return score
         # Note: text_hash used to keep cache key small
@@ -45,7 +45,6 @@ class LlmReranker:
         for cand in candidates:
             text = cand.get("brick_text", "")
             # Fingerprint for cache
-            import hashlib
             text_hash = hashlib.md5(text.encode()).hexdigest()
             cache_key = (query, text_hash)
             
