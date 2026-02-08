@@ -1,0 +1,20 @@
+model_list:
+  - model_name: jarvis-l2
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20240620
+      api_key: os.environ/ANTHROPIC_API_KEY
+  
+  - model_name: jarvis-l3
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  master_key: sk-1234
+  alerting: ["console"]
+
+# THE SAFETY RAIL
+router_settings:
+  - model_group: "jarvis-stack"
+    max_budget: 2.00    # Hard stop at $2.00
+    budget_duration: "1d"

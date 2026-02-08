@@ -1,78 +1,95 @@
-# MODULE_DEEP_DIVES
+# Module Deep Dives
 
-## 1. Cognition Engine: `Assembler`
+## 1. Graph Manager (`src/nexus/graph/manager.py`)
+**Role:** The Central Nervous System. Manages the unified graph of Intent, Source, Scope, and Brick nodes.
 
-### 1.1 Overview
-The `Assembler` (`src/nexus/cognition/assembler.py`) is the engine responsible for synthesizing scattered "Bricks" into coherent "Topics". It bridges the gap between raw vector retrieval and structured knowledge graph updates.
+### Method: `promote_node_to_frozen(node_id, promote_bricks, actor)`
+*   **Responsibility:** Executes the critical lifecycle transition from `FORMING` to `FROZEN`.
+*   **Inputs:**
+    *   `node_id` (str): UUID of the node to freeze.
+    *   `promote_bricks` (List[str]): IDs of bricks acting as "Hard Anchors".
+    *   `actor` (str): ID of the user/agent authorizing the freeze.
+*   **Outputs:** None (State change).
+*   **Invariants Enforced:**
+    *   Node must currently be in `FORMING` state.
+    *   Transition is monotonic (cannot go back to LOOSE).
+*   **Side Effects:**
+    *   Updates `nodes` table (lifecycle="frozen", hard_anchors=...).
+    *   Logs `NODE_FROZEN` event to Audit Trace.
+    *   Emits `NODE_FROZEN` pulse to Gateway.
+*   **Failure Modes:**
+    *   `ValueError`: If node not found or not in `FORMING` state.
+*   **Lifecycle:** **GATEKEEPER** (Write Barrier).
 
-### 1.2 The `assemble_topic` Pipeline
+### Method: `supersede_node(old_node_id, new_node_id, reason, actor)`
+*   **Responsibility:** Replaces an obsolete fact with a new one while preserving history.
+*   **Inputs:** `old_node_id`, `new_node_id`, `reason`, `actor`.
+*   **Invariants Enforced:**
+    *   Both nodes must be `FROZEN`.
+    *   Nodes cannot supersede themselves.
+*   **Side Effects:**
+    *   Creates edge: `old -> [SUPERSEDED_BY] -> new`.
+    *   Updates `nodes` metadata: `old.superseded_by`, `new.supersedes`.
+    *   Logs `NODE_SUPERSEDED` event.
+*   **Lifecycle:** **GOVERNANCE** (History Preservation).
 
-1. **Recall Phase (Read-Only)**
-   - Inputs: `topic_query` (string)
-   - Action: Calls `recall_bricks_readonly(topic_query, k=15)`.
-   - Output: List of candidate bricks with similarity scores.
-   - *Note:* If no bricks are found, it creates an empty "NO_RECALL_MATCHES" artifact.
+---
 
-2. **Expansion & Deduplication Phase**
-   - Goal: Contextualize bricks.
-   - Action: Loads full conversation trees for each brick. Deduplicates multiple bricks coming from the same conversation to avoid redundancy.
-   - Result: `unique_docs` map containing full context window.
+## 2. Nexus Compiler (`src/nexus/sync/compiler.py`)
+**Role:** The Zero-Trust Ingestion Engine. Transforms raw logs into verified Bricks.
 
-3. **Cognitive Extraction Phase**
-   - Tool: `CognitiveExtractor` (DSPy).
-   - Inputs: Aggregated text from all unique docs.
-   - Action: 
-     - Extracts **Atomic Facts** (`FactSignature`).
-     - Extracts **Visuals** (`DiagramSignature`: Latex, Mermaid).
-   - *Error Handling:* Wraps DSPy call in try-except; defaults to empty lists on failure.
+### Method: `compile_run(run_id, topic_id)`
+*   **Responsibility:** Orchestrates the extraction pipeline for a specific conversation run.
+*   **Control Flow:**
+    1.  **Fetch:** Retrieves Run JSON and Topic Definition from DB.
+    2.  **Scan:** Calls `_pre_filter_nodes` to optimize context.
+    3.  **LLM:** Calls `_llm_extract_pointers` to get candidate quotes.
+    4.  **Validate:** Calls `_materialize_brick` for byte-level verification.
+    5.  **Persist:** Saves valid bricks to DB.
+*   **Outputs:** Integer (count of new bricks).
 
-4. **Persistence Phase**
-   - Action: Saves the full `artifact_payload` (provenance, raw excerpts, extracted facts) to disk (`output/nexus/artifacts/`).
-   - Mechanism: Content-Addressable Storage (SHA256 hash of payload).
+### Method: `_materialize_brick(run_data, run_id, pointer, topic_id)`
+*   **Responsibility:** The "Zero-Trust Gate". Validates that the LLM's hallucinated pointer matches reality.
+*   **Inputs:** Raw JSON data, pointer object (JSONPath + Verbatim Quote).
+*   **Logic:**
+    1.  Resolves JSONPath to find the node text.
+    2.  Searches for `verbatim_quote` within that text.
+    3.  **CRITICAL:** If quote is missing, returns `None` (Silent Rejection).
+*   **Outputs:** `Brick` dict or `None`.
+*   **Invariants Enforced:** Content MUST exist in source.
+*   **Security:** Prevents "hallucinated facts" from entering the graph.
 
-5. **Graph Linkage & Monotonic Conflict Resolution**
-   - **Nodes:**
-     - Creates `Topic` node (merged by slug).
-     - Creates `Artifact` node (immutable snapshot).
-   - **Edges:**
-     - `Topic` -> `ASSEMBLED_IN` -> `Artifact`.
-     - `Artifact` -> `DERIVED_FROM` -> `Brick`.
-   - **Conflict Logic:**
-     - Iterates over extracted facts.
-     - Compares against existing intents for the topic using `CrossEncoderReranker`.
-     - **Rule:** If new fact is highly similar (>0.85) to an existing `FROZEN` intent, the new fact is **Overridden** (anchor wins).
-     - **Rule:** If new fact is highly similar to an existing `FORMING` intent, the new fact **Supersedes** it (newest forming wins).
+---
 
-## 2. Graph Governance: `GraphManager`
+## 3. Cortex Gateway (`services/cortex/gateway.py`)
+**Role:** The Economic Router. Manages cognitive costs.
 
-### 2.1 Overview
-The `GraphManager` (`src/nexus/graph/manager.py`) is the guardian of the Knowledge Graph. It ensures data integrity, enforces lifecycle transitions, and handles persistence to SQLite.
+### Method: `pulse(event_type, context)` (Tier L1)
+*   **Responsibility:** Low-cost system narration.
+*   **Routing:** Directs request to **Local LLM** (Ollama/Llama3).
+*   **Cost:** $0.00.
+*   **Fallbacks:** Returns static string if local inference fails.
 
-### 2.2 Lifecycle State Machine
+### Method: `explain(query, context_bricks)` (Tier L2)
+*   **Responsibility:** High-quality user Q&A.
+*   **Routing:** Directs request to **LiteLLM Proxy** (Claude-3.5 Sonnet).
+*   **Cost:** ~$0.01 per call.
+*   **Logic:**
+    1.  Injects "Governor" system prompt.
+    2.  Checks for proxy errors (429 Budget Exceeded).
+    3.  Returns content + usage stats.
+*   **Lifecycle:** **Read-Only** (does not write to graph).
 
-The system enforces a strict lifecycle for `Intent` nodes:
+---
 
-- **LOOSE:** Initial state. A raw idea or fact extracted by AI. Low confidence.
-- **FORMING:** Promoted by user or high-confidence AI aggregation. Gaining structure.
-- **FROZEN:** Authoritative. Immutable. Can only be superseded, never changed.
-- **KILLED:** Explicitly rejected. Dead end.
-- **SUPERSEDED:** Historic. Replaced by a newer FROZEN node.
+## 4. Vector Embedder (`src/nexus/vector/embedder.py`)
+**Role:** Semantic Indexing.
 
-### 2.3 Key Operations
-
-#### `promote_node_to_frozen`
-- **Pre-condition:** Node must be `FORMING`.
-- **Action:** Sets lifecycle to `FROZEN`. records `promoted_at`, `promoted_by`.
-- **Side Effect:** Logs audit event `NODE_FROZEN`.
-
-#### `supersede_node`
-- **Pre-condition:** Both Old and New nodes must be `FROZEN`.
-- **Action:** 
-  - Creates `SUPERSEDED_BY` edge from Old to New.
-  - Updates metadata on both nodes.
-- **Invariant:** A node cannot supersede itself.
-
-#### `kill_node`
-- **Pre-condition:** None (can kill from any state, unless already killed).
-- **Action:** Sets lifecycle to `KILLED`.
-- **Note:** This is a soft delete; data remains for audit trails.
+### Method: `embed_query(query, use_genai)`
+*   **Responsibility:** Converts text to vector.
+*   **Inputs:** `query` (str), `use_genai` (bool).
+*   **Logic:**
+    1.  (Optional) Calls `_rewrite_with_llm` to expand technical terms (e.g., "brick" -> "nexus documentation unit").
+    2.  Calls `SentenceTransformer.encode`.
+*   **Outputs:** `numpy.ndarray` (384-d).
+*   **Performance:** Singleton pattern ensures model is loaded once.

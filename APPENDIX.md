@@ -1,38 +1,30 @@
-# APPENDIX
+# Appendix: Class Responsibility Matrix
 
-## 1. Class → Method → Responsibility Reference
+| Class | Method | Responsibility | Layer | Used By |
+| :--- | :--- | :--- | :--- | :--- |
+| **GraphManager** | `register_node` | Upsert node (Idempotent) | Graph | `sync_bricks_to_nodes`, `NexusCompiler` |
+| | `register_edge` | Create edge (Idempotent) | Graph | `RelationshipSynthesizer`, `supersede_node` |
+| | `promote_node_to_frozen` | Enforce FROZEN state | Governance | `server.py` (API), Manual Scripts |
+| | `kill_node` | Soft-delete node | Governance | `server.py` (API) |
+| | `supersede_node` | Replace node with history | Governance | `server.py` (API) |
+| **NexusCompiler** | `compile_run` | End-to-end ingestion | Ingest | `nexus-cli` (CLI), `server.py` (API) |
+| | `_materialize_brick` | Zero-Trust Verification | Ingest | `compile_run` |
+| **CortexAPI** | `route` | Agent selection | Service | `server.py` (API) |
+| | `generate` | L2 Pipeline Execution | Service | `server.py` (API) |
+| | `ask_preview` | Read-only Preview | Service | `server.py` (API), `Jarvis UI` |
+| **JarvisGateway** | `pulse` | L1 (Local) Inference | Service | `GraphManager` (Events), `NexusIngestor` |
+| | `explain` | L2 (Cloud) Inference | Service | `CortexAPI.generate` |
+| | `synthesize` | L3 (Cloud) Inference | Service | `CortexAPI.synthesize` |
+| **VectorEmbedder** | `embed_query` | Text-to-Vector | Vector | `LocalVectorIndex`, `CortexAPI` |
+| **LocalVectorIndex** | `search` | K-NN Search | Vector | `recall.py`, `CortexAPI` |
+| **SyncDatabase** | `save_brick` | Persist Brick | Ingest | `NexusCompiler` |
 
-| Class | Method | Responsibility | Used By |
-|-------|--------|----------------|---------|
-| **GraphManager** | `register_node` | Persist generic node to DB | Internal, `assembler.py` |
-| | `register_edge` | Persist generic edge to DB | Internal, `assembler.py` |
-| | `promote_node_to_frozen` | **Lifecycle Transition:** Forming -> Frozen | `server.py` (API) |
-| | `kill_node` | **Lifecycle Transition:** Any -> Killed | `server.py` (API) |
-| | `supersede_node` | **Lifecycle Transition:** Frozen -> Superseded | `server.py` (API) |
-| | `get_intents_by_topic` | Retrieve intents for conflict check | `assembler.py` |
-| **Assembler** | `assemble_topic` | Orchestrate Topic creation pipeline | `server.py` (API), CLI |
-| **CognitiveExtractor** | `forward` | Run DSPy extraction chains | `assembler.py` |
-| **CortexAPI** | `assemble` | Wrapper for `assemble_topic` | `server.py` |
+---
 
-## 2. Terminology Glossary
-
-- **Brick:** A raw chunk of conversation.
-- **Intent:** A refined, atomic unit of knowledge (Rule, Fact).
-- **Topic:** A cluster of Bricks and Intents around a subject.
-- **Anchor:** A `FROZEN` intent that overrides conflicting new information.
-- **Supersession:** The act of replacing an old `FROZEN` intent with a new one.
-- **Monotonicity:** The property that `FROZEN` nodes never change, they only get superseded.
-
-## 3. Directory Structure
-
-```
-src/nexus/
-├── ask/            # Retrieval logic
-├── bricks/         # Ingestion & chunking
-├── cognition/      # LLM assembly & extraction
-├── graph/          # Graph database & schema
-├── vector/         # Embeddings & Index
-└── walls/          # (Legacy) Visualization data
-services/cortex/    # Flask API
-ui/jarvis/          # React Frontend
-```
+## Terminology
+*   **Brick:** Atomic unit of extracted knowledge (verbatim quote).
+*   **Intent:** Synthesized fact or goal derived from one or more Bricks.
+*   **Scope:** The domain or context an Intent applies to (e.g., "Project A", "Global").
+*   **Pointer:** A JSONPath + Quote pair identified by the LLM during scanning.
+*   **Frozen:** A state where a node is immutable and considered "Truth".
+*   **Superseded:** A state where a node is historically preserved but logically obsolete.

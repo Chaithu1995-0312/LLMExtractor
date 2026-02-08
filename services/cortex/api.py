@@ -3,103 +3,138 @@ import os
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 import sys
+import numpy as np
 
 # Try to import BrickStore from Nexus
 try:
     from nexus.bricks.brick_store import BrickStore
+    from nexus.vector.embedder import get_embedder
 except ImportError:
     # Fallback if nexus not installed
     import os
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src")))
     from nexus.bricks.brick_store import BrickStore
+    from nexus.vector.embedder import get_embedder
+
+# Flexible import for JarvisGateway (handles root vs services/ path context)
+try:
+    from services.cortex.gateway import JarvisGateway
+except ImportError:
+    try:
+        from cortex.gateway import JarvisGateway
+    except ImportError:
+        # Fallback to relative import if package structure allows
+        from .gateway import JarvisGateway
 
 class CortexAPI:
     def __init__(self, audit_log_path: str = "phase3_audit_trace.jsonl"):
         self.audit_log_path = audit_log_path
         self.brick_store = BrickStore()
+        # Initialize the Multi-Tier Gateway
+        self.gateway = JarvisGateway()
+        
+        self.agent_profiles = {
+            "Jarvis": "Expert in financial markets, trading, stocks, and economic analysis.",
+            "Architect": "Expert in software architecture, code implementation, design patterns, and system engineering.",
+            "ResearchPro": "Expert in deep research, finding facts, historical data, and answering 'who/when' questions.",
+            "VideoFactory": "Expert in creative writing, video production, storytelling, and content creation.",
+            "General": "General purpose assistant for casual conversation and broad queries."
+        }
+        self.agent_embeddings = {}
+        self._init_agent_embeddings()
+
+    def _init_agent_embeddings(self):
+        try:
+            embedder = get_embedder()
+            for agent_id, desc in self.agent_profiles.items():
+                self.agent_embeddings[agent_id] = embedder.embed_query(desc)
+            print("[CortexAPI] Semantic routing initialized.")
+        except Exception as e:
+            print(f"[CortexAPI] Failed to initialize semantic routing: {e}")
 
     def route(self, user_query: str) -> Dict:
-        """Endpoint: /route - Intent-based routing (LOCKED Rules)"""
-        query_lower = user_query.lower()
-        
-        # Deterministic Routing Table
-        if any(word in query_lower for word in ["trade", "market", "stock", "price"]):
-            return {"agent_id": "Jarvis", "model": "Claude"}
-        
-        if any(word in query_lower for word in ["architect", "code", "implement", "design"]):
-            return {"agent_id": "Architect", "model": "Gemini"}
+        """Endpoint: /route - Intent-based routing (Semantic + Fallback)"""
+        try:
+            embedder = get_embedder()
+            query_vec = embedder.embed_query(user_query)
             
-        if any(word in query_lower for word in ["research", "find", "who", "when"]):
-            return {"agent_id": "ResearchPro", "model": "Gemini"}
+            best_agent = "General"
+            best_score = -1.0
             
-        if any(word in query_lower for word in ["video", "creative", "story", "write"]):
-            return {"agent_id": "VideoFactory", "model": "GPT"}
+            for agent_id, agent_vec in self.agent_embeddings.items():
+                # Cosine similarity
+                score = np.dot(query_vec.flatten(), agent_vec.flatten()) / (np.linalg.norm(query_vec) * np.linalg.norm(agent_vec))
+                if score > best_score:
+                    best_score = score
+                    best_agent = agent_id
             
-        # Default fallback
-        return {"agent_id": "General", "model": "GPT"}
+            # Threshold for fallback
+            if best_score < 0.2:
+                best_agent = "General"
+                
+            model_map = {
+                "Jarvis": "Claude",
+                "Architect": "Gemini",
+                "ResearchPro": "Gemini",
+                "VideoFactory": "GPT",
+                "General": "GPT"
+            }
+            
+            return {"agent_id": best_agent, "model": model_map.get(best_agent, "GPT"), "confidence": float(best_score)}
+            
+        except Exception as e:
+            print(f"[CortexAPI] Semantic routing failed, using fallback: {e}")
+            # Fallback to keyword routing
+            query_lower = user_query.lower()
+            if any(word in query_lower for word in ["trade", "market", "stock", "price"]):
+                return {"agent_id": "Jarvis", "model": "Claude"}
+            if any(word in query_lower for word in ["architect", "code", "implement", "design"]):
+                return {"agent_id": "Architect", "model": "Gemini"}
+            if any(word in query_lower for word in ["research", "find", "who", "when"]):
+                return {"agent_id": "ResearchPro", "model": "Gemini"}
+            if any(word in query_lower for word in ["video", "creative", "story", "write"]):
+                return {"agent_id": "VideoFactory", "model": "GPT"}
+            return {"agent_id": "General", "model": "GPT"}
 
     def generate(self, user_id: str, agent_id: str, user_query: str, brick_ids: List[str]) -> Dict:
-        """Endpoint: /generate - Secure generation with memory injection"""
+        """Endpoint: /generate - Now uses Tier 2 (The Voice)"""
         print(f"[{datetime.now(timezone.utc).isoformat()}] Cortex: Generating response for {agent_id}...")
         
-        # 1. Inject memory (Reload raw source)
+        # 1. Inject Memory (Same as before)
         context_text = self._reload_source_text(brick_ids)
-        if not context_text and brick_ids:
-            return {"error": "MODE-1 Violation: Source reload failed.", "status": "blocked"}
-        
+        if not context_text and brick_ids: # Keep original logic: fail if bricks requested but reload failed
+             return {"error": "MODE-1 Violation: Source reload failed.", "status": "blocked"}
+
         # 1.5 Inject Graph Context (GraphRAG)
         graph_context = self._fetch_graph_context(brick_ids)
         if graph_context:
             context_text += "\n\n" + graph_context
-        
-        # 2. LLM Call (Pluggable Backend)
-        model = "gpt-4o" # Default model tag for audit
-        response_text = ""
-        token_cost = 0.0
-        
-        try:
-            prompt = f"Context from memory:\n{context_text}\n\nUser: {user_query}\nAssistant:"
-            
-            # Check for OpenAI Key
-            openai_key = os.environ.get("OPENAI_API_KEY")
-            if openai_key:
-                from openai import OpenAI
-                client = OpenAI(api_key=openai_key)
-                completion = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0
-                )
-                response_text = completion.choices[0].message.content
-                token_cost = (completion.usage.total_tokens / 1000.0) * 0.03 # Simple estimate
-            else:
-                # Fallback to local Ollama if available
-                import requests
-                try:
-                    ollama_resp = requests.post("http://localhost:11434/api/generate", json={
-                        "model": "llama3",
-                        "prompt": prompt,
-                        "stream": False
-                    }, timeout=30)
-                    if ollama_resp.status_code == 200:
-                        response_text = ollama_resp.json().get("response", "")
-                        model = "ollama/llama3"
-                    else:
-                        raise Exception("Ollama returned error")
-                except Exception:
-                    # Final fallback for demonstration if no LLM is running
-                    response_text = f"[NO LLM DETECTED] This would be a real response using the reloaded context: {context_text[:100]}..."
-                    model = "mock-fallback"
 
-        except Exception as e:
-            return {"error": f"Generation failed: {str(e)}", "status": "failed"}
+        # 2. Call Gateway (Tier 2)
+        # This routes to Claude-3.5 via LiteLLM and checks budget
+        result = self.gateway.explain(user_query, context_text)
         
-        # 3. Emit audit record
-        self._audit_trace(user_id, agent_id, brick_ids, model, token_cost)
+        if "error" in result:
+            # Handle Budget Cap Gracefully
+            if result["error"] == "DAILY_BUDGET_EXCEEDED":
+                return {
+                    "response": "⚠️ **SYSTEM ALERT**: Daily cognitive budget depleted. Operating in Read-Only Mode.",
+                    "status": "budget_locked"
+                }
+            return {"response": f"Cognitive Failure: {result['content']}", "status": "failed"}
+
+        # 3. Audit (Now includes accurate usage data from proxy)
+        usage = result.get("usage", {})
+        # Estimate cost (blended rate for Sonnet) -> ~$3.00 / 1M input + $15 / 1M output
+        # Rough calc: (Input * 3e-6) + (Output * 15e-6)
+        est_cost = (usage.get("prompt_tokens", 0) * 0.000003) + (usage.get("completion_tokens", 0) * 0.000015)
+        
+        self._audit_trace(user_id, agent_id, brick_ids, "jarvis-l2", est_cost)
         
         return {
-            "response": response_text,
-            "model": model,
+            "response": result["content"],
+            "model": "jarvis-l2",
+            "usage": usage,
             "status": "success"
         }
 
@@ -151,6 +186,24 @@ class CortexAPI:
             
         except Exception as e:
             print(f"ERROR: Assembly failed: {e}")
+            return {"error": str(e), "status": "failed"}
+
+    def synthesize(self, topic_id: Optional[str] = None) -> Dict:
+        """Endpoint: /cognition/synthesize - Trigger relationship discovery"""
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Cortex: Synthesizing relationships (topic={topic_id})...")
+        
+        try:
+            from nexus.cognition.synthesizer import run_relationship_synthesis
+            
+            discovered_count = run_relationship_synthesis(topic_id=topic_id)
+            
+            return {
+                "status": "success",
+                "discovered_relationships": discovered_count,
+                "topic_id": topic_id
+            }
+        except Exception as e:
+            print(f"ERROR: Synthesis failed: {e}")
             return {"error": str(e), "status": "failed"}
 
     def calculate_complexity_score(self, content: str) -> float:

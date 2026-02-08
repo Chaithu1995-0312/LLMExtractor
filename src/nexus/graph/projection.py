@@ -31,12 +31,38 @@ def is_global_scope(intent_id: str, edges: List[Edge], scope_nodes: Dict[str, Sc
     return False
 
 def has_conflict(intent_id: str, edges: List[Edge]) -> bool:
-    """Check if intent has active conflicts."""
-    # Check for incoming or outgoing conflict edges
+    """
+    Check if intent has active conflicts.
+    Logic includes:
+    1. Explicit CONFLICTS_WITH edges.
+    2. Structural conflicts (e.g., both OVERRIDES and being OVERRIDDEN by different active nodes).
+    3. Multiple active intents derived from the same source brick without resolution.
+    """
+    # 1. Explicit conflict edges
     for edge in edges:
         if edge.edge_type == EdgeType.CONFLICTS_WITH:
             if edge.source_id == intent_id or edge.target_id == intent_id:
                 return True
+                
+    # 2. Structural: Check for circular or competing overrides
+    outgoing_overrides = [e for e in edges if e.source_id == intent_id and e.edge_type == EdgeType.OVERRIDES]
+    incoming_overrides = [e for e in edges if e.target_id == intent_id and e.edge_type == EdgeType.OVERRIDES]
+    
+    if outgoing_overrides and incoming_overrides:
+        # Node is trying to override something while being overridden itself (ambiguous truth)
+        return True
+        
+    # 3. Source-level competition: Are there other intents derived from the same bricks?
+    source_brick_ids = [e.target_id for e in edges if e.source_id == intent_id and e.edge_type == EdgeType.DERIVED_FROM]
+    for brick_id in source_brick_ids:
+        # Find other intents sharing this brick
+        other_intents = [e.source_id for e in edges if e.target_id == brick_id and e.edge_type == EdgeType.DERIVED_FROM and e.source_id != intent_id]
+        if other_intents:
+            # Check if these competing intents are active
+            # (Note: This is a limited check as we don't have the full intent lifecycle list here, 
+            # but we can flag based on shared provenance alone for manual triage).
+            return True
+            
     return False
 
 def is_from_agent(intent_id: str, edges: List[Edge], sources: Dict[str, any]) -> bool:

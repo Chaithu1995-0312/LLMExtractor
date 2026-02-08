@@ -1,6 +1,9 @@
-import React, { useEffect, useRef, useState, useLayoutEffect } from 'react';
-import * as d3 from 'd3';
-import { motion } from 'framer-motion';
+import React, { useEffect, useRef, useState } from 'react';
+import CytoscapeComponent from 'react-cytoscapejs';
+import cytoscape from 'cytoscape';
+import dagre from 'cytoscape-dagre';
+
+cytoscape.use(dagre);
 
 interface CortexVisualizerProps {
   data: {
@@ -11,139 +14,105 @@ interface CortexVisualizerProps {
 }
 
 export const CortexVisualizer: React.FC<CortexVisualizerProps> = ({ data }) => {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-
-  // Handle Dynamic Resizing
-  useLayoutEffect(() => {
-    if (!containerRef.current) return;
-
-    const observer = new ResizeObserver((entries) => {
-      if (!entries[0]) return;
-      const { width, height } = entries[0].contentRect;
-      setDimensions({ width, height });
-    });
-
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, []);
+  const [elements, setElements] = useState<any[]>([]);
+  const cyRef = useRef<cytoscape.Core | null>(null);
 
   useEffect(() => {
-    if (!svgRef.current || !data || dimensions.width === 0) return;
+    if (!data) return;
 
-    const svg = d3.select(svgRef.current);
-    svg.selectAll('*').remove();
+    // Transform generic data to Cytoscape elements
+    const nodes = data.nodes.map((n) => ({
+      data: {
+        id: n.id,
+        label: n.label || n.id.substring(0, 8),
+        type: n.type || 'default',
+        lifecycle: n.lifecycle || 'loose' // loose, frozen, killed
+      },
+      classes: n.lifecycle || 'loose'
+    }));
 
-    const { width, height } = dimensions;
-
-    if (data.type === 'graph') {
-      const simulation = d3.forceSimulation(data.nodes)
-        .force('link', d3.forceLink(data.edges).id((d: any) => d.id).distance(100))
-        .force('charge', d3.forceManyBody().strength(-300))
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(30));
-
-      const link = svg.append('g')
-        .selectAll('line')
-        .data(data.edges)
-        .enter().append('line')
-        .attr('stroke', '#0080FF')
-        .attr('stroke-opacity', 0.6)
-        .attr('stroke-width', 1)
-        .attr('stroke-dasharray', '5,5');
-
-      const node = svg.append('g')
-        .selectAll('circle')
-        .data(data.nodes)
-        .enter().append('g')
-        .call(d3.drag<any, any>()
-          .on('start', dragstarted)
-          .on('drag', dragged)
-          .on('end', dragended));
-
-      node.append('circle')
-        .attr('r', 10)
-        .attr('fill', '#05080a')
-        .attr('stroke', '#00fff9')
-        .attr('stroke-width', 2)
-        .attr('class', 'crt-flicker shadow-glow-loose');
-
-      node.append('text')
-        .text((d: any) => d.label || d.id.substring(0, 8))
-        .attr('x', 14)
-        .attr('y', 4)
-        .attr('fill', '#e0e0e0')
-        .attr('font-size', '11px')
-        .attr('font-family', '"JetBrains Mono", monospace')
-        .attr('class', 'select-none pointer-events-none');
-
-      simulation.on('tick', () => {
-        link
-          .attr('x1', (d: any) => d.source.x)
-          .attr('y1', (d: any) => d.source.y)
-          .attr('x2', (d: any) => d.target.x)
-          .attr('y2', (d: any) => d.target.y);
-
-        node
-          .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
-      });
-
-      function dragstarted(event: any) {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        event.subject.fx = event.subject.x;
-        event.subject.fy = event.subject.y;
+    const edges = data.edges.map((e, idx) => ({
+      data: {
+        id: e.id || `e${idx}`,
+        source: e.source.id || e.source, // Handle both object and string refs
+        target: e.target.id || e.target,
+        label: e.type
       }
+    }));
 
-      function dragged(event: any) {
-        event.subject.fx = event.x;
-        event.subject.fy = event.y;
+    setElements([...nodes, ...edges]);
+  }, [data]);
+
+  const styles = [
+    {
+      selector: 'node',
+      style: {
+        'label': 'data(label)',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'color': '#fff',
+        'font-family': 'JetBrains Mono',
+        'font-size': '10px',
+        'width': '20px',
+        'height': '20px',
+        'background-color': '#05080a',
+        'border-width': 2,
+        'border-color': '#00fff9'
       }
-
-      function dragended(event: any) {
-        if (!event.active) simulation.alphaTarget(0);
-        event.subject.fx = null;
-        event.subject.fy = null;
+    },
+    {
+      selector: 'node.frozen',
+      style: {
+        'border-color': '#0080FF',
+        'background-color': '#001a33',
+        'width': '25px',
+        'height': '25px'
       }
-    } else if (data.type === 'radar') {
-       const radius = Math.min(width, height) / 2 - 60;
-       const g = svg.append('g').attr('transform', `translate(${width/2},${height/2})`);
-
-       [0.2, 0.4, 0.6, 0.8, 1].forEach(tick => {
-         g.append('circle')
-          .attr('r', radius * tick)
-          .attr('fill', 'none')
-          .attr('stroke', '#0080FF')
-          .attr('stroke-opacity', 0.2);
-       });
-
-       const points = g.selectAll('.point')
-        .data(data.nodes)
-        .enter().append('circle')
-        .attr('cx', (d, i) => Math.cos(i) * radius * (1 - (d.confidence || 0.5)))
-        .attr('cy', (d, i) => Math.sin(i) * radius * (1 - (d.confidence || 0.5)))
-        .attr('r', 6)
-        .attr('fill', '#ff00c1')
-        .attr('class', 'crt-flicker shadow-glow-forming');
+    },
+    {
+      selector: 'node.killed',
+      style: {
+        'border-color': '#FF0055',
+        'background-color': '#1a0000',
+        'opacity': 0.6
+      }
+    },
+    {
+      selector: 'edge',
+      style: {
+        'width': 2,
+        'line-color': '#0080FF',
+        'target-arrow-color': '#0080FF',
+        'target-arrow-shape': 'triangle',
+        'curve-style': 'bezier',
+        'opacity': 0.5
+      }
     }
+  ];
 
-  }, [data, dimensions]);
+  const layout = {
+    name: 'dagre',
+    rankDir: 'LR',
+    spacingFactor: 1.2,
+    animate: true
+  };
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-[#05080a]/40 rounded-xl overflow-hidden border border-white/5 backdrop-blur-sm shadow-2xl">
+    <div className="relative w-full h-full bg-[#05080a]/40 rounded-xl overflow-hidden border border-white/5 backdrop-blur-sm shadow-2xl">
       <div className="scanline absolute inset-0 pointer-events-none z-10" />
-      <svg 
-        ref={svgRef} 
-        width="100%" 
-        height="100%" 
-        viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} 
-        preserveAspectRatio="xMidYMid meet" 
-        className="absolute inset-0 block cursor-crosshair"
+      
+      <CytoscapeComponent
+        elements={elements}
+        style={{ width: '100%', height: '100%' }}
+        stylesheet={styles}
+        layout={layout}
+        cy={(cy) => { cyRef.current = cy; }}
+        className="block w-full h-full cursor-crosshair"
       />
+
       {/* HUD Overlays */}
       <div className="absolute top-4 left-4 font-mono-data text-[10px] text-primary/60 tracking-widest uppercase pointer-events-none select-none">
-        System_Visualizer_V3 // ONLINE<br/>
-        Resolution: {dimensions.width}x{dimensions.height}<br/>
+        System_Visualizer_V3 // CYTOSCAPE_CORE<br/>
         Nodes: {data.nodes.length} // Edges: {data.edges.length}
       </div>
       <div className="absolute bottom-4 right-4 font-mono-data text-[10px] text-primary/40 tracking-tighter pointer-events-none select-none">

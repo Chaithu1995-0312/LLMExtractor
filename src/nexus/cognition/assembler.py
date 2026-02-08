@@ -143,8 +143,48 @@ def assemble_topic(topic_query: str) -> str:
     for doc in unique_docs.values():
         all_brick_ids.update(doc["brick_ids"])
 
-    # 3.5 Cognitive Extraction via DSPy
-    aggregated_context = ""
+    # 3.5 Cognitive Extraction via DSPy with Graph-Topology Awareness
+    graph = GraphManager()
+    
+    # Identify core intents related to these bricks
+    related_intents: List[Dict] = []
+    overridden_statements: List[str] = []
+    
+    for brick_id in all_brick_ids:
+        edges = graph.get_edges_for_node(brick_id)
+        for edge in edges:
+            if edge.edge_type == EdgeType.DERIVED_FROM and edge.target_id == brick_id:
+                # This intent is derived from one of our bricks
+                node_info = graph.get_node(edge.source_id)
+                if node_info and node_info[0] == 'intent':
+                    intent_data = node_info[1]
+                    # Check for overrides
+                    intent_edges = graph.get_edges_for_node(edge.source_id)
+                    is_overridden = any(ie.edge_type == EdgeType.OVERRIDES and ie.target_id == edge.source_id for ie in intent_edges)
+                    
+                    if is_overridden:
+                        overridden_statements.append(intent_data.get("statement", ""))
+                    else:
+                        related_intents.append({
+                            "id": edge.source_id,
+                            "statement": intent_data.get("statement", ""),
+                            "lifecycle": intent_data.get("lifecycle", "loose")
+                        })
+
+    # Build Context respecting Topology
+    # 1. Primary Intents (FROZEN first)
+    sorted_intents = sorted(related_intents, key=lambda x: (x['lifecycle'] == 'frozen', x['lifecycle'] == 'forming'), reverse=True)
+    
+    topology_context = "## CORE INTENTS (Verified Graph Data)\n"
+    for ri in sorted_intents:
+        topology_context += f"[{ri['lifecycle'].upper()}] {ri['statement']}\n"
+    
+    if overridden_statements:
+        topology_context += "\n## SUPERSEDED/OVERRIDDEN INFO (Reference Only)\n"
+        for os_text in set(overridden_statements):
+            topology_context += f"- {os_text}\n"
+
+    aggregated_context = topology_context + "\n## RAW EVIDENCE (Conversation Excerpts)\n"
     for excerpt in raw_excerpts:
         for msg in excerpt["conversation"]:
             for block in msg["blocks"]:

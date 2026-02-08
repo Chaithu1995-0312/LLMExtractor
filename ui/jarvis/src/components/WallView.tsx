@@ -8,7 +8,7 @@ interface WallViewProps {
 }
 
 export const WallView: React.FC<WallViewProps> = ({ bricks, selectedId, onSelect }) => {
-  const [activeTab, setActiveTab] = useState<'FROZEN' | 'FORMING' | 'LOOSE' | 'KILLED'>('FROZEN');
+  const [activeTab, setActiveTab] = useState<'FROZEN' | 'FORMING' | 'LOOSE' | 'KILLED'>('LOOSE');
 
   const { frozen, forming, loose, killed } = useMemo(() => {
     return {
@@ -23,7 +23,7 @@ export const WallView: React.FC<WallViewProps> = ({ bricks, selectedId, onSelect
     { id: 'FROZEN', label: 'FROZEN', data: frozen, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: null },
     { id: 'FORMING', label: 'FORMING', data: forming, color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', icon: null },
     { id: 'LOOSE', label: 'LOOSE', data: loose, color: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', icon: null },
-    { id: 'KILLED', label: 'KILLED', data: killed, color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20', icon: '☠' },
+    { id: 'KILLED', label: '☠KILLED', data: killed, color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20', icon: null },
   ] as const;
 
   const currentTabData = useMemo(() => {

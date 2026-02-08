@@ -14,7 +14,9 @@ dependencies = [
     "flask",
     "sentence-transformers",
     "tiktoken",
-    "unstructured"
+    "unstructured",
+    "celery",
+    "redis"
 ]
 
 [project.scripts]

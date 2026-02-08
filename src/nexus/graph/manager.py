@@ -12,6 +12,8 @@ class GraphManager:
             db_path = os.path.join(self.graph_dir, "graph.db")
         self.db_path = db_path
         self._init_db()
+        # Enforce unified storage on startup
+        # self.sync_bricks_to_nodes()
 
     def _init_db(self):
         conn = sqlite3.connect(self.db_path)
@@ -41,6 +43,13 @@ class GraphManager:
             )
         ''')
         
+        # Ensure Sync Schema exists
+        schema_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema_sync.sql")
+        if os.path.exists(schema_path):
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema_sql = f.read()
+            c.executescript(schema_sql)
+
         conn.commit()
         conn.close()
 
@@ -194,10 +203,23 @@ class GraphManager:
             return (row[0], json.loads(row[1]))
         return None
 
+    def _emit_pulse(self, event_type: str, data: Dict):
+        """
+        Fire-and-forget call to the L1 Narrator.
+        In a real app, use a background task queue (Celery/RQ).
+        For this script, we can do a quick POST or print.
+        """
+        try:
+            # We assume the gateway is running or we import it for a quick local call
+            # For simplicity, we just print the 'Intent' of the pulse here.
+            # In full implementation, this calls JarvisGateway.pulse()
+            print(f"⚡ [PULSE L1] {event_type}: {data}")
+        except:
+            pass
+
     def _log_audit_event(self, event_type: str, payload: Dict[str, Any]):
         """
-        Log an audit event. For now, we print to console.
-        In Phase 3, this will append to phase3_audit_trace.jsonl.
+        Log an audit event. Appends to phase3_audit_trace.jsonl.
         """
         # ISO8601 timestamp
         ts = datetime.now(timezone.utc).isoformat()
@@ -207,7 +229,22 @@ class GraphManager:
             **payload
         }
         print(f"[AUDIT] {json.dumps(event)}")
-        # TODO: Append to services/cortex/phase3_audit_trace.jsonl if needed by strict requirements
+        
+        # Append to services/cortex/phase3_audit_trace.jsonl
+        try:
+            # Get path relative to this file's directory: ../../../services/cortex/phase3_audit_trace.jsonl
+            # Or use workspace root if we can determine it. 
+            # Looking at directory structure, services is in the root.
+            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(self.graph_dir)))
+            audit_log_path = os.path.join(root_dir, "services", "cortex", "phase3_audit_trace.jsonl")
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(audit_log_path), exist_ok=True)
+            
+            with open(audit_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(event) + "\n")
+        except Exception as e:
+            print(f"ERROR: Failed to write to audit log: {e}")
 
     def kill_node(self, node_id: str, reason: str, actor: str):
         """
@@ -243,6 +280,8 @@ class GraphManager:
             "actor": actor,
             "previous_state": current_state.value
         })
+
+        self._emit_pulse("NODE_KILLED", {"id": node_id, "actor": actor, "reason": reason})
 
     def promote_node_to_frozen(self, node_id: str, promote_bricks: List[str], actor: str):
         """
@@ -282,6 +321,8 @@ class GraphManager:
             "promoted_bricks": promote_bricks,
             "actor": actor
         })
+
+        self._emit_pulse("NODE_FROZEN", {"id": node_id, "actor": actor})
 
     def supersede_node(self, old_node_id: str, new_node_id: str, reason: str, actor: str):
         """
@@ -545,22 +586,93 @@ class GraphManager:
         """
         conn = self._get_conn()
         c = conn.cursor()
+        
+        # 1. Get explicit graph nodes
         c.execute("SELECT id, type, data, created_at FROM nodes")
         rows = c.fetchall()
-        conn.close()
         
         nodes = []
         for r in rows:
             data = json.loads(r[2])
-            # Merge fields
-            node = {
+            nodes.append({
                 "id": r[0],
                 "type": r[1],
                 "created_at": r[3],
                 **data
-            }
-            nodes.append(node)
+            })
+            
+        conn.close()
         return nodes
+
+    def sync_bricks_to_nodes(self):
+        """
+        Migrate bricks from the 'bricks' sync table into the unified 'nodes' table.
+        This enforces a single physical storage schema for all graph entities.
+        """
+        conn = self._get_conn()
+        c = conn.cursor()
+        
+        try:
+            # 1. Fetch bricks that aren't yet in the 'nodes' table
+            c.execute("""
+                SELECT b.id, b.content, b.state, b.created_at, b.topic_id, t.display_name
+                FROM bricks b
+                LEFT JOIN topics t ON b.topic_id = t.id
+                WHERE b.id NOT IN (SELECT id FROM nodes)
+            """)
+            brick_rows = c.fetchall()
+            
+            # 2. Insert them as nodes
+            state_map = {
+                "IMPROVISE": "loose",
+                "FORMING": "forming",
+                "FINAL": "frozen",
+                "SUPERSEDED": "killed"
+            }
+            
+            for br in brick_rows:
+                brick_id = br[0]
+                content = br[1]
+                state = br[2]
+                created_at = br[3]
+                topic_id = br[4]
+                topic_name = br[5]
+                
+                node_data = {
+                    "statement": content,
+                    "lifecycle": state_map.get(state, "loose"),
+                    "metadata": {
+                        "sync_topic_id": topic_id,
+                        "sync_topic_name": topic_name
+                    }
+                }
+                
+                c.execute(
+                    "INSERT INTO nodes (id, type, data, created_at) VALUES (?, 'brick', ?, ?)",
+                    (brick_id, json.dumps(node_data), created_at)
+                )
+                
+                # 3. If topic node doesn't exist, create it
+                if topic_id:
+                    c.execute("SELECT id FROM nodes WHERE id = ?", (f"topic_{topic_id}",))
+                    if not c.fetchone():
+                        c.execute(
+                            "INSERT INTO nodes (id, type, data, created_at) VALUES (?, 'topic', ?, ?)",
+                            (f"topic_{topic_id}", json.dumps({"name": topic_name or topic_id}), created_at)
+                        )
+                    
+                    # 4. Create edge between topic and brick
+                    c.execute(
+                        "INSERT OR IGNORE INTO edges (source, target, type, created_at) VALUES (?, ?, ?, ?)",
+                        (f"topic_{topic_id}", brick_id, EdgeType.ASSEMBLED_IN.value, created_at)
+                    )
+
+            conn.commit()
+            print(f"[SYNC] Migrated {len(brick_rows)} bricks to unified node storage.")
+        except sqlite3.OperationalError as e:
+            print(f"[SYNC] Migration skipped: {e}")
+        finally:
+            conn.close()
 
     def get_all_edges_raw(self) -> List[Dict]:
         """

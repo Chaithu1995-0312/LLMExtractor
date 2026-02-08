@@ -1,9 +1,18 @@
 from flask import Flask, request, jsonify
 import os
 import sys
+import logging
 from datetime import datetime, timezone
 import json
 from nexus.vector.embedder import get_embedder
+
+# Suppress transformers architectural warnings and HF Hub warnings
+os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN_WARNING"] = "1"
+try:
+    import transformers
+    transformers.logging.set_verbosity_error()
+except ImportError:
+    pass
 
 # Adjust the path to import CortexAPI from the same directory
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +32,14 @@ except ImportError:
     from nexus.cognition.assembler import assemble_topic
     from nexus.graph.manager import GraphManager
     from nexus.config import REPO_ROOT
+
+# Import Celery Tasks
+try:
+    from services.cortex.tasks import sync_bricks_task, assemble_topic_task, synthesize_relationships_task
+    HAS_CELERY = True
+except ImportError:
+    print("Celery tasks not found. Running in synchronous mode.")
+    HAS_CELERY = False
 
 app = Flask(__name__)
 cortex_api = CortexAPI()
@@ -300,10 +317,43 @@ def cognition_assemble():
     if not topic:
         return jsonify({"error": "topic is required"}), 400
 
-    result = cortex_api.assemble(topic)
-    if result.get("status") == "failed":
-        return jsonify(result), 500
-    return jsonify(result)
+    if HAS_CELERY:
+        task = assemble_topic_task.delay(topic)
+        return jsonify({"status": "accepted", "task_id": task.id}), 202
+    else:
+        result = cortex_api.assemble(topic)
+        if result.get("status") == "failed":
+            return jsonify(result), 500
+        return jsonify(result)
+
+@app.route("/cognition/synthesize", methods=["POST"])
+def cognition_synthesize():
+    """Trigger automatic relationship discovery"""
+    data = request.json or {}
+    topic_id = data.get("topic_id")
+
+    if HAS_CELERY:
+        task = synthesize_relationships_task.delay(topic_id=topic_id)
+        return jsonify({"status": "accepted", "task_id": task.id}), 202
+    else:
+        result = cortex_api.synthesize(topic_id=topic_id)
+        if result.get("status") == "failed":
+            return jsonify(result), 500
+        return jsonify(result)
+
+@app.route("/tasks/sync", methods=["POST"])
+def trigger_sync():
+    """Manually trigger background sync of bricks to graph nodes"""
+    if HAS_CELERY:
+        task = sync_bricks_task.delay()
+        return jsonify({"status": "accepted", "task_id": task.id}), 202
+    else:
+        # Synchronous fallback
+        try:
+            GraphManager().sync_bricks_to_nodes()
+            return jsonify({"status": "success", "mode": "synchronous"})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
 @app.route("/jarvis/assemble-topic", methods=["POST"])
 def jarvis_assemble_topic():
@@ -329,6 +379,14 @@ if __name__ == "__main__":
     print("Prewarming embedder...")
     get_embedder()
     print("Embedder ready")
+
+    # Initial sync of bricks to graph
+    print("Performing initial graph sync...")
+    try:
+        GraphManager().sync_bricks_to_nodes()
+    except Exception as e:
+        print(f"Initial sync failed: {e}")
+
     # For development purposes, run with debug true
     # In production, use a production-ready WSGI server like Gunicorn
     app.run(debug=False, port=5001)

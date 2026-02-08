@@ -1,73 +1,61 @@
-# CANONICAL_OVERVIEW
+# Canonical Architectural Overview
 
-## 1. System Identity
+## System Identity
+**Name:** Nexus Cognitive Architecture (v3)
+**Primary Function:** Autonomous Knowledge Synthesis & Governance Engine
+**Core Philosophy:** "Zero-Trust Ingestion, Monotonic Truth, Budget-Aware Cognition"
 
-**Name:** Nexus Cognitive Architecture (v1)
-**Purpose:** A monotonic, graph-based knowledge synthesis engine that evolves loose ideas into frozen, authoritative intents through human-in-the-loop governance.
-**Core Principle:** "Knowledge is not just stored; it is refined, anchored, and superseded."
+## High-Level Architecture
+Nexus is a **local-first, hybrid-cloud cognitive engine** that transforms unstructured conversation logs into a rigorous, queryable Knowledge Graph. It distinguishes itself from standard RAG systems by enforcing strict **lifecycle governance** on knowledge artifacts ("Bricks") and using a **multi-tier cognitive gateway** to manage inference costs.
 
-## 2. High-Level Architecture
+### The 4-Layer Stack
 
-The system operates as a **Unidirectional Data Refining Pipeline**:
+1.  **Ingestion Layer (The "Digestive System")**
+    *   **Responsibility:** Raw log parsing, structural scanning, and "Brick" materialization.
+    *   **Key Component:** `NexusCompiler`
+    *   **Mechanism:** Uses deterministic LLM pointers to extract verbatim quotes. **Zero-Trust Validation** rejects any extraction that does not match the source text byte-for-byte.
 
-```mermaid
-flowchart LR
-    Ingest[Ingestion Layer] --> Recall[Recall & Rerank]
-    Recall --> Assemble[Cognitive Assembly]
-    Assemble --> Graph[Knowledge Graph]
-    Graph --> API[Cortex API]
-    API --> UI[Jarvis UI]
-    UI -- Feedback (Promote/Kill) --> Graph
-```
+2.  **Graph Layer (The "Long-Term Memory")**
+    *   **Responsibility:** Storage of Bricks, Intents, Sources, and Scopes.
+    *   **Key Component:** `GraphManager`
+    *   **Data Structure:** Unified Node/Edge Graph (SQLite).
+    *   **Governance:** Enforces the **Lifecycle State Machine** (IMPROVISE → FORMING → FROZEN → KILLED).
 
-### 2.1 Layers
+3.  **Cognition Layer (The "Synthesizer")**
+    *   **Responsibility:** Higher-order reasoning, relationship discovery, and answering.
+    *   **Key Component:** `CortexAPI` & `JarvisGateway`
+    *   **Mechanism:**
+        *   **L1 (Pulse):** Local/Free (Ollama/Llama3) for status updates.
+        *   **L2 (Voice):** Cloud/Standard (Claude-3.5) for user Q&A.
+        *   **L3 (Sage):** Cloud/Reasoning (o1/GPT-4o) for deep structural analysis.
 
-| Layer | Responsibility | Key Components |
-|-------|----------------|----------------|
-| **Ingestion** | Parses raw chat logs into atomic "Bricks" (context-aware chunks). | `TreeSplitter`, `BrickExtractor` |
-| **Vector** | Semantic indexing of Bricks for retrieval. | `LocalIndex` (FAISS), `Embedder` |
-| **Cognition** | Synthesizes "Topics" from Bricks using LLMs (DSPy). | `Assembler`, `CognitiveExtractor` |
-| **Graph** | Manages the lifecycle of knowledge nodes (Intent, Source, Topic). Enforces invariants. | `GraphManager`, `SQLite` |
-| **Service** | Exposes graph operations and data to the UI. | `CortexAPI`, `Flask` |
-| **UI** | Visualization and governance interface for the user. | `CortexVisualizer`, `ControlStrip` |
+4.  **Interface Layer (The "Control Plane")**
+    *   **Responsibility:** Visualization and Interaction.
+    *   **Key Component:** `Jarvis UI` (React)
+    *   **Features:** Wall View (Graph interaction), Chat (Agent interface).
 
-## 3. Core Concepts
+## Core Workflows
 
-### 3.1 The "Brick"
-The fundamental unit of raw information. A Brick is a chunk of conversation text, preserving context (previous messages).
+### 1. The Compiler Loop (Ingest)
+1.  **Scan:** `NexusCompiler` loads raw conversation JSON.
+2.  **Point:** LLM identifies relevant segments ("Pointers") based on Topic Definitions.
+3.  **Validate:** `_materialize_brick` verifies the pointer matches source text exactly.
+4.  **Persist:** Validated segments are saved as "Bricks" (State: IMPROVISE).
 
-### 3.2 The "Intent"
-A refined unit of knowledge derived from Bricks. An Intent represents a specific claim, rule, or fact.
-- **Lifecycle:** `LOOSE` → `FORMING` → `FROZEN` (or `KILLED`)
-- **Monotonicity:** Once `FROZEN`, an Intent cannot be modified, only `SUPERSEDED` by a new Intent.
+### 2. The Promotion Cycle (Governance)
+1.  **Form:** Bricks are grouped into "Intents".
+2.  **Freeze:** Humans or high-confidence agents promote Intents to FROZEN state.
+    *   *Invariant:* Frozen nodes cannot be modified, only Superseded.
+3.  **Supersede:** New information renders old facts obsolete. A "SUPERSEDED_BY" edge is created.
 
-### 3.3 The "Topic"
-A higher-order aggregation of Bricks and Intents related to a specific subject query. Topics serve as entry points for exploration.
+### 3. The Retrieval Flow (Recall)
+1.  **Search:** Vector Search (`LocalVectorIndex`) finds relevant Bricks.
+2.  **Expand:** Graph Traversal (`GraphManager`) pulls connected context (Sources, Scopes).
+3.  **Synthesize:** `CortexAPI` routes the context to the appropriate model via `JarvisGateway`.
 
-### 3.4 Monotonic Conflict Resolution
-The system handles conflicting information not by overwriting, but by:
-1. **Anchoring:** Older, frozen nodes ("Anchors") resist change.
-2. **Supersession:** New information explicitly supersedes old information via graph edges, preserving history.
-
-## 4. Data Flow
-
-1. **Ingest:** Chat logs (`.json`) are split into Trees and then Bricks.
-2. **Index:** Bricks are embedded and indexed in FAISS.
-3. **Recall:** User queries a Topic. System retrieves relevant Bricks (Recall + Rerank).
-4. **Assemble:** `Assembler` uses `CognitiveExtractor` (DSPy) to distill Facts/Diagrams from Bricks.
-5. **Graph Update:** 
-   - New Artifacts/Intents are created (`FORMING`).
-   - Edges link Topics, Artifacts, Intents, and Bricks.
-   - High-confidence conflicts with `FROZEN` nodes are resolved (or flagged).
-6. **Governance:** User views the Graph via `Jarvis UI`.
-   - **Promote:** `LOOSE` → `FORMING`, `FORMING` → `FROZEN`.
-   - **Kill:** Reject an Intent (`KILLED`).
-   - **Supersede:** Replace an old `FROZEN` node with a new one.
-
-## 5. Technology Stack
-
-- **Language:** Python 3.10+
-- **Backend:** Flask
-- **Database:** SQLite (Graph Storage), FAISS (Vector Storage)
-- **AI/ML:** DSPy (Orchestration), SentenceTransformers (Embedding/Reranking)
-- **Frontend:** React, Vite, TailwindCSS, D3.js
+## Technology Stack
+*   **Language:** Python 3.10+ (Backend), TypeScript (Frontend)
+*   **Database:** SQLite (Relational + Graph + Vector storage via blob/JSON)
+*   **Vector Search:** FAISS (Local), `sentence-transformers/all-MiniLM-L6-v2`
+*   **LLM Orchestration:** DSPy (Modules), LiteLLM (Proxy)
+*   **Frontend:** React, Vite, Tailwind

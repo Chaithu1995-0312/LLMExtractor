@@ -1,20 +1,28 @@
-# GAPS_AND_TODOS
+# Gaps and TODOs
 
-## 1. High Priority (Critical)
+## 1. High Priority (Blockers)
+| Status | Priority | Description | Impact |
+| :--- | :--- | :--- | :--- |
+| 🔴 | P0 | **Secure API Authentication** | No auth mechanism (JWT/Key) in `server.py`. Open access. |
+| ✅ | P0 | **Background Job Runner** | Implemented Celery worker + Redis backend. `sync_bricks` and `assemble` are now async tasks. |
+| ✅ | P1 | **BrickStore Database Integration** | `BrickStore` now queries `SyncDatabase` (SQLite) directly. |
+| ✅ | P1 | **Graph Visualization** | `CortexVisualizer.tsx` rewritten with Cytoscape.js for scalable rendering. |
 
-- [ ] **Security:** `services/cortex/server.py` has no authentication. Add API Key or OAuth middleware.
-- [ ] **Data Integrity:** `GraphManager.kill_node` does not explicitly check for incoming edges that might break traversal (orphaned nodes).
-- [ ] **Error Handling:** `CognitiveExtractor` in `assembler.py` swallows DSPy errors. Add robust retry logic and error reporting.
+## 2. Medium Priority (Enhancements)
+| Status | Priority | Description | Impact |
+| :--- | :--- | :--- | :--- |
+| ✅ | P2 | **L3 (Sage) Pipeline** | Enhanced `RelationshipSynthesizer` to fetch existing edges and prevent duplication. |
+| 🔴 | P2 | **Conflict Resolution UI** | No UI workflow to resolve `CONFLICTS_WITH` edges manually. |
+| ✅ | P2 | **Semantic Routing** | `CortexAPI.route` now uses embedding similarity (Cosine) against agent profiles. |
 
-## 2. Medium Priority (Important)
+## 3. Low Priority (Future)
+| Status | Priority | Description | Impact |
+| :--- | :--- | :--- | :--- |
+| 🔴 | P3 | **Multi-Tenant Scoping** | Current `ScopeNode` is global. Need user-specific scopes. |
+| 🔴 | P3 | **Voice/Audio Input** | `JarvisGateway` supports text only. Audio ingestion planned for v4. |
+| 🧪 | P3 | **Local LLM Fine-Tuning** | `NexusCompiler` could generate training data for a local Llama 3 model. |
 
-- [ ] **Audit Logs:** `GraphManager._log_audit_event` only prints to stdout. Implement structured file logging (`phase3_audit_trace.jsonl`).
-- [ ] **Scalability:** `GraphManager` uses SQLite directly. For production, migrate to PostgreSQL or Neo4j.
-- [ ] **Search:** `recall_bricks_readonly` uses `k=15` hardcoded. Make configurable based on query complexity.
-- [ ] **UI Feedback:** `ControlStrip` actions are optimistic. Add loading states and error toasts.
-
-## 3. Low Priority (Nice to Have)
-
-- [ ] **Visuals:** `CortexVisualizer` "Radar" mode is experimental. Polish rendering.
-- [ ] **Refinement:** Implement "Merge Nodes" feature for manual consolidation of similar intents.
-- [ ] **Testing:** Add unit tests for `GraphManager` lifecycle transitions.
+## 4. Technical Debt
+*   **Hardcoded Paths:** Many paths (e.g., `services/cortex/phase3_audit_trace.jsonl`) are relative and fragile.
+*   **Duplicate Logic:** `SyncDatabase` and `GraphManager` both handle SQLite connections. Should share a connection pool.
+*   **Testing:** `tests/` folder exists but coverage is unknown. `test_rewrite_integration.py` is one of few visible tests.

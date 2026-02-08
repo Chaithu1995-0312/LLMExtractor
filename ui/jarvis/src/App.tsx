@@ -43,6 +43,7 @@ import { NexusNode, NexusNodeProps, Lifecycle } from './components/NexusNode';
 import { WallView } from './components/WallView';
 import { Panel } from './components/Panel';
 import { CortexVisualizer } from './components/CortexVisualizer';
+import { NodeEditor } from './components/NodeEditor';
 import dagre from 'dagre';
 
 // --- Adapters ---
@@ -272,11 +273,11 @@ export default function App() {
   });
 
   const killMutation = useMutation({
-    mutationFn: async ({ nodeId }: { nodeId: string }) => {
+    mutationFn: async ({ nodeId, reason }: { nodeId: string, reason?: string }) => {
       const res = await fetch('/jarvis/node/kill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ node_id: nodeId, reason: 'Killed via UI', actor: 'user' })
+        body: JSON.stringify({ node_id: nodeId, reason: reason || 'Killed via UI', actor: 'user' })
       });
       if (!res.ok) {
          const err = await res.json();
@@ -327,17 +328,7 @@ export default function App() {
     return wallBricks.find(b => b.id === selectedBrickId);
   }, [wallBricks, selectedBrickId]);
 
-  const handlePromote = () => {
-    if (selectedBrickId) {
-      promoteMutation.mutate({ nodeId: selectedBrickId });
-    }
-  };
-
-  const handleKill = () => {
-    if (selectedBrickId) {
-      killMutation.mutate({ nodeId: selectedBrickId });
-    }
-  };
+  const [showEditor, setShowEditor] = useState(false);
 
   useEffect(() => {
     if (graphData && graphData.nodes) {
@@ -403,10 +394,10 @@ export default function App() {
     <div className="flex h-screen w-screen overflow-hidden flex-col md:flex-row">
       {/* Sidebar - Desktop */}
       <aside className="hidden md:flex w-16 flex-col items-center py-6 glass-panel border-r z-20">
-        <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-10 shadow-[0_0_20px_rgba(0,128,255,0.4)]">
+      {  
+      /*  <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-10 shadow-[0_0_20px_rgba(0,128,255,0.4)]">
           <Activity className="text-primary-foreground w-6 h-6" />
         </div>
-        
         <nav className="flex flex-col gap-6">
           {navItems.map((item) => (
             <button 
@@ -418,7 +409,7 @@ export default function App() {
               <item.icon className="w-6 h-6" />
             </button>
           ))}
-        </nav>
+        </nav>*/}
 
         <div className="mt-auto">
            <button className="p-3 text-white/40 hover:text-white">
@@ -464,12 +455,12 @@ export default function App() {
       {/* Main Stage */}
       <main className="flex-1 flex flex-col relative bg-background overflow-hidden">
         <header className="hidden md:flex h-16 border-b border-white/5 items-center justify-between px-8 glass-panel sticky top-0 z-10">
-          <div className="flex items-center gap-3">
+       {/*   <div className="flex items-center gap-3">
             <h1 className="font-bold text-lg tracking-tighter uppercase">
               {mode === 'ask' ? 'Ask & Recall' : mode === 'explore' ? 'Knowledge Wall' : 'Visualizer'}
             </h1>
             <span className="px-2 py-0.5 rounded text-[10px] bg-primary/20 text-primary uppercase font-bold tracking-widest">Nexus v3</span>
-          </div>
+          </div>*/}
           
           <div className="flex items-center gap-4">
              {mode === 'explore' && (
@@ -662,18 +653,36 @@ export default function App() {
             <div className="flex-1 overflow-y-auto p-0 no-scrollbar flex flex-col">
                {brickMeta ? (
                  <div className="flex-1 h-full p-4 md:p-6 pb-20 md:pb-6">
-                   <Panel
-                     nodeId={selectedBrickId}
-                     lifecycle={selectedBrickData?.lifecycle || 'LOOSE'}
-                     title={brickMeta.title || `Brick ${selectedBrickId.substring(0, 8)}`}
-                     fullText={brickFull?.full_text || brickMeta.fullText || brickMeta.text_sample || 'No content available.'}
-                     sources={brickMeta.sources || [brickMeta.source_file || 'Unknown source']}
-                     conflicts={brickMeta.conflicts || []}
-                     supersededBy={brickMeta.superseded_by}
-                     history={brickMeta.history || [{ timestamp: 'Now', note: 'Viewed' }]}
-                     onPromote={handlePromote}
-                     onKill={handleKill}
-                   />
+                    <div className="flex flex-col gap-6">
+                      <Panel
+                        nodeId={selectedBrickId}
+                        lifecycle={selectedBrickData?.lifecycle || 'LOOSE'}
+                        title={brickMeta.title || `Brick ${selectedBrickId.substring(0, 8)}`}
+                        fullText={brickFull?.full_text || brickMeta.fullText || brickMeta.text_sample || 'No content available.'}
+                        sources={brickMeta.sources || [brickMeta.source_file || 'Unknown source']}
+                        conflicts={brickMeta.conflicts || []}
+                        supersededBy={brickMeta.superseded_by}
+                        history={brickMeta.history || [{ timestamp: 'Now', note: 'Viewed' }]}
+                        onPromote={() => setShowEditor(true)}
+                        onKill={() => setShowEditor(true)}
+                      />
+
+                      {showEditor && (
+                        <NodeEditor 
+                          nodeId={selectedBrickId}
+                          currentLifecycle={selectedBrickData?.lifecycle || 'LOOSE'}
+                          onUpdate={async (id, action, data) => {
+                            if (action === 'promote') {
+                              await promoteMutation.mutateAsync({ nodeId: id });
+                            } else {
+                              await killMutation.mutateAsync({ nodeId: id, reason: data?.reason });
+                            }
+                            setShowEditor(false);
+                          }}
+                          onClose={() => setShowEditor(false)}
+                        />
+                      )}
+                    </div>
                  </div>
                ) : (
                  <div className="p-8 text-center text-white/30 text-xs uppercase tracking-widest">

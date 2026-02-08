@@ -2,61 +2,55 @@ import json
 import os
 from typing import Dict, Optional
 from nexus.config import DATA_DIR
+from nexus.sync.db import SyncDatabase
 
 class BrickStore:
-    def __init__(self, bricks_dir: str = None):
-        if bricks_dir is None:
-            # Default to data/bricks if it exists, or follow old pattern relative to output
-            # Actually, per target structure, data/ should have fixtures and index.
-            # Bricks are generated in output/nexus/bricks.
-            bricks_dir = os.path.join(os.path.dirname(DATA_DIR), "output", "nexus", "bricks")
-        
-        self.bricks_dir = bricks_dir
-        self.metadata_store = {}
-        self._load_all_bricks_metadata()
+    def __init__(self, db_path: str = None):
+        self.db = SyncDatabase(db_path)
+        # We can keep some caching if needed, but for now direct DB access is better for consistency.
+        self.metadata_store = {} 
 
     def _load_all_bricks_metadata(self):
-        # In a real system, this would load metadata more robustly
-        # For now, it's a simple mock based on expected brick file structure
-        if not os.path.exists(self.bricks_dir):
-            return
-
-        for root, _, files in os.walk(self.bricks_dir):
-            for bf in files:
-                if bf.endswith(".json"):
-                    path = os.path.join(root, bf)
-                    try:
-                        with open(path, "r", encoding="utf-8") as f:
-                            bricks_data = json.load(f)
-                            for brick in bricks_data:
-                                self.metadata_store[brick["brick_id"]] = {
-                                    "source_file": brick["source_file"],
-                                    "source_span": brick["source_span"],
-                                    "file_path": path
-                                }
-                    except Exception:
-                        continue
+        # Deprecated: DB is the source of truth
+        pass
 
     def get_brick_metadata(self, brick_id: str) -> Optional[Dict]:
-        return self.metadata_store.get(brick_id)
+        """
+        Retrieves brick metadata from the DB.
+        """
+        conn = self.db._get_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, topic_id, content, run_id, json_path, start_index, end_index 
+            FROM bricks WHERE id = ?
+        """, (brick_id,))
+        row = c.fetchone()
+        conn.close()
+
+        if row:
+            return {
+                "brick_id": row[0],
+                "topic_id": row[1],
+                # Construct legacy source info if needed by consumers
+                "source_file": row[3], # Using run_id as proxy for file/source
+                "source_span": {
+                    "json_path": row[4],
+                    "start": row[5],
+                    "end": row[6]
+                }
+            }
+        return None
 
     def get_brick_text(self, brick_id: str) -> Optional[str]:
         """
-        Retrieves the raw text content of a brick.
-        Used for reranking.
+        Retrieves the raw text content of a brick from the DB.
         """
-        meta = self.get_brick_metadata(brick_id)
-        if not meta or "file_path" not in meta:
-            return None
+        conn = self.db._get_conn()
+        c = conn.cursor()
+        c.execute("SELECT content FROM bricks WHERE id = ?", (brick_id,))
+        row = c.fetchone()
+        conn.close()
         
-        try:
-            # Efficiently read the specific brick content
-            # In a production DB this would be a SELECT
-            with open(meta["file_path"], "r", encoding="utf-8") as f:
-                bricks_data = json.load(f)
-                for brick in bricks_data:
-                    if brick["brick_id"] == brick_id:
-                        return brick.get("content")
-        except Exception:
-            return None
+        if row:
+            return row[0]
         return None

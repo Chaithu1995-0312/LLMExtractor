@@ -148,13 +148,13 @@ SOURCE JSON TO SCAN:
             if not isinstance(node_text, str):
                  node_text = str(node_text)
         except Exception as e:
-            print(f"❌ Path Error: {pointer['json_path']} - {e}")
+            # print(f"❌ Path Error: {pointer['json_path']} - {e}")
             return None
 
         start_idx = node_text.find(pointer['verbatim_quote'])
         
         if start_idx == -1:
-            print(f"❌ Hallucination Detected: Quote not found in {pointer['json_path']}")
+            # print(f"❌ Hallucination Detected: Quote not found in {pointer['json_path']}")
             return None # HARD REJECT
 
         end_idx = start_idx + len(pointer['verbatim_quote'])
