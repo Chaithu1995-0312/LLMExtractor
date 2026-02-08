@@ -1,71 +1,63 @@
-# NEXUS IMPLEMENTATION REALITY MAP
+# IMPLEMENTATION_REALITY_MAP.md
 
-## 1. System-Wide Readiness Overview
+## Layer status: Ingestion & Sync
 
-| Layer | Status | Method Implementation (%) | Primary Risks |
-| :--- | :---: | :---: | :--- |
-| **Ingestion** | ✅ | 95% | JSON Path resolution edge cases. |
-| **Vector/Recall** | 🟡 | 80% | Model-specific reranking latency. |
-| **Graph** | ✅ | 100% | SQLite scale constraints for massive graphs. |
-| **Cognition** | 🧪 | 60% | DSPy prompt drift; complex relationship inference. |
-| **Service/UI** | 🟡 | 75% | Real-time graph sync overhead. |
+### `NexusCompiler` (src/nexus/sync/compiler.py)
+- `compile_run` ✅ Implemented (Orchestrates brick extraction from raw runs)
+- `_pre_filter_nodes` ✅ Implemented (Initial content scanning)
+- `_llm_extract_pointers` ✅ Implemented (Generates brick pointers via LLM)
+- `_materialize_brick` ✅ Implemented (Transforms pointers into persisted bricks)
 
----
+### `BrickStore` (src/nexus/bricks/brick_store.py)
+- `save_brick` ✅ Implemented (Physical persistence)
+- `get_brick` ✅ Implemented (Retrieval)
 
-## 2. Method Intelligence Status
+## Layer status: Graph Management
 
-### Class: `GraphManager` (Graph Layer)
-| Method | Status | Notes |
-| :--- | :---: | :--- |
-| `register_node` | ✅ | Fully transactional. |
-| `register_edge` | ✅ | Includes cycle detection. |
-| `kill_node` | ✅ | State-authoritative for node destruction. |
-| `supersede_node` | ✅ | Complex redirection of edges implemented. |
-| `sync_bricks_to_nodes` | ✅ | Syncs Brick IDs into the Graph. |
+### `GraphManager` (src/nexus/graph/manager.py)
+- `register_node` ✅ Implemented (Core node creation with conflict resolution)
+- `register_edge` ✅ Implemented (Basic edge creation)
+- `add_typed_edge` ✅ Implemented (Schema-aware edge creation)
+- `promote_node_to_frozen` ✅ Implemented (Lifecycle state transition)
+- `supersede_node` ✅ Implemented (Versioning/Replacement logic)
+- `kill_node` ✅ Implemented (Logical deletion)
+- `_check_for_cycle` ✅ Implemented (Graph integrity check)
+- `sync_bricks_to_nodes` ✅ Implemented (Bridge between Ingestion and Graph)
 
-### Class: `CortexAPI` (Service Layer)
-| Method | Status | Notes |
-| :--- | :---: | :--- |
-| `route` | ✅ | High-performance intent routing. |
-| `generate` | ✅ | Core response synthesis. |
-| `assemble` | ✅ | Orchestrates Brick gathering. |
-| `synthesize` | 🟡 | Relationship synthesis call is partial. |
-| `get_audit_events` | ✅ | Functional, but needs better filtering. |
+## Layer status: Cognition
 
-### Class: `NexusCompiler` (Ingestion Layer)
-| Method | Status | Notes |
-| :--- | :---: | :--- |
-| `compile_run` | ✅ | Main entry point for brickification. |
-| `_llm_extract_pointers` | ✅ | Functional, depends on `LLMClient`. |
-| `_materialize_brick` | ✅ | Creates the persistent Brick records. |
-| `_resolve_json_path` | 🟡 | Fails on certain nested array patterns. |
+### `RelationshipSynthesizer` (src/nexus/cognition/dspy_modules.py)
+- `forward` ✅ Implemented (Relationship inference via DSPy)
+- `analyze_sentiment` 🟡 Partial (Initial logic present, not integrated in main flow)
 
-### Class: `LocalVectorIndex` (Recall Layer)
-| Method | Status | Notes |
-| :--- | :---: | :--- |
-| `add_bricks` | ✅ | Updates FAISS index. |
-| `search` | ✅ | Optimized vector lookup. |
-| `save`/`load` | ✅ | Local persistence of FAISS index. |
+### `CognitiveExtractor` (src/nexus/cognition/dspy_modules.py)
+- `forward` ✅ Implemented (Recursive entity/fact extraction)
 
-### Class: `CognitiveExtractor` (Cognition Layer)
-| Method | Status | Notes |
-| :--- | :---: | :--- |
-| `forward` | 🧪 | Mocked in tests, but DSPy module exists. |
+### `Synthesizer` (src/nexus/cognition/synthesizer.py)
+- `run_relationship_synthesis` ✅ Implemented (Batch synthesis runner)
 
----
+## Layer status: Service & API
 
-## 3. Implied Methods (The "Under-Construction" Methods)
+### `CortexAPI` (services/cortex/api.py)
+- `route` ✅ Implemented (Central query routing)
+- `generate` ✅ Implemented (Final context-aware response generation)
+- `ask_preview` ✅ Implemented (Fast retrieval preview)
+- `get_audit_events` ✅ Implemented (Observability endpoint)
+- `trigger_self_healing` 🔴 Missing (Planned for automated graph correction)
 
-| Method Name | Layer | Purpose | Status |
-| :--- | :---: | :--- | :---: |
-| `rebalance_graph` | Graph | Optimization of node clusters. | 🔴 |
-| `validate_cross_intent_logic` | Cognition | Logical consistency checking between intents. | 🧪 |
-| `stream_audit_realtime` | Service | WebSocket push for audit events. | 🔴 |
-| `auto_resolve_conflicts` | Cognition | Intelligent merging of conflicting intents. | 🧪 |
+### `JarvisGateway` (services/cortex/gateway.py)
+- `pulse` ✅ Implemented (Event broadcasting)
+- `explain` ✅ Implemented (LLM-backed reasoning)
 
----
+## Layer status: UI (Jarvis)
 
-## 4. Conflict & Uncertainty Log
-- **Uncertainty:** `VectorEmbedder` uses LLM for query rewriting. Impact on search precision is not fully measured (Status: 🧪).
-- **Conflict:** `runner.py` vs `runner_old.py`. The system is transitioning from manual state files to `SyncDatabase` management.
-- **Dependency Risk:** DSPy modules in `Cognition` layer are highly sensitive to the underlying model provider (Status: 🧪).
+### `Store` (ui/jarvis/src/store.ts)
+- `fetchGraph` ✅ Implemented
+- `promoteNode` ✅ Implemented
+- `killNode` ✅ Implemented
+
+### `Components`
+- `WallView` ✅ Implemented (Spatial layout)
+- `NodeEditor` ✅ Implemented (Node metadata modification)
+- `AuditPanel` ✅ Implemented (Live trace monitoring)
+- `CortexVisualizer` 🧪 Mocked (Simulated cognitive state visualization)

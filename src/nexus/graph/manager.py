@@ -2,18 +2,52 @@ import json
 import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Dict, Any, Tuple, List, Optional, Union
+from typing import Dict, Any, Tuple, List, Optional, Union, Generator
+from contextlib import contextmanager
 from nexus.graph.schema import (
     Intent, Source, ScopeNode, Edge, EdgeType, IntentLifecycle, 
     IntentType, GraphNode, AuditEventType, ModelTier, DecisionAction
 )
+from nexus.config import GRAPH_DB_PATH, SYNC_SCHEMA_PATH, AUDIT_LOG_PATH
+
+class GraphTransaction:
+    """
+    Context manager for SQLite transactions with nested (SAVEPOINT) support.
+    """
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+        self.savepoint_name = f"sp_{id(self)}"
+        self.entered = False
+
+    def __enter__(self):
+        if not self.conn.in_transaction:
+            self.conn.execute("BEGIN TRANSACTION")
+            self.nested = False
+        else:
+            self.conn.execute(f"SAVEPOINT {self.savepoint_name}")
+            self.nested = True
+        self.entered = True
+        return self.conn
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self.entered:
+            return
+        
+        if exc_type is not None:
+            if self.nested:
+                self.conn.execute(f"ROLLBACK TO {self.savepoint_name}")
+            else:
+                self.conn.rollback()
+        else:
+            if self.nested:
+                self.conn.execute(f"RELEASE SAVEPOINT {self.savepoint_name}")
+            else:
+                self.conn.commit()
+        self.entered = False
 
 class GraphManager:
     def __init__(self, db_path: str = None):
-        self.graph_dir = os.path.dirname(os.path.abspath(__file__))
-        if db_path is None:
-            db_path = os.path.join(self.graph_dir, "graph.db")
-        self.db_path = db_path
+        self.db_path = db_path or GRAPH_DB_PATH
         self._init_db()
         # Enforce unified storage on startup - Idempotent
         self.sync_bricks_to_nodes()
@@ -47,9 +81,8 @@ class GraphManager:
         ''')
         
         # Ensure Sync Schema exists
-        schema_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema_sync.sql")
-        if os.path.exists(schema_path):
-            with open(schema_path, "r", encoding="utf-8") as f:
+        if os.path.exists(SYNC_SCHEMA_PATH):
+            with open(SYNC_SCHEMA_PATH, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
             c.executescript(schema_sql)
 
@@ -65,33 +98,31 @@ class GraphManager:
         If merge=True, updates existing node data.
         """
         conn = self._get_conn()
-        c = conn.cursor()
-        try:
-            # Check if exists
-            c.execute("SELECT data FROM nodes WHERE id = ?", (node_id,))
-            row = c.fetchone()
-            
-            if row:
-                if merge:
-                    existing_data = json.loads(row[0])
-                    existing_data.update(attrs)
-                    c.execute(
-                        "UPDATE nodes SET data = ? WHERE id = ?",
-                        (json.dumps(existing_data), node_id)
-                    )
-                    conn.commit()
-                return # Already exists or updated
-            
-            # Insert
-            c.execute(
-                "INSERT INTO nodes (id, type, data, created_at) VALUES (?, ?, ?, datetime('now'))",
-                (node_id, node_type, json.dumps(attrs))
-            )
-            conn.commit()
-        except Exception as e:
-            print(f"Error registering node {node_id}: {e}")
-        finally:
-            conn.close()
+        with GraphTransaction(conn) as c:
+            try:
+                # Check if exists
+                res = c.execute("SELECT data FROM nodes WHERE id = ?", (node_id,))
+                row = res.fetchone()
+                
+                if row:
+                    if merge:
+                        existing_data = json.loads(row[0])
+                        existing_data.update(attrs)
+                        c.execute(
+                            "UPDATE nodes SET data = ? WHERE id = ?",
+                            (json.dumps(existing_data), node_id)
+                        )
+                    return # Already exists or updated
+                
+                # Insert
+                c.execute(
+                    "INSERT INTO nodes (id, type, data, created_at) VALUES (?, ?, ?, datetime('now'))",
+                    (node_id, node_type, json.dumps(attrs))
+                )
+            except Exception as e:
+                print(f"Error registering node {node_id}: {e}")
+                raise
+        conn.close()
 
     def get_intents_by_topic(self, topic_node_id: str) -> List[Intent]:
         """
@@ -105,7 +136,7 @@ class GraphManager:
             JOIN edges e ON n.id = e.target
             WHERE e.source = ? AND e.type = ? AND n.type = 'intent'
         """
-        c.execute(query, (topic_node_id, EdgeType.ASSEMBLED_IN.value)) # Note: Check Edge direction in assembler
+        c.execute(query, (topic_node_id, EdgeType.ASSEMBLED_IN.value))
         rows = c.fetchall()
         conn.close()
         
@@ -174,24 +205,23 @@ class GraphManager:
                 raise ValueError(f"Cycle detected for {edge_type_str}: {' -> '.join(cycle)}")
 
         conn = self._get_conn()
-        c = conn.cursor()
-        try:
-            c.execute(
-                "SELECT type FROM edges WHERE source=? AND target=? AND type=?",
-                (src_id, dst_id, edge_type_str)
-            )
-            if c.fetchone():
-                return
+        with GraphTransaction(conn) as c:
+            try:
+                res = c.execute(
+                    "SELECT type FROM edges WHERE source=? AND target=? AND type=?",
+                    (src_id, dst_id, edge_type_str)
+                )
+                if res.fetchone():
+                    return
 
-            c.execute(
-                "INSERT INTO edges (source, target, type, data, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
-                (src_id, dst_id, edge_type_str, json.dumps(attrs or {}))
-            )
-            conn.commit()
-        except Exception as e:
-            print(f"Error registering edge {src_id}->{dst_id}: {e}")
-        finally:
-            conn.close()
+                c.execute(
+                    "INSERT INTO edges (source, target, type, data, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
+                    (src_id, dst_id, edge_type_str, json.dumps(attrs or {}))
+                )
+            except Exception as e:
+                print(f"Error registering edge {src_id}->{dst_id}: {e}")
+                raise
+        conn.close()
 
     # Typed helpers for new Schema
     def add_intent(self, intent: Intent):
@@ -307,18 +337,12 @@ class GraphManager:
 
         print(f"[AUDIT] {json.dumps(event)}")
         
-        # Append to services/cortex/phase3_audit_trace.jsonl
+        # Append to AUDIT_LOG_PATH
         try:
-            # Get path relative to this file's directory: ../../../services/cortex/phase3_audit_trace.jsonl
-            # Or use workspace root if we can determine it. 
-            # Looking at directory structure, services is in the root.
-            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(self.graph_dir)))
-            audit_log_path = os.path.join(root_dir, "services", "cortex", "phase3_audit_trace.jsonl")
-            
             # Ensure directory exists
-            os.makedirs(os.path.dirname(audit_log_path), exist_ok=True)
+            os.makedirs(os.path.dirname(AUDIT_LOG_PATH), exist_ok=True)
             
-            with open(audit_log_path, "a", encoding="utf-8") as f:
+            with open(AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event) + "\n")
         except Exception as e:
             print(f"ERROR: Failed to write to audit log: {e}")
@@ -345,9 +369,8 @@ class GraphManager:
         
         # Persist
         conn = self._get_conn()
-        c = conn.cursor()
-        c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(data), node_id))
-        conn.commit()
+        with GraphTransaction(conn) as c:
+            c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(data), node_id))
         conn.close()
 
         # Audit
@@ -390,9 +413,8 @@ class GraphManager:
 
         # Persist
         conn = self._get_conn()
-        c = conn.cursor()
-        c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(data), node_id))
-        conn.commit()
+        with GraphTransaction(conn) as c:
+            c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(data), node_id))
         conn.close()
 
         self._log_audit_event(
@@ -433,31 +455,30 @@ class GraphManager:
         if old_node_id == new_node_id:
             raise ValueError("Cannot supersede a node with itself")
 
-        # 1. Create Edge
-        edge = Edge(
-            source_id=old_node_id,
-            target_id=new_node_id,
-            edge_type=EdgeType.SUPERSEDED_BY,
-            metadata={
-                "reason": reason,
-                "actor": actor,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-        )
-        self.add_typed_edge(edge)
-
-        # 2. Update Node Metadata (Old)
-        old_data["superseded_by"] = new_node_id
-        
-        # 3. Update Node Metadata (New)
-        new_data["supersedes"] = list(set(new_data.get("supersedes", []) + [old_node_id]))
-
-        # Persist Nodes
         conn = self._get_conn()
-        c = conn.cursor()
-        c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(old_data), old_node_id))
-        c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(new_data), new_node_id))
-        conn.commit()
+        with GraphTransaction(conn) as c:
+            # 1. Create Edge
+            self.register_edge(
+                ("node", old_node_id),
+                ("node", new_node_id),
+                EdgeType.SUPERSEDED_BY.value,
+                {
+                    "reason": reason,
+                    "actor": actor,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            )
+
+            # 2. Update Node Metadata (Old)
+            old_data["superseded_by"] = new_node_id
+            
+            # 3. Update Node Metadata (New)
+            new_data["supersedes"] = list(set(new_data.get("supersedes", []) + [old_node_id]))
+
+            # Persist Nodes
+            c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(old_data), old_node_id))
+            c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(new_data), new_node_id))
+            
         conn.close()
 
         self._log_audit_event(
@@ -506,9 +527,8 @@ class GraphManager:
         # Update
         data["lifecycle"] = new_lifecycle.value
         conn = self._get_conn()
-        c = conn.cursor()
-        c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(data), intent_id))
-        conn.commit()
+        with GraphTransaction(conn) as c:
+            c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(data), intent_id))
         conn.close()
 
     def add_typed_edge(self, edge: Edge, actor: str = "system"):
@@ -543,7 +563,7 @@ class GraphManager:
                     raise ValueError(f"Target {edge.target_id} already overridden by {existing[0][0]}")
 
         self.register_edge(
-            ("node", edge.source_id), # Generic type as we rely on ID
+            ("node", edge.source_id),
             ("node", edge.target_id),
             edge.edge_type.value,
             edge.metadata
@@ -656,15 +676,13 @@ class GraphManager:
         Delete a node and all connected edges.
         """
         conn = self._get_conn()
-        c = conn.cursor()
         try:
-            # Delete edges where this node is source or target
-            c.execute("DELETE FROM edges WHERE source = ? OR target = ?", (node_id, node_id))
-            
-            # Delete the node
-            c.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
-            
-            conn.commit()
+            with GraphTransaction(conn) as c:
+                # Delete edges where this node is source or target
+                c.execute("DELETE FROM edges WHERE source = ? OR target = ?", (node_id, node_id))
+                
+                # Delete the node
+                c.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
             return True
         except Exception as e:
             print(f"Error deleting node {node_id}: {e}")
@@ -702,71 +720,70 @@ class GraphManager:
         This enforces a single physical storage schema for all graph entities.
         """
         conn = self._get_conn()
-        c = conn.cursor()
         
         try:
-            # Optimization: Quick count check
-            c.execute("SELECT COUNT(*) FROM bricks WHERE id NOT IN (SELECT id FROM nodes)")
-            pending = c.fetchone()[0]
-            if pending == 0:
-                return
+            with GraphTransaction(conn) as c:
+                # Optimization: Quick count check
+                res = c.execute("SELECT COUNT(*) FROM bricks WHERE id NOT IN (SELECT id FROM nodes)")
+                pending = res.fetchone()[0]
+                if pending == 0:
+                    return
 
-            # 1. Fetch bricks that aren't yet in the 'nodes' table
-            c.execute(f"""
-                SELECT b.id, b.content, b.state, b.created_at, b.topic_id, t.display_name
-                FROM bricks b
-                LEFT JOIN topics t ON b.topic_id = t.id
-                WHERE b.id NOT IN (SELECT id FROM nodes)
-                LIMIT {limit}
-            """)
-            brick_rows = c.fetchall()
-            
-            # 2. Insert them as nodes
-            state_map = {
-                "IMPROVISE": "loose",
-                "FORMING": "forming",
-                "FINAL": "frozen",
-                "SUPERSEDED": "killed"
-            }
-            
-            for br in brick_rows:
-                brick_id = br[0]
-                content = br[1]
-                state = br[2]
-                created_at = br[3]
-                topic_id = br[4]
-                topic_name = br[5]
+                # 1. Fetch bricks that aren't yet in the 'nodes' table
+                res = c.execute(f"""
+                    SELECT b.id, b.content, b.state, b.created_at, b.topic_id, t.display_name
+                    FROM bricks b
+                    LEFT JOIN topics t ON b.topic_id = t.id
+                    WHERE b.id NOT IN (SELECT id FROM nodes)
+                    LIMIT {limit}
+                """)
+                brick_rows = res.fetchall()
                 
-                node_data = {
-                    "statement": content,
-                    "lifecycle": state_map.get(state, "loose"),
-                    "metadata": {
-                        "sync_topic_id": topic_id,
-                        "sync_topic_name": topic_name
-                    }
+                # 2. Insert them as nodes
+                state_map = {
+                    "IMPROVISE": "loose",
+                    "FORMING": "forming",
+                    "FINAL": "frozen",
+                    "SUPERSEDED": "killed"
                 }
                 
-                c.execute(
-                    "INSERT INTO nodes (id, type, data, created_at) VALUES (?, 'brick', ?, ?)",
-                    (brick_id, json.dumps(node_data), created_at)
-                )
-                
-                # 3. If topic node doesn't exist, create it
-                if topic_id:
-                    c.execute("SELECT id FROM nodes WHERE id = ?", (f"topic_{topic_id}",))
-                    if not c.fetchone():
-                        c.execute(
-                            "INSERT INTO nodes (id, type, data, created_at) VALUES (?, 'topic', ?, ?)",
-                            (f"topic_{topic_id}", json.dumps({"name": topic_name or topic_id}), created_at)
-                        )
+                for br in brick_rows:
+                    brick_id = br[0]
+                    content = br[1]
+                    state = br[2]
+                    created_at = br[3]
+                    topic_id = br[4]
+                    topic_name = br[5]
                     
-                    # 4. Create edge between topic and brick
+                    node_data = {
+                        "statement": content,
+                        "lifecycle": state_map.get(state, "loose"),
+                        "metadata": {
+                            "sync_topic_id": topic_id,
+                            "sync_topic_name": topic_name
+                        }
+                    }
+                    
                     c.execute(
-                        "INSERT OR IGNORE INTO edges (source, target, type, created_at) VALUES (?, ?, ?, ?)",
-                        (f"topic_{topic_id}", brick_id, EdgeType.ASSEMBLED_IN.value, created_at)
+                        "INSERT INTO nodes (id, type, data, created_at) VALUES (?, 'brick', ?, ?)",
+                        (brick_id, json.dumps(node_data), created_at)
                     )
+                    
+                    # 3. If topic node doesn't exist, create it
+                    if topic_id:
+                        res_topic = c.execute("SELECT id FROM nodes WHERE id = ?", (f"topic_{topic_id}",))
+                        if not res_topic.fetchone():
+                            c.execute(
+                                "INSERT INTO nodes (id, type, data, created_at) VALUES (?, 'topic', ?, ?)",
+                                (f"topic_{topic_id}", json.dumps({"name": topic_name or topic_id}), created_at)
+                            )
+                        
+                        # 4. Create edge between topic and brick
+                        c.execute(
+                            "INSERT OR IGNORE INTO edges (source, target, type, created_at) VALUES (?, ?, ?, ?)",
+                            (f"topic_{topic_id}", brick_id, EdgeType.ASSEMBLED_IN.value, created_at)
+                        )
 
-            conn.commit()
             print(f"[SYNC] Migrated {len(brick_rows)} bricks to unified node storage.")
         except sqlite3.OperationalError as e:
             print(f"[SYNC] Migration skipped: {e}")
@@ -799,14 +816,11 @@ class GraphManager:
         Governance Analytics: Query the audit JSONL file.
         In-memory table approach for fast analysis.
         """
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(self.graph_dir)))
-        audit_log_path = os.path.join(root_dir, "services", "cortex", "phase3_audit_trace.jsonl")
-        
-        if not os.path.exists(audit_log_path):
+        if not os.path.exists(AUDIT_LOG_PATH):
             return []
 
         events = []
-        with open(audit_log_path, "r", encoding="utf-8") as f:
+        with open(AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
             for line in f:
                 try:
                     ev = json.loads(line)

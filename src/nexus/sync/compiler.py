@@ -305,10 +305,21 @@ SOURCE JSON TO SCAN:
             # print(f"❌ Path Error: {pointer['json_path']} - {e}")
             return None
 
+        # Hard Verification Gate: Verbatim quote must exist at path
         start_idx = node_text.find(pointer['verbatim_quote'])
         
         if start_idx == -1:
-            # print(f"❌ Hallucination Detected: Quote not found in {pointer['json_path']}")
+            # Audit Hallucination
+            self.graph_manager._log_audit_event(
+                event_type=AuditEventType.LLM_HALLUCINATION_DETECTED,
+                agent="NexusCompiler",
+                component="compiler",
+                decision_action=DecisionAction.REJECTED,
+                reason=f"Verbatim quote not found at path {pointer['json_path']}",
+                topic_id=topic_id,
+                run_id=run_id,
+                metadata={"pointer": pointer}
+            )
             return None # HARD REJECT
 
         end_idx = start_idx + len(pointer['verbatim_quote'])
@@ -334,31 +345,18 @@ SOURCE JSON TO SCAN:
 
     def _resolve_json_path(self, data: Any, path_str: str) -> Any:
         """
-        Robust JSONPath resolver with support for content_blocks.
+        Robust JSONPath resolver with support for content_blocks using jsonpath-ng.
         """
-        if parse:
-             try:
-                 jsonpath_expr = parse(path_str)
-                 matches = [match.value for match in jsonpath_expr.find(data)]
-                 if matches:
-                     return matches[0]
-             except Exception:
-                 pass # Fallback to manual
-        
-        # Fallback manual parsing: $.messages[0].content_blocks[1].value
-        parts = path_str.replace("$", "").strip(".").split(".")
-        current = data
+        if not parse:
+             raise ImportError("jsonpath-ng is not installed.")
+
         try:
-            for part in parts:
-                if not part: continue
-                if "[" in part and "]" in part:
-                    key_part = part.split("[")[0]
-                    idx_part = part.split("[")[1].split("]")[0]
-                    if key_part:
-                        current = current[key_part]
-                    current = current[int(idx_part)]
-                else:
-                    current = current[part]
-            return current
-        except (KeyError, IndexError, ValueError, TypeError) as e:
+            jsonpath_expr = parse(path_str)
+            matches = [match.value for match in jsonpath_expr.find(data)]
+            if matches:
+                return matches[0]
+            raise ValueError(f"No matches found for path: {path_str}")
+        except Exception as e:
+            # Enhanced error logging for debugging
+            print(f"[Compiler] JSONPath Error: {path_str} - {e}")
             raise ValueError(f"Path resolution failed for {path_str}: {e}")

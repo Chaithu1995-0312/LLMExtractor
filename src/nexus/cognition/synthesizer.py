@@ -44,7 +44,7 @@ def run_relationship_synthesis(topic_id: str = None, batch_size: int = 20):
     
     for i in range(0, len(intent_payloads), batch_size):
         batch = intent_payloads[i : i + batch_size]
-        print(f"[SYNTHESIZER] Analyzing batch of {len(batch)} intents...")
+        print(f"[SYNTHESIZER] Analyzing batch {i//batch_size + 1} of {len(intent_payloads)//batch_size + 1}...")
         
         # Filter edges relevant to this batch (optimization)
         batch_ids = {item['id'] for item in batch}
@@ -54,6 +54,7 @@ def run_relationship_synthesis(topic_id: str = None, batch_size: int = 20):
         ]
         
         try:
+            # P0.5 Batch Recovery: Wrapped in local try-except
             prediction = synthesizer.forward(intents=batch, existing_edges=relevant_edges)
             relationships = prediction.relationships
             

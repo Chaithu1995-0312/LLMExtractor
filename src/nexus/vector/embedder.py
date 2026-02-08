@@ -4,29 +4,30 @@ from typing import List, Optional
 import logging
 
 class VectorEmbedder:
-    _instance = None
-    _model = None
+    """
+    Handles text embedding generation.
+    Refactored to support non-singleton instantiation for testing.
+    """
+    _shared_model = None
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(VectorEmbedder, cls).__new__(cls)
-        return cls._instance
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        self.model_name = model_name
 
     def _get_model(self):
-        if self._model is None:
+        if VectorEmbedder._shared_model is None:
             try:
                 from sentence_transformers import SentenceTransformer
                 # Use a lightweight, high-performance model suitable for local use
                 # 384 dimensions
-                print("Loading embedding model: all-MiniLM-L6-v2 ...")
-                self._model = SentenceTransformer('all-MiniLM-L6-v2')
+                print(f"Loading embedding model: {self.model_name} ...")
+                VectorEmbedder._shared_model = SentenceTransformer(self.model_name)
             except ImportError:
                 print("Error: sentence-transformers not installed. Please install it.")
                 raise
             except Exception as e:
                 print(f"Error loading model: {e}")
                 raise
-        return self._model
+        return VectorEmbedder._shared_model
 
     def _rewrite_with_llm(self, original_query: str) -> str:
         """
@@ -118,6 +119,6 @@ class VectorEmbedder:
         return embeddings.astype("float32")
 
 
-# Global singleton accessor
+# Global singleton accessor (Deprecated: Use direct instantiation)
 def get_embedder():
     return VectorEmbedder()

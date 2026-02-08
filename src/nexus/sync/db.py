@@ -4,22 +4,18 @@ import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
-GRAPH_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "graph", "graph.db")
-SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "graph", "schema_sync.sql")
+from nexus.config import GRAPH_DB_PATH, SYNC_SCHEMA_PATH
 
 class SyncDatabase:
     def __init__(self, db_path: str = None):
-        if db_path is None:
-            self.db_path = GRAPH_DB_PATH
-        else:
-            self.db_path = db_path
+        self.db_path = db_path or GRAPH_DB_PATH
         self._init_db()
 
     def _init_db(self):
         """Initialize the database with the schema."""
         conn = self._get_conn()
         try:
-            with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+            with open(SYNC_SCHEMA_PATH, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
             conn.executescript(schema_sql)
             conn.commit()

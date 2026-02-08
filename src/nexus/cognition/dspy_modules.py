@@ -18,26 +18,54 @@ class RelationshipSignature(dspy.Signature):
     existing_topology = dspy.InputField(desc="List of existing edges to avoid duplication or contradiction")
     relationships = dspy.OutputField(desc="List of dicts: [{'source_id': str, 'target_id': str, 'type': 'DEPENDS_ON' | 'CONFLICTS_WITH' | 'OVERRIDES', 'reason': str}]")
 
+class EntitySignature(dspy.Signature):
+    """Identify key entities and technical components mentioned in the text."""
+    context = dspy.InputField(desc="Text to analyze")
+    entities = dspy.OutputField(desc="List of unique entities, systems, or technical terms found")
+
 class CognitiveExtractor(dspy.Module):
-    def __init__(self):
+    def __init__(self, max_depth: int = 2):
         super().__init__()
         self.fact_extractor = dspy.ChainOfThought(FactSignature)
         self.diagram_extractor = dspy.ChainOfThought(DiagramSignature)
+        self.entity_extractor = dspy.ChainOfThought(EntitySignature)
+        self.max_depth = max_depth
 
-    def forward(self, context: str):
+    def forward(self, context: str, current_depth: int = 0):
+        # 1. Primary Extraction
         facts_res = self.fact_extractor(context=context)
         diagrams_res = self.diagram_extractor(context=context)
+        entities_res = self.entity_extractor(context=context)
         
-        return dspy.Prediction(
+        prediction = dspy.Prediction(
             facts=facts_res.facts,
             latex=diagrams_res.latex_formulas,
-            mermaid=diagrams_res.mermaid_diagrams
+            mermaid=diagrams_res.mermaid_diagrams,
+            entities=entities_res.entities
         )
+
+        # 2. Recursive Logic: Trigger secondary extraction if entities found
+        if current_depth < self.max_depth and entities_res.entities:
+            # Note: Recursive triggers would typically be handled by a queue/orchestrator
+            # but we define the logical bridge here.
+            prediction.recursive_entities = entities_res.entities
+
+        return prediction
+
+class SentimentSignature(dspy.Signature):
+    """Analyze the user query for urgency and sentiment."""
+    query = dspy.InputField()
+    urgency_score = dspy.OutputField(desc="Score from 0.0 to 1.0 (1.0 being critical/emergency)")
+    sentiment = dspy.OutputField(desc="Positive, Negative, or Neutral")
 
 class RelationshipSynthesizer(dspy.Module):
     def __init__(self):
         super().__init__()
         self.synthesizer = dspy.ChainOfThought(RelationshipSignature)
+        self.sentiment_analyzer = dspy.ChainOfThought(SentimentSignature)
+
+    def analyze_sentiment(self, query: str):
+        return self.sentiment_analyzer(query=query)
 
     def forward(self, intents: List[dict], existing_edges: List[dict] = []):
         # Format intents for the prompt

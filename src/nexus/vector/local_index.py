@@ -9,9 +9,10 @@ from nexus.config import INDEX_PATH, BRICK_IDS_PATH
 from nexus.vector.embedder import get_embedder
 
 class LocalVectorIndex:
-    def __init__(self):
-        self.index_file = Path(INDEX_PATH)
-        self.meta_file = Path(BRICK_IDS_PATH)
+    def __init__(self, index_path: str = None, meta_path: str = None):
+        from nexus.config import INDEX_PATH, BRICK_IDS_PATH
+        self.index_file = Path(index_path or INDEX_PATH)
+        self.meta_file = Path(meta_path or BRICK_IDS_PATH)
 
         self.dimension = 384
         self.index = faiss.IndexFlatL2(self.dimension)

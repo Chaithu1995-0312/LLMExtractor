@@ -1,80 +1,74 @@
-# NEXUS MODULE DEEP DIVES
+# MODULE_DEEP_DIVES.md
 
-## 1. Graph Manager (`src/nexus/graph/manager.py`)
-The `GraphManager` is the authoritative state controller for the Nexus Knowledge Graph. It abstracts the underlying SQLite database into a transactional graph interface.
+## 1. Graph Manager Core (`src/nexus/graph/manager.py`)
 
-### Method Intelligence: `GraphManager`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+The `GraphManager` is the authoritative controller for the Nexus state. It handles all state transitions and enforces graph-level invariants.
+
+### Method Intelligence Table: `GraphManager`
+
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants Enforced |
 | :--- | :--- | :--- | :--- | :--- |
-| `register_node` | Core node insertion. | `type`, `id`, `attrs` | DB write; emits pulse. | Unique `id` constraint. |
-| `register_edge` | Directional link creation. | `src`, `dst`, `type` | DB write; cycle check. | No cycles (if enforced). |
-| `kill_node` | Logical deletion. | `node_id`, `reason` | Sets status to `KILLED`. | Immutable once killed. |
-| `supersede_node` | Versioning/replacement. | `old_id`, `new_id` | Re-links edges to `new_id`. | `old_id` becomes `SUPERSEDED`. |
-| `promote_intent` | Lifecycle progression. | `id`, `lifecycle` | Updates node status. | State must be valid Enum. |
+| `register_node` | Atomic node creation/merge | node_type, node_id, attrs | Persistent record in SQLite | Prevents duplicate ID collisions |
+| `add_typed_edge` | Schema-aware relationship creation | edge object | Typed edge record | Validates node existence; checks for cycles |
+| `promote_node_to_frozen` | Finalize node state | node_id, promote_bricks, actor | State -> `frozen`; audit log entry | Transitions node to immutable status |
+| `supersede_node` | Versioning replacement | old_id, new_id, reason | Links old to new; marks old as `superseded` | Maintains lineage; prevents circular supersession |
+| `kill_node` | Logical removal | node_id, reason, actor | State -> `killed`; audit log entry | Preserves history (no physical delete) |
+| `sync_bricks_to_nodes` | Ingestion bridge | limit | Promotes bricks to Intent nodes | Ensures bricks aren't double-processed |
 
-- **Usage:** Called by `Cognition` (for fact storage) and `UI` (for manual overrides).
-- **Layer:** Graph (State Authoritative).
+### Method Usage Graph: `GraphManager`
+- **Called By**: `CortexAPI` (via `server.py`), `NexusCompiler` (indirectly via brick promotion), `ui/jarvis` (via REST API).
+- **Layer**: Graph Layer.
+- **Authority**: Write-authoritative. All state changes MUST pass through this class.
 
 ---
 
 ## 2. Nexus Compiler (`src/nexus/sync/compiler.py`)
-The `NexusCompiler` transforms messy conversation logs and documents into structured "Bricks". It uses JSON path resolution and LLM pointers to find relevant content.
 
-### Method Intelligence: `NexusCompiler`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+The `NexusCompiler` manages the transformation of raw data into atomic Bricks. It is the primary orchestrator of the Ingestion layer.
+
+### Method Intelligence Table: `NexusCompiler`
+
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Failure Modes |
 | :--- | :--- | :--- | :--- | :--- |
-| `compile_run` | Main orchestrator. | `run_id`, `topic_id` | Full brickification process. | Atomic run completion. |
-| `_extract_pointers` | AI-assisted search. | `content`, `topic` | List of content paths. | Paths must exist in source. |
-| `_materialize_brick` | Brick creation. | `data`, `pointer` | DB record in `SyncDatabase`. | Unique brick hash. |
+| `compile_run` | Process a conversation run | run_id, topic_id | Count of bricks materialized | LLM timeout; malformed JSON input |
+| `_llm_extract_pointers` | Semantic segmentation | content, topic | List of brick pointers | Hallucinated JSON paths; empty responses |
+| `_materialize_brick` | Brick persistence | run_data, pointer | JSON Brick object in `BrickStore` | Integrity error on duplicate fingerprint |
 
-- **Usage:** Triggered by `runner.py` or `tasks.py` during sync cycles.
-- **Layer:** Ingestion (Data Processing).
+### Method Usage Graph: `NexusCompiler`
+- **Called By**: `sync_bricks_task` (Cortex Worker), `runner.py` (CLI).
+- **Layer**: Ingestion Layer.
+- **Authority**: Transactional (Run level). Read-write on `SyncDatabase` and `BrickStore`.
 
 ---
 
-## 3. Cortex API (`services/cortex/api.py`)
-The business logic hub. It coordinates between the Vector Index, the Graph, and the LLM generation modules.
+## 3. Cognitive Extractor (`src/nexus/cognition/dspy_modules.py`)
 
-### Method Intelligence: `CortexAPI`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+Uses DSPy to recursively extract structured knowledge from text context.
+
+### Method Intelligence Table: `CognitiveExtractor`
+
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Lifecycle Impact |
 | :--- | :--- | :--- | :--- | :--- |
-| `route` | Intent routing. | `user_query` | Metadata + predicted agent. | Read-only. |
-| `generate` | Response synthesis. | `query`, `bricks` | LLM-generated string. | Context window limits. |
-| `assemble` | Context gathering. | `topic_id` | Aggregated brick content. | Permission/Scope check. |
-| `_audit_trace` | Observability. | `event_data` | Writes to `.jsonl` file. | Non-blocking write. |
+| `forward` | Recursive extraction | context, depth | Facts, Entities, Relationships | High token cost; defines graph topology |
 
-- **Usage:** Primary endpoint for the Jarvis UI and external integrations.
-- **Layer:** Service (Orchestration).
+### Method Usage Graph: `CognitiveExtractor`
+- **Called By**: `RelationshipSynthesizer`, `CortexAPI` (indirectly).
+- **Layer**: Cognition Layer.
+- **Authority**: Pure (Analytical). No direct side effects on main Graph.
 
 ---
 
-## 4. Vector Index (`src/nexus/vector/local_index.py`)
-Provides the semantic backbone for retrieval. Uses FAISS for local vector search.
+## 4. Relationship Synthesizer (`src/nexus/cognition/dspy_modules.py`)
 
-### Method Intelligence: `LocalVectorIndex`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+Infers typed edges between existing Intents by analyzing their semantic overlap.
+
+### Method Intelligence Table: `RelationshipSynthesizer`
+
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants Enforced |
 | :--- | :--- | :--- | :--- | :--- |
-| `add_bricks` | Index update. | `List[Brick]` | Updates FAISS buffer. | Vectors must match dim. |
-| `search` | Nearest neighbor. | `query_vector` | List of `(id, score)`. | Sorted by distance. |
-| `save` | Persistence. | - | Writes `.index` to disk. | Index must be valid. |
+| `forward` | Edge inference | intents, existing_edges | List of inferred typed edges | Prevents redundant edge creation |
 
-- **Usage:** Heavily used by `Recall` module to find context for LLM prompts.
-- **Layer:** Vector (Semantic Storage).
-
----
-
-## 5. Cognitive Extraction (`src/nexus/cognition/dspy_modules.py`)
-Uses DSPy to provide structured reasoning. It identifies facts and relationships from raw text.
-
-### Method Intelligence: `CognitiveExtractor`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
-| :--- | :--- | :--- | :--- | :--- |
-| `forward` | Inference pass. | `context` | List of `Fact` objects. | Adherence to signature. |
-
-### Method Intelligence: `RelationshipSynthesizer`
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
-| :--- | :--- | :--- | :--- | :--- |
-| `forward` | Link discovery. | `List[Intent]` | Proposed `Edges`. | Logical consistency. |
-
-- **Usage:** Called during `Topic Assembly` to populate the Graph with extracted knowledge.
-- **Layer:** Cognition (Inference).
+### Method Usage Graph: `RelationshipSynthesizer`
+- **Called By**: `run_relationship_synthesis` (Synthesizer).
+- **Layer**: Cognition Layer.
+- **Authority**: Stateful Read / Pure Write (Generates proposals for the Graph Layer).
