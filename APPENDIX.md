@@ -1,30 +1,46 @@
-# Appendix: Class Responsibility Matrix
+# NEXUS APPENDIX
 
-| Class | Method | Responsibility | Layer | Used By |
-| :--- | :--- | :--- | :--- | :--- |
-| **GraphManager** | `register_node` | Upsert node (Idempotent) | Graph | `sync_bricks_to_nodes`, `NexusCompiler` |
-| | `register_edge` | Create edge (Idempotent) | Graph | `RelationshipSynthesizer`, `supersede_node` |
-| | `promote_node_to_frozen` | Enforce FROZEN state | Governance | `server.py` (API), Manual Scripts |
-| | `kill_node` | Soft-delete node | Governance | `server.py` (API) |
-| | `supersede_node` | Replace node with history | Governance | `server.py` (API) |
-| **NexusCompiler** | `compile_run` | End-to-end ingestion | Ingest | `nexus-cli` (CLI), `server.py` (API) |
-| | `_materialize_brick` | Zero-Trust Verification | Ingest | `compile_run` |
-| **CortexAPI** | `route` | Agent selection | Service | `server.py` (API) |
-| | `generate` | L2 Pipeline Execution | Service | `server.py` (API) |
-| | `ask_preview` | Read-only Preview | Service | `server.py` (API), `Jarvis UI` |
-| **JarvisGateway** | `pulse` | L1 (Local) Inference | Service | `GraphManager` (Events), `NexusIngestor` |
-| | `explain` | L2 (Cloud) Inference | Service | `CortexAPI.generate` |
-| | `synthesize` | L3 (Cloud) Inference | Service | `CortexAPI.synthesize` |
-| **VectorEmbedder** | `embed_query` | Text-to-Vector | Vector | `LocalVectorIndex`, `CortexAPI` |
-| **LocalVectorIndex** | `search` | K-NN Search | Vector | `recall.py`, `CortexAPI` |
-| **SyncDatabase** | `save_brick` | Persist Brick | Ingest | `NexusCompiler` |
+## 1. Consolidated Class-Method Reference
 
----
+| Class | Method | Responsibility | Used By | Layer |
+| :--- | :--- | :--- | :--- | :---: |
+| `GraphManager` | `register_node` | State persistence for Graph Nodes. | `Cognition`, `UI` | Graph |
+| `GraphManager` | `register_edge` | Linking nodes with type/metadata. | `Cognition`, `UI` | Graph |
+| `GraphManager` | `kill_node` | Logical removal of node. | `UI`, `Maintenance` | Graph |
+| `NexusCompiler` | `compile_run` | End-to-end brickification. | `Runner`, `Tasks` | Ingestion |
+| `NexusCompiler` | `_materialize_brick` | DB write for atomic Bricks. | `compile_run` | Ingestion |
+| `CortexAPI` | `route` | Routing query to specific intent. | `UI`, `External` | Service |
+| `CortexAPI` | `generate` | Final RAG-based response synthesis. | `UI`, `External` | Service |
+| `LocalVectorIndex` | `search` | FAISS vector lookup. | `Recall`, `CortexAPI` | Vector |
+| `VectorEmbedder` | `embed_query` | Query vectorization & rewriting. | `Recall`, `LocalIndex` | Vector |
+| `CognitiveExtractor`| `forward` | Fact extraction from text. | `Assembler` | Cognition |
+| `RerankOrchestrator`| `rerank` | Multi-pass result refinement. | `Recall` | Recall |
+| `SyncDatabase` | `save_brick` | Persistence for Brick metadata. | `Compiler` | Ingestion |
 
-## Terminology
-*   **Brick:** Atomic unit of extracted knowledge (verbatim quote).
-*   **Intent:** Synthesized fact or goal derived from one or more Bricks.
-*   **Scope:** The domain or context an Intent applies to (e.g., "Project A", "Global").
-*   **Pointer:** A JSONPath + Quote pair identified by the LLM during scanning.
-*   **Frozen:** A state where a node is immutable and considered "Truth".
-*   **Superseded:** A state where a node is historically preserved but logically obsolete.
+## 2. Key Terminology Reference
+- **Brick:** Atomic data unit containing raw content and source pointer.
+- **Intent:** Distilled factual unit represented as a Graph Node.
+- **Wall:** A projected view of the Graph tailored for specific topic analysis.
+- **Recall:** The process of retrieving Bricks via semantic search and reranking.
+- **Sync:** The background process that turns raw data into indexed Bricks.
+
+## 3. Communication & Authority Graph
+- **Graph Layer:** Authority over persistent state and logical consistency.
+- **Cognition Layer:** Authority over truth inference and relationship discovery.
+- **Service Layer:** Authority over query orchestration and audit logging.
+- **Ingestion Layer:** Authority over data integrity and source attribution.
+
+## 4. Visualizing the NEXUS Flow
+```mermaid
+graph TD
+    A[Raw Data] --> B(Ingestion Layer)
+    B -->|Bricks| C{Brick Store}
+    C --> D(Vector Index)
+    C --> E(Cognition Layer)
+    E -->|Intents/Edges| F(Graph Layer)
+    G[User Query] --> H(Recall Layer)
+    H -->|Ranked Bricks| I(Service Layer)
+    F -->|Context| I
+    I --> J[AI Response]
+```
+*(Diagram represents high-level data flow through the system)*

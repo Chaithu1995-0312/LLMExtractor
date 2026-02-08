@@ -4,7 +4,7 @@ import { Lifecycle } from "./NexusNode";
 interface NodeEditorProps {
   nodeId: string;
   currentLifecycle: Lifecycle;
-  onUpdate: (nodeId: string, action: "promote" | "kill", data?: any) => void;
+  onUpdate: (nodeId: string, action: "promote" | "kill" | "supersede", data?: any) => void;
   onClose: () => void;
 }
 
@@ -15,6 +15,8 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
   onClose,
 }) => {
   const [killReason, setKillReason] = useState("");
+  const [supersedeReason, setSupersedeReason] = useState("");
+  const [newNodeId, setNewNodeId] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
 
   const handlePromote = async () => {
@@ -30,6 +32,16 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
     }
     setIsUpdating(true);
     await onUpdate(nodeId, "kill", { reason: killReason });
+    setIsUpdating(false);
+  };
+
+  const handleSupersede = async () => {
+    if (!newNodeId || !supersedeReason) {
+      alert("Please provide both a New Node ID and a Reason.");
+      return;
+    }
+    setIsUpdating(true);
+    await onUpdate(nodeId, "supersede", { new_node_id: newNodeId, reason: supersedeReason });
     setIsUpdating(false);
   };
 
@@ -49,7 +61,7 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
 
       <div className="flex flex-col gap-2">
         <span className="text-[10px] uppercase tracking-widest text-white/40">Selected Node ID</span>
-        <code className="text-xs font-mono text-cyan-400 bg-black/40 p-2 rounded border border-white/5">
+        <code className="text-xs font-mono text-cyan-400 bg-black/40 p-2 rounded border border-white/5 break-all">
           {nodeId}
         </code>
       </div>
@@ -66,6 +78,7 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
         </span>
       </div>
 
+      {/* Action: Promote */}
       {currentLifecycle !== 'FROZEN' && currentLifecycle !== 'KILLED' && (
         <button
           disabled={isUpdating}
@@ -76,6 +89,33 @@ export const NodeEditor: React.FC<NodeEditorProps> = ({
         </button>
       )}
 
+      {/* Action: Supersede (Only for Frozen) */}
+      {currentLifecycle === 'FROZEN' && (
+        <div className="flex flex-col gap-3 pt-4 border-t border-white/5">
+           <span className="text-[10px] uppercase tracking-widest text-white/40">Evolution Protocol (Supersede)</span>
+           <input
+            value={newNodeId}
+            onChange={(e) => setNewNodeId(e.target.value)}
+            placeholder="New Node ID (UUID)"
+            className="bg-black/40 border border-white/10 rounded p-3 text-xs text-white/80 focus:border-blue-500/50 outline-none font-mono"
+          />
+           <textarea
+            value={supersedeReason}
+            onChange={(e) => setSupersedeReason(e.target.value)}
+            placeholder="Reason for supersession..."
+            className="bg-black/40 border border-white/10 rounded p-3 text-xs text-white/80 focus:border-blue-500/50 outline-none h-20 resize-none font-mono"
+          />
+          <button
+            disabled={isUpdating}
+            onClick={handleSupersede}
+            className="bg-blue-900/40 hover:bg-blue-800/60 border border-blue-500/50 disabled:opacity-50 text-blue-400 text-xs font-bold py-3 rounded uppercase tracking-widest transition-all"
+          >
+            {isUpdating ? "Processing..." : "Supersede Node"}
+          </button>
+        </div>
+      )}
+
+      {/* Action: Kill */}
       {currentLifecycle !== 'KILLED' && (
         <div className="flex flex-col gap-3 pt-4 border-t border-white/5">
           <span className="text-[10px] uppercase tracking-widest text-white/40">Rejection Protocol</span>

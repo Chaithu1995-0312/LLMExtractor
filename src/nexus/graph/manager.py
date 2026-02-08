@@ -2,8 +2,11 @@ import json
 import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Dict, Any, Tuple, List, Optional
-from nexus.graph.schema import Intent, Source, ScopeNode, Edge, EdgeType, IntentLifecycle, IntentType, GraphNode
+from typing import Dict, Any, Tuple, List, Optional, Union
+from nexus.graph.schema import (
+    Intent, Source, ScopeNode, Edge, EdgeType, IntentLifecycle, 
+    IntentType, GraphNode, AuditEventType, ModelTier, DecisionAction
+)
 
 class GraphManager:
     def __init__(self, db_path: str = None):
@@ -12,8 +15,8 @@ class GraphManager:
             db_path = os.path.join(self.graph_dir, "graph.db")
         self.db_path = db_path
         self._init_db()
-        # Enforce unified storage on startup
-        # self.sync_bricks_to_nodes()
+        # Enforce unified storage on startup - Idempotent
+        self.sync_bricks_to_nodes()
 
     def _init_db(self):
         conn = sqlite3.connect(self.db_path)
@@ -120,6 +123,37 @@ class GraphManager:
             intents.append(i)
         return intents
 
+    def _check_for_cycle(self, start_node_id: str, target_node_id: str, edge_type_str: str) -> Optional[List[str]]:
+        """
+        DFS to detect cycles for a specific edge type.
+        Guardrail 1: Type-scoped traversal.
+        """
+        visited = set()
+        
+        def dfs(current_id, path):
+            if current_id == start_node_id:
+                return path + [current_id]
+            if current_id in visited:
+                return None
+            
+            visited.add(current_id)
+            
+            # Fetch outgoing edges of the same type
+            conn = self._get_conn()
+            c = conn.cursor()
+            c.execute("SELECT target FROM edges WHERE source=? AND type=?", (current_id, edge_type_str))
+            targets = [row[0] for row in c.fetchall()]
+            conn.close()
+            
+            for t in targets:
+                cycle = dfs(t, path + [current_id])
+                if cycle:
+                    return cycle
+            return None
+
+        # Start DFS from the target of the proposed edge
+        return dfs(target_node_id, [])
+
     def register_edge(self, src: Tuple[str, str], dst: Tuple[str, str], edge_type: Any, attrs: Dict[str, Any] = None):
         """
         Register an edge. Idempotent.
@@ -132,6 +166,13 @@ class GraphManager:
         # Ensure edge_type is a string (handles Enum)
         edge_type_str = edge_type.value if hasattr(edge_type, 'value') else str(edge_type)
         
+        # P0.1 Real-Time Cycle Prevention
+        # Only for versioning edges: OVERRIDES and SUPERSEDED_BY
+        if edge_type_str in [EdgeType.OVERRIDES.value, EdgeType.SUPERSEDED_BY.value]:
+            cycle = self._check_for_cycle(src_id, dst_id, edge_type_str)
+            if cycle:
+                raise ValueError(f"Cycle detected for {edge_type_str}: {' -> '.join(cycle)}")
+
         conn = self._get_conn()
         c = conn.cursor()
         try:
@@ -217,17 +258,53 @@ class GraphManager:
         except:
             pass
 
-    def _log_audit_event(self, event_type: str, payload: Dict[str, Any]):
+    def _log_audit_event(
+        self, 
+        event_type: Union[AuditEventType, str], 
+        agent: str,
+        component: str,
+        decision_action: DecisionAction,
+        reason: str,
+        topic_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        model_tier: Optional[ModelTier] = None,
+        cost_usd: Optional[float] = None,
+        tokens_in: Optional[int] = None,
+        tokens_out: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
         """
-        Log an audit event. Appends to phase3_audit_trace.jsonl.
+        Log a standardized audit event. Appends to phase3_audit_trace.jsonl.
         """
-        # ISO8601 timestamp
         ts = datetime.now(timezone.utc).isoformat()
+        
+        event_str = event_type.value if hasattr(event_type, 'value') else str(event_type)
+        
         event = {
             "timestamp": ts,
-            "event": event_type,
-            **payload
+            "event": event_str,
+            "component": component,
+            "agent": agent,
+            "topic_id": topic_id,
+            "run_id": run_id,
+            "model_tier": model_tier.value if model_tier else None,
+            "cost": {
+                "usd": cost_usd or 0.0,
+                "tokens_in": tokens_in or 0,
+                "tokens_out": tokens_out or 0
+            } if model_tier else None,
+            "decision": {
+                "action": decision_action.value if hasattr(decision_action, 'value') else str(decision_action),
+                "reason": reason[:200] # Cap reason length
+            },
+            "metadata": metadata or {}
         }
+        
+        # Economic Cognition Invariant: 
+        # Any operation that invokes a non-free model must emit cost metadata.
+        if model_tier and model_tier != ModelTier.L1 and (cost_usd is None):
+            print(f"⚠️ [AUDIT WARNING] Silent spend detected for {event_str}. Model tier {model_tier} requires explicit cost.")
+
         print(f"[AUDIT] {json.dumps(event)}")
         
         # Append to services/cortex/phase3_audit_trace.jsonl
@@ -274,12 +351,14 @@ class GraphManager:
         conn.close()
 
         # Audit
-        self._log_audit_event("NODE_KILLED", {
-            "node_id": node_id,
-            "reason": reason,
-            "actor": actor,
-            "previous_state": current_state.value
-        })
+        self._log_audit_event(
+            event_type=AuditEventType.NODE_KILLED,
+            agent=actor,
+            component="graph",
+            decision_action=DecisionAction.REJECTED,
+            reason=reason,
+            metadata={"node_id": node_id, "previous_state": current_state.value}
+        )
 
         self._emit_pulse("NODE_KILLED", {"id": node_id, "actor": actor, "reason": reason})
 
@@ -316,11 +395,14 @@ class GraphManager:
         conn.commit()
         conn.close()
 
-        self._log_audit_event("NODE_FROZEN", {
-            "node_id": node_id,
-            "promoted_bricks": promote_bricks,
-            "actor": actor
-        })
+        self._log_audit_event(
+            event_type=AuditEventType.NODE_FROZEN,
+            agent=actor,
+            component="graph",
+            decision_action=DecisionAction.PROMOTED,
+            reason="Promotion from FORMING to FROZEN based on anchors",
+            metadata={"node_id": node_id, "promoted_bricks": promote_bricks}
+        )
 
         self._emit_pulse("NODE_FROZEN", {"id": node_id, "actor": actor})
 
@@ -378,12 +460,14 @@ class GraphManager:
         conn.commit()
         conn.close()
 
-        self._log_audit_event("NODE_SUPERSEDED", {
-            "old_node": old_node_id,
-            "new_node": new_node_id,
-            "reason": reason,
-            "actor": actor
-        })
+        self._log_audit_event(
+            event_type=AuditEventType.NODE_SUPERSEDED,
+            agent=actor,
+            component="graph",
+            decision_action=DecisionAction.SUPERSEDED,
+            reason=reason,
+            metadata={"old_node": old_node_id, "new_node": new_node_id}
+        )
 
     def promote_intent(self, intent_id: str, new_lifecycle: IntentLifecycle):
         """
@@ -427,7 +511,7 @@ class GraphManager:
         conn.commit()
         conn.close()
 
-    def add_typed_edge(self, edge: Edge):
+    def add_typed_edge(self, edge: Edge, actor: str = "system"):
         # Write-Time Invariants
         if edge.edge_type == EdgeType.OVERRIDES:
             # 1. Source must be FROZEN
@@ -448,6 +532,14 @@ class GraphManager:
             if existing:
                 # If existing is same source, it's idempotent retry, allow.
                 if existing[0][0] != edge.source_id:
+                    self._log_audit_event(
+                        event_type=AuditEventType.EDGE_REJECTED,
+                        agent=actor,
+                        component="graph",
+                        decision_action=DecisionAction.REJECTED,
+                        reason=f"Target {edge.target_id} already overridden by {existing[0][0]}",
+                        metadata={"edge": str(edge)}
+                    )
                     raise ValueError(f"Target {edge.target_id} already overridden by {existing[0][0]}")
 
         self.register_edge(
@@ -604,7 +696,7 @@ class GraphManager:
         conn.close()
         return nodes
 
-    def sync_bricks_to_nodes(self):
+    def sync_bricks_to_nodes(self, limit: int = 1000):
         """
         Migrate bricks from the 'bricks' sync table into the unified 'nodes' table.
         This enforces a single physical storage schema for all graph entities.
@@ -613,12 +705,19 @@ class GraphManager:
         c = conn.cursor()
         
         try:
+            # Optimization: Quick count check
+            c.execute("SELECT COUNT(*) FROM bricks WHERE id NOT IN (SELECT id FROM nodes)")
+            pending = c.fetchone()[0]
+            if pending == 0:
+                return
+
             # 1. Fetch bricks that aren't yet in the 'nodes' table
-            c.execute("""
+            c.execute(f"""
                 SELECT b.id, b.content, b.state, b.created_at, b.topic_id, t.display_name
                 FROM bricks b
                 LEFT JOIN topics t ON b.topic_id = t.id
                 WHERE b.id NOT IN (SELECT id FROM nodes)
+                LIMIT {limit}
             """)
             brick_rows = c.fetchall()
             
@@ -694,3 +793,33 @@ class GraphManager:
                 **data
             })
         return edges
+
+    def query_audit_logs(self, filters: Dict[str, Any] = None) -> List[Dict]:
+        """
+        Governance Analytics: Query the audit JSONL file.
+        In-memory table approach for fast analysis.
+        """
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(self.graph_dir)))
+        audit_log_path = os.path.join(root_dir, "services", "cortex", "phase3_audit_trace.jsonl")
+        
+        if not os.path.exists(audit_log_path):
+            return []
+
+        events = []
+        with open(audit_log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    ev = json.loads(line)
+                    # Apply simple filters
+                    match = True
+                    if filters:
+                        for k, v in filters.items():
+                            if ev.get(k) != v:
+                                match = False
+                                break
+                    if match:
+                        events.append(ev)
+                except json.JSONDecodeError:
+                    continue
+        
+        return events

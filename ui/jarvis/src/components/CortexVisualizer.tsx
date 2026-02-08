@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
 import cytoscape from 'cytoscape';
 import dagre from 'cytoscape-dagre';
@@ -90,12 +90,20 @@ export const CortexVisualizer: React.FC<CortexVisualizerProps> = ({ data }) => {
     }
   ];
 
-  const layout = {
+  const layout = useMemo(() => ({
     name: 'dagre',
     rankDir: 'LR',
     spacingFactor: 1.2,
     animate: true
-  };
+  }), []);
+
+  useEffect(() => {
+    if (cyRef.current) {
+      const runLayout = cyRef.current.layout(layout);
+      runLayout.run();
+      cyRef.current.fit();
+    }
+  }, [elements, layout]);
 
   return (
     <div className="relative w-full h-full bg-[#05080a]/40 rounded-xl overflow-hidden border border-white/5 backdrop-blur-sm shadow-2xl">
@@ -106,7 +114,7 @@ export const CortexVisualizer: React.FC<CortexVisualizerProps> = ({ data }) => {
         style={{ width: '100%', height: '100%' }}
         stylesheet={styles}
         layout={layout}
-        cy={(cy) => { cyRef.current = cy; }}
+        cy={(cy: cytoscape.Core) => { cyRef.current = cy; }}
         className="block w-full h-full cursor-crosshair"
       />
 

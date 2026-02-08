@@ -1,95 +1,80 @@
-# Module Deep Dives
+# NEXUS MODULE DEEP DIVES
 
 ## 1. Graph Manager (`src/nexus/graph/manager.py`)
-**Role:** The Central Nervous System. Manages the unified graph of Intent, Source, Scope, and Brick nodes.
+The `GraphManager` is the authoritative state controller for the Nexus Knowledge Graph. It abstracts the underlying SQLite database into a transactional graph interface.
 
-### Method: `promote_node_to_frozen(node_id, promote_bricks, actor)`
-*   **Responsibility:** Executes the critical lifecycle transition from `FORMING` to `FROZEN`.
-*   **Inputs:**
-    *   `node_id` (str): UUID of the node to freeze.
-    *   `promote_bricks` (List[str]): IDs of bricks acting as "Hard Anchors".
-    *   `actor` (str): ID of the user/agent authorizing the freeze.
-*   **Outputs:** None (State change).
-*   **Invariants Enforced:**
-    *   Node must currently be in `FORMING` state.
-    *   Transition is monotonic (cannot go back to LOOSE).
-*   **Side Effects:**
-    *   Updates `nodes` table (lifecycle="frozen", hard_anchors=...).
-    *   Logs `NODE_FROZEN` event to Audit Trace.
-    *   Emits `NODE_FROZEN` pulse to Gateway.
-*   **Failure Modes:**
-    *   `ValueError`: If node not found or not in `FORMING` state.
-*   **Lifecycle:** **GATEKEEPER** (Write Barrier).
+### Method Intelligence: `GraphManager`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `register_node` | Core node insertion. | `type`, `id`, `attrs` | DB write; emits pulse. | Unique `id` constraint. |
+| `register_edge` | Directional link creation. | `src`, `dst`, `type` | DB write; cycle check. | No cycles (if enforced). |
+| `kill_node` | Logical deletion. | `node_id`, `reason` | Sets status to `KILLED`. | Immutable once killed. |
+| `supersede_node` | Versioning/replacement. | `old_id`, `new_id` | Re-links edges to `new_id`. | `old_id` becomes `SUPERSEDED`. |
+| `promote_intent` | Lifecycle progression. | `id`, `lifecycle` | Updates node status. | State must be valid Enum. |
 
-### Method: `supersede_node(old_node_id, new_node_id, reason, actor)`
-*   **Responsibility:** Replaces an obsolete fact with a new one while preserving history.
-*   **Inputs:** `old_node_id`, `new_node_id`, `reason`, `actor`.
-*   **Invariants Enforced:**
-    *   Both nodes must be `FROZEN`.
-    *   Nodes cannot supersede themselves.
-*   **Side Effects:**
-    *   Creates edge: `old -> [SUPERSEDED_BY] -> new`.
-    *   Updates `nodes` metadata: `old.superseded_by`, `new.supersedes`.
-    *   Logs `NODE_SUPERSEDED` event.
-*   **Lifecycle:** **GOVERNANCE** (History Preservation).
+- **Usage:** Called by `Cognition` (for fact storage) and `UI` (for manual overrides).
+- **Layer:** Graph (State Authoritative).
 
 ---
 
 ## 2. Nexus Compiler (`src/nexus/sync/compiler.py`)
-**Role:** The Zero-Trust Ingestion Engine. Transforms raw logs into verified Bricks.
+The `NexusCompiler` transforms messy conversation logs and documents into structured "Bricks". It uses JSON path resolution and LLM pointers to find relevant content.
 
-### Method: `compile_run(run_id, topic_id)`
-*   **Responsibility:** Orchestrates the extraction pipeline for a specific conversation run.
-*   **Control Flow:**
-    1.  **Fetch:** Retrieves Run JSON and Topic Definition from DB.
-    2.  **Scan:** Calls `_pre_filter_nodes` to optimize context.
-    3.  **LLM:** Calls `_llm_extract_pointers` to get candidate quotes.
-    4.  **Validate:** Calls `_materialize_brick` for byte-level verification.
-    5.  **Persist:** Saves valid bricks to DB.
-*   **Outputs:** Integer (count of new bricks).
+### Method Intelligence: `NexusCompiler`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `compile_run` | Main orchestrator. | `run_id`, `topic_id` | Full brickification process. | Atomic run completion. |
+| `_extract_pointers` | AI-assisted search. | `content`, `topic` | List of content paths. | Paths must exist in source. |
+| `_materialize_brick` | Brick creation. | `data`, `pointer` | DB record in `SyncDatabase`. | Unique brick hash. |
 
-### Method: `_materialize_brick(run_data, run_id, pointer, topic_id)`
-*   **Responsibility:** The "Zero-Trust Gate". Validates that the LLM's hallucinated pointer matches reality.
-*   **Inputs:** Raw JSON data, pointer object (JSONPath + Verbatim Quote).
-*   **Logic:**
-    1.  Resolves JSONPath to find the node text.
-    2.  Searches for `verbatim_quote` within that text.
-    3.  **CRITICAL:** If quote is missing, returns `None` (Silent Rejection).
-*   **Outputs:** `Brick` dict or `None`.
-*   **Invariants Enforced:** Content MUST exist in source.
-*   **Security:** Prevents "hallucinated facts" from entering the graph.
+- **Usage:** Triggered by `runner.py` or `tasks.py` during sync cycles.
+- **Layer:** Ingestion (Data Processing).
 
 ---
 
-## 3. Cortex Gateway (`services/cortex/gateway.py`)
-**Role:** The Economic Router. Manages cognitive costs.
+## 3. Cortex API (`services/cortex/api.py`)
+The business logic hub. It coordinates between the Vector Index, the Graph, and the LLM generation modules.
 
-### Method: `pulse(event_type, context)` (Tier L1)
-*   **Responsibility:** Low-cost system narration.
-*   **Routing:** Directs request to **Local LLM** (Ollama/Llama3).
-*   **Cost:** $0.00.
-*   **Fallbacks:** Returns static string if local inference fails.
+### Method Intelligence: `CortexAPI`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `route` | Intent routing. | `user_query` | Metadata + predicted agent. | Read-only. |
+| `generate` | Response synthesis. | `query`, `bricks` | LLM-generated string. | Context window limits. |
+| `assemble` | Context gathering. | `topic_id` | Aggregated brick content. | Permission/Scope check. |
+| `_audit_trace` | Observability. | `event_data` | Writes to `.jsonl` file. | Non-blocking write. |
 
-### Method: `explain(query, context_bricks)` (Tier L2)
-*   **Responsibility:** High-quality user Q&A.
-*   **Routing:** Directs request to **LiteLLM Proxy** (Claude-3.5 Sonnet).
-*   **Cost:** ~$0.01 per call.
-*   **Logic:**
-    1.  Injects "Governor" system prompt.
-    2.  Checks for proxy errors (429 Budget Exceeded).
-    3.  Returns content + usage stats.
-*   **Lifecycle:** **Read-Only** (does not write to graph).
+- **Usage:** Primary endpoint for the Jarvis UI and external integrations.
+- **Layer:** Service (Orchestration).
 
 ---
 
-## 4. Vector Embedder (`src/nexus/vector/embedder.py`)
-**Role:** Semantic Indexing.
+## 4. Vector Index (`src/nexus/vector/local_index.py`)
+Provides the semantic backbone for retrieval. Uses FAISS for local vector search.
 
-### Method: `embed_query(query, use_genai)`
-*   **Responsibility:** Converts text to vector.
-*   **Inputs:** `query` (str), `use_genai` (bool).
-*   **Logic:**
-    1.  (Optional) Calls `_rewrite_with_llm` to expand technical terms (e.g., "brick" -> "nexus documentation unit").
-    2.  Calls `SentenceTransformer.encode`.
-*   **Outputs:** `numpy.ndarray` (384-d).
-*   **Performance:** Singleton pattern ensures model is loaded once.
+### Method Intelligence: `LocalVectorIndex`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `add_bricks` | Index update. | `List[Brick]` | Updates FAISS buffer. | Vectors must match dim. |
+| `search` | Nearest neighbor. | `query_vector` | List of `(id, score)`. | Sorted by distance. |
+| `save` | Persistence. | - | Writes `.index` to disk. | Index must be valid. |
+
+- **Usage:** Heavily used by `Recall` module to find context for LLM prompts.
+- **Layer:** Vector (Semantic Storage).
+
+---
+
+## 5. Cognitive Extraction (`src/nexus/cognition/dspy_modules.py`)
+Uses DSPy to provide structured reasoning. It identifies facts and relationships from raw text.
+
+### Method Intelligence: `CognitiveExtractor`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `forward` | Inference pass. | `context` | List of `Fact` objects. | Adherence to signature. |
+
+### Method Intelligence: `RelationshipSynthesizer`
+| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants |
+| :--- | :--- | :--- | :--- | :--- |
+| `forward` | Link discovery. | `List[Intent]` | Proposed `Edges`. | Logical consistency. |
+
+- **Usage:** Called during `Topic Assembly` to populate the Graph with extracted knowledge.
+- **Layer:** Cognition (Inference).

@@ -3,6 +3,13 @@ import json
 import requests
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+import sys
+
+# Add src to path for nexus imports
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src")))
+
+from nexus.graph.prompt_manager import PromptManager
 
 class JarvisGateway:
     """
@@ -15,6 +22,7 @@ class JarvisGateway:
         self.local_url = local_url
         self.proxy_url = proxy_url
         self.local_model = "llama3"  # or "mistral"
+        self.prompt_manager = PromptManager()
         
     def pulse(self, event_type: str, context: Dict) -> str:
         """
@@ -22,7 +30,7 @@ class JarvisGateway:
         Used for: Status updates, simple narration, log summarization.
         Routing: Local Ollama instance.
         """
-        prompt = f"""
+        fallback_prompt = f"""
         [ROLE] You are the Nexus System Narrator.
         [TASK] Summarize this system event in one sentence (<15 words).
         [TONE] Clinical, objective, cybernetic.
@@ -30,6 +38,11 @@ class JarvisGateway:
         """
         
         try:
+            # Governance-checked prompt
+            raw_prompt = self.prompt_manager.get_prompt("jarvis-l1-pulse", fallback=fallback_prompt)
+            # Re-inject variables if they were placeholders in DB
+            prompt = raw_prompt.replace("{event_type}", event_type).replace("{context}", json.dumps(context))
+
             # Try Local First
             payload = {
                 "model": self.local_model,
@@ -52,13 +65,15 @@ class JarvisGateway:
         Used for: "Why" questions, conflict resolution, intent analysis.
         Routing: LiteLLM Proxy (Claude-3.5-Sonnet).
         """
-        system_msg = """
+        fallback_system = """
         You are Jarvis, the Governor of the Nexus State.
         1. Answer based ONLY on the provided Brick context.
         2. If the bricks contradict, highlight the conflict.
         3. Never invent facts not in the context.
         """
         
+        system_msg = self.prompt_manager.get_prompt("jarvis-l2-system", fallback=fallback_system)
+
         payload = {
             "model": "jarvis-l2", # Maps to Claude-3.5 via Proxy
             "messages": [

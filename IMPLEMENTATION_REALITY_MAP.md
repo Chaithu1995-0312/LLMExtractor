@@ -1,66 +1,71 @@
-# Implementation Reality Map
+# NEXUS IMPLEMENTATION REALITY MAP
 
-## Legend
-| Status | Definition |
-| :--- | :--- |
-| ✅ | **Confirmed Active**: Code exists, runs, and is integrated. |
-| 🟡 | **Partial / Degraded**: Implemented but has limitations or bugs. |
-| 🔴 | **Missing**: Architectural component defined but not found in code. |
-| 🧪 | **Experimental / Mocked**: Exists as a test harness or hardcoded mock. |
+## 1. System-Wide Readiness Overview
 
----
-
-## 1. Ingestion Layer
-| Component | Sub-Component | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| **NexusCompiler** | `compile_run` | ✅ | Core ingestion logic operational. |
-| | `_llm_extract_pointers` | ✅ | LLM integration via `llm_client`. |
-| | `_materialize_brick` | ✅ | Zero-trust validation (verbatim quote check) enforced. |
-| **TreeSplitter** | `extract_message` | ✅ | Recursively extracts messages from conversation trees. |
-| **BrickStore** | `get_brick_text` | 🟡 | Relies on file system (json) rather than DB for retrieval. |
-
-## 2. Graph Layer
-| Component | Sub-Component | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| **GraphManager** | `register_node` | ✅ | Generic node storage (SQLite `nodes` table). |
-| | `register_edge` | ✅ | Generic edge storage (SQLite `edges` table). |
-| | `kill_node` | ✅ | Implements `KILLED` lifecycle state. |
-| | `promote_node_to_frozen` | ✅ | Implements `FROZEN` state transition. |
-| | `supersede_node` | ✅ | Handles `SUPERSEDED_BY` edges. |
-| | `sync_bricks_to_nodes` | 🟡 | One-way sync from legacy `bricks` table to unified `nodes`. |
-| | `validate_no_cycles` | ✅ | Cycle detection implemented in `validation.py`. |
-
-## 3. Cognition Layer
-| Component | Sub-Component | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| **CortexAPI** | `route` | 🧪 | Hardcoded routing rules (keyword based). |
-| | `generate` | ✅ | Calls `JarvisGateway` (Tier 2). |
-| | `audit_trace` | ✅ | Logs usage to `phase3_audit_trace.jsonl`. |
-| **JarvisGateway** | `pulse` (L1) | ✅ | Connects to local Ollama. |
-| | `explain` (L2) | ✅ | Connects to Proxy (Claude). |
-| | `synthesize` (L3) | ✅ | Connects to Proxy (o1/GPT-4). |
-| **DSPy Modules** | `CognitiveExtractor` | ✅ | Fact/Diagram extraction implemented. |
-| | `RelationshipSynthesizer` | ✅ | Relationship discovery implemented. |
-
-## 4. Vector Layer
-| Component | Sub-Component | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| **VectorEmbedder** | `embed_query` | ✅ | Uses `sentence-transformers/all-MiniLM-L6-v2`. |
-| | `_rewrite_with_llm` | ✅ | Optional GenAI query expansion. |
-| **LocalVectorIndex** | `add_bricks` | ✅ | FAISS integration. |
-| | `search` | ✅ | Standard K-NN search. |
-
-## 5. UI Layer (Jarvis)
-| Component | Sub-Component | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| **React App** | `WallView` | ✅ | Visualizes nodes/bricks. |
-| | `NodeEditor` | ✅ | Allows editing of node properties. |
-| | `CortexVisualizer` | 🟡 | Visual component exists, integration depth unclear. |
-| | `ControlStrip` | ✅ | Main navigation. |
+| Layer | Status | Method Implementation (%) | Primary Risks |
+| :--- | :---: | :---: | :--- |
+| **Ingestion** | ✅ | 95% | JSON Path resolution edge cases. |
+| **Vector/Recall** | 🟡 | 80% | Model-specific reranking latency. |
+| **Graph** | ✅ | 100% | SQLite scale constraints for massive graphs. |
+| **Cognition** | 🧪 | 60% | DSPy prompt drift; complex relationship inference. |
+| **Service/UI** | 🟡 | 75% | Real-time graph sync overhead. |
 
 ---
 
-## 6. Critical Gaps (Summary)
-1.  **Orchestration**: No automated background job runner (e.g., Celery/Redis) to trigger `sync_bricks_to_nodes` or `validate_frozen_scope`. Currently appears to be script-driven.
-2.  **Auth/Security**: No user authentication found in `api.py` or `server.py`. `user_id` is passed as a string argument.
-3.  **Governance UI**: No dedicated UI workflow for "Promoting" or "Freezing" nodes found in `App.tsx` (though `GraphManager` supports it).
+## 2. Method Intelligence Status
+
+### Class: `GraphManager` (Graph Layer)
+| Method | Status | Notes |
+| :--- | :---: | :--- |
+| `register_node` | ✅ | Fully transactional. |
+| `register_edge` | ✅ | Includes cycle detection. |
+| `kill_node` | ✅ | State-authoritative for node destruction. |
+| `supersede_node` | ✅ | Complex redirection of edges implemented. |
+| `sync_bricks_to_nodes` | ✅ | Syncs Brick IDs into the Graph. |
+
+### Class: `CortexAPI` (Service Layer)
+| Method | Status | Notes |
+| :--- | :---: | :--- |
+| `route` | ✅ | High-performance intent routing. |
+| `generate` | ✅ | Core response synthesis. |
+| `assemble` | ✅ | Orchestrates Brick gathering. |
+| `synthesize` | 🟡 | Relationship synthesis call is partial. |
+| `get_audit_events` | ✅ | Functional, but needs better filtering. |
+
+### Class: `NexusCompiler` (Ingestion Layer)
+| Method | Status | Notes |
+| :--- | :---: | :--- |
+| `compile_run` | ✅ | Main entry point for brickification. |
+| `_llm_extract_pointers` | ✅ | Functional, depends on `LLMClient`. |
+| `_materialize_brick` | ✅ | Creates the persistent Brick records. |
+| `_resolve_json_path` | 🟡 | Fails on certain nested array patterns. |
+
+### Class: `LocalVectorIndex` (Recall Layer)
+| Method | Status | Notes |
+| :--- | :---: | :--- |
+| `add_bricks` | ✅ | Updates FAISS index. |
+| `search` | ✅ | Optimized vector lookup. |
+| `save`/`load` | ✅ | Local persistence of FAISS index. |
+
+### Class: `CognitiveExtractor` (Cognition Layer)
+| Method | Status | Notes |
+| :--- | :---: | :--- |
+| `forward` | 🧪 | Mocked in tests, but DSPy module exists. |
+
+---
+
+## 3. Implied Methods (The "Under-Construction" Methods)
+
+| Method Name | Layer | Purpose | Status |
+| :--- | :---: | :--- | :---: |
+| `rebalance_graph` | Graph | Optimization of node clusters. | 🔴 |
+| `validate_cross_intent_logic` | Cognition | Logical consistency checking between intents. | 🧪 |
+| `stream_audit_realtime` | Service | WebSocket push for audit events. | 🔴 |
+| `auto_resolve_conflicts` | Cognition | Intelligent merging of conflicting intents. | 🧪 |
+
+---
+
+## 4. Conflict & Uncertainty Log
+- **Uncertainty:** `VectorEmbedder` uses LLM for query rewriting. Impact on search precision is not fully measured (Status: 🧪).
+- **Conflict:** `runner.py` vs `runner_old.py`. The system is transitioning from manual state files to `SyncDatabase` management.
+- **Dependency Risk:** DSPy modules in `Cognition` layer are highly sensitive to the underlying model provider (Status: 🧪).

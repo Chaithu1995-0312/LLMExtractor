@@ -98,7 +98,7 @@ class SyncDatabase:
     def get_run(self, run_id: str) -> Optional[Dict]:
         conn = self._get_conn()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, raw_content, status FROM source_runs WHERE id = ?", (run_id,))
+        cursor.execute("SELECT id, raw_content, status, last_processed_index FROM source_runs WHERE id = ?", (run_id,))
         row = cursor.fetchone()
         conn.close()
         
@@ -106,9 +106,21 @@ class SyncDatabase:
             return {
                 "id": row[0],
                 "raw_content": json.loads(row[1]),
-                "status": row[2]
+                "status": row[2],
+                "last_processed_index": row[3]
             }
         return None
+
+    def update_run_boundary(self, run_id: str, last_index: int):
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                "UPDATE source_runs SET last_processed_index = ? WHERE id = ?",
+                (last_index, run_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     # --- BRICKS ---
 

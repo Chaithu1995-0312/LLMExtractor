@@ -1,74 +1,55 @@
-# File Index
+# NEXUS FILE INDEX
 
-## `src/nexus/graph/`
-### `manager.py`
-*   `GraphManager`
-    *   `register_node`: Upsert a generic node into the graph.
-    *   `register_edge`: Create a directed edge between two nodes.
-    *   `kill_node`: Move a node to KILLED state (soft delete).
-    *   `promote_node_to_frozen`: Lock a node into FROZEN state.
-    *   `supersede_node`: Replace a FROZEN node with a new one.
-    *   `sync_bricks_to_nodes`: Migrate bricks from ingestion table to graph table.
+## 1. Graph Layer (`src/nexus/graph/`)
+- `manager.py`: Primary interface for graph state.
+    - `GraphManager`: Transactional node/edge persistence and lifecycle control.
+- `schema.py`: Data models for Graph entities.
+    - `Intent`, `Source`, `ScopeNode`, `Edge`: Core structural definitions.
+- `projection.py`: Logic for projecting graph state into specific views (e.g., Walls).
+- `prompt_manager.py`: Manages system prompts and governance rules.
+    - `PromptManager`: CRUD for versioned AI instructions.
+- `validation.py`: Structural integrity checks (cycles, orphans).
 
-### `projection.py`
-*   (Functions)
-    *   `project_intent`: Resolve an intent's effective state based on edges.
-    *   `has_conflict`: Check for CONFLICTS_WITH edges.
+## 2. Cognition Layer (`src/nexus/cognition/`)
+- `assembler.py`: High-level orchestration of topic assembly.
+    - `assemble_topic`: Fetches context and triggers cognitive extraction.
+- `dspy_modules.py`: DSPy signatures and modules for AI reasoning.
+    - `CognitiveExtractor`: Transforms raw text into structured facts.
+    - `RelationshipSynthesizer`: Infers logical edges between existing intents.
+- `synthesizer.py`: Batch processing for relationship discovery.
 
-### `schema.py`
-*   `IntentLifecycle` (Enum): LOOSE, FORMING, FROZEN, SUPERSEDED, KILLED.
-*   `EdgeType` (Enum): APPLIES_TO, ASSEMBLED_IN, SUPERSEDED_BY, CONFLICTS_WITH.
+## 3. Ingestion & Sync Layer (`src/nexus/sync/`, `src/nexus/extract/`)
+- `compiler.py`: The logic for turning raw JSON/Text into Bricks.
+    - `NexusCompiler`: Path resolution, pointer extraction, and brick materialization.
+- `db.py`: Persistence for the synchronization process.
+    - `SyncDatabase`: Tracks topics, runs, and brick fingerprints.
+- `ingest_history.py`: Legacy ingestion tools for historical data.
+- `tree_splitter.py`: Decomposes large JSON exports into traversable trees.
 
-## `src/nexus/sync/`
-### `compiler.py`
-*   `NexusCompiler`
-    *   `compile_run`: Orchestrate the extraction pipeline for a run.
-    *   `_llm_extract_pointers`: Call LLM to find text coordinates.
-    *   `_materialize_brick`: Verify and create a Brick object.
+## 4. Vector & Recall Layer (`src/nexus/vector/`, `src/nexus/ask/`, `src/nexus/rerank/`)
+- `embedder.py`: Query and text vectorization.
+    - `VectorEmbedder`: Singleton for embedding generation and query rewriting.
+- `local_index.py`: FAISS-based vector storage.
+    - `LocalVectorIndex`: High-speed semantic search implementation.
+- `recall.py`: Top-level retrieval functions.
+    - `recall_bricks`: Retrieves and reranks candidates based on query.
+- `orchestrator.py` (rerank): Multi-strategy reranking.
+    - `RerankOrchestrator`: Sequences LLM and heuristic ranking passes.
 
-### `db.py`
-*   `SyncDatabase`
-    *   `save_brick`: Persist a brick to SQLite.
-    *   `register_run`: Log a new ingestion run.
+## 5. Bricks Layer (`src/nexus/bricks/`)
+- `brick_store.py`: Read-optimized access to atomic data.
+    - `BrickStore`: Fast retrieval of brick text and metadata.
+- `extractor.py`: Utility for generating brick IDs and extracting atoms.
 
-### `ingest_history.py`
-*   `NexusIngestor`
-    *   `brickify`: Convert raw content into bricks.
+## 6. Service Layer (`services/cortex/`)
+- `api.py`: Business logic for the Cortex system.
+    - `CortexAPI`: Orchestrates recall, generation, and auditing.
+- `gateway.py`: Proxy interface for external model interaction.
+    - `JarvisGateway`: Managed access to local or remote LLM providers.
+- `server.py`: FastAPI endpoints for UI and external integration.
+- `tasks.py`: Background job definitions for async processing.
 
-## `src/nexus/vector/`
-### `embedder.py`
-*   `VectorEmbedder` (Singleton)
-    *   `embed_query`: Generate vector for search query.
-    *   `embed_texts`: Batch embed text strings.
-    *   `_rewrite_with_llm`: Expand query terms using LLM.
-
-### `local_index.py`
-*   `LocalVectorIndex`
-    *   `add_bricks`: Add brick content to FAISS index.
-    *   `search`: Perform Nearest Neighbor search.
-
-## `services/cortex/`
-### `api.py`
-*   `CortexAPI`
-    *   `route`: Determine which agent handles a query.
-    *   `generate`: Execute the L2 (Voice) cognitive pipeline.
-    *   `ask_preview`: Read-only L2 preview.
-    *   `assemble`: Trigger background assembly.
-
-### `gateway.py`
-*   `JarvisGateway`
-    *   `pulse`: L1 local inference (fast/free).
-    *   `explain`: L2 proxy inference (smart/paid).
-    *   `synthesize`: L3 proxy inference (deep/expensive).
-
-### `server.py`
-*   (Functions)
-    *   `jarvis_node_promote`: HTTP endpoint wrapper for GraphManager.
-    *   `jarvis_ask_preview`: HTTP endpoint wrapper for CortexAPI.
-
-## `src/nexus/cognition/`
-### `dspy_modules.py`
-*   `CognitiveExtractor` (DSPy Module)
-    *   `forward`: Extract Facts and Diagrams from text.
-*   `RelationshipSynthesizer` (DSPy Module)
-    *   `forward`: Infer relationships between intents.
+## 7. UI Layer (`ui/jarvis/`)
+- `src/App.tsx`: Main application container.
+- `src/store.ts`: Client-side state management (Zustand).
+- `src/components/`: Modular UI units (AuditPanel, WallView, NodeEditor).

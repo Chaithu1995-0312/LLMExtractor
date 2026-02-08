@@ -375,6 +375,35 @@ def jarvis_prompts():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# --- P1 Observability Endpoints ---
+
+@app.route("/api/audit/events", methods=["GET"])
+def get_audit_events():
+    limit = request.args.get("limit", default=100, type=int)
+    offset = request.args.get("offset", default=0, type=int)
+    event_type = request.args.get("event")
+    component = request.args.get("component")
+    run_id = request.args.get("run_id")
+    
+    return jsonify(cortex_api.get_audit_events(limit, offset, event_type, component, run_id))
+
+@app.route("/api/runs/<run_id>", methods=["GET"])
+def get_run_details(run_id):
+    return jsonify(cortex_api.get_run_details(run_id))
+
+@app.route("/api/graph/snapshot", methods=["GET"])
+def get_graph_snapshot():
+    return jsonify(cortex_api.get_graph_snapshot())
+
+@app.route("/api/prompts", methods=["GET"])
+def get_governance_prompts():
+    try:
+        pm = PromptManager()
+        prompts = pm.get_all_system_prompts()
+        return jsonify({"prompts": prompts})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     print("Prewarming embedder...")
     get_embedder()

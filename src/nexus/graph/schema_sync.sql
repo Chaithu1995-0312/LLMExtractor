@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS source_runs (
     id TEXT PRIMARY KEY, -- e.g., 'run_2026_02_07'
     raw_content JSON NOT NULL, -- The full conversation/artifact
     ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    status TEXT CHECK (status IN ('OPEN', 'CLOSED'))
+    status TEXT CHECK (status IN ('OPEN', 'CLOSED')),
+    last_processed_index INTEGER DEFAULT -1 -- Boundary for incremental extraction
 );
 
 -- 3. The Atomic Truths
@@ -39,6 +40,19 @@ CREATE TABLE IF NOT EXISTS bricks (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 4. Prompt Governance
+CREATE TABLE IF NOT EXISTS prompts (
+    slug TEXT NOT NULL, -- e.g., 'jarvis-l2-system'
+    version INTEGER NOT NULL DEFAULT 1,
+    content TEXT NOT NULL,
+    role TEXT CHECK (role IN ('system', 'user', 'assistant')) DEFAULT 'system',
+    description TEXT,
+    metadata JSON, -- Optional model-specific params
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (slug, version)
+);
+
 -- Indexes for Speed
 CREATE INDEX IF NOT EXISTS idx_bricks_topic ON bricks(topic_id);
 CREATE INDEX IF NOT EXISTS idx_bricks_fingerprint ON bricks(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_prompts_slug ON prompts(slug);

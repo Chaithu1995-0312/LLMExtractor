@@ -15,7 +15,8 @@ import {
   LayoutGrid,
   Network,
   Menu,
-  X
+  X,
+  Terminal
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -42,8 +43,10 @@ import 'reactflow/dist/style.css';
 import { NexusNode, NexusNodeProps, Lifecycle } from './components/NexusNode';
 import { WallView } from './components/WallView';
 import { Panel } from './components/Panel';
+import { AuditPanel } from './components/AuditPanel';
 import { CortexVisualizer } from './components/CortexVisualizer';
 import { NodeEditor } from './components/NodeEditor';
+import { ControlPanel } from './components/ControlPanel';
 import dagre from 'dagre';
 
 // --- Adapters ---
@@ -197,6 +200,7 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [useGenAI, setUseGenAI] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [controlPanelOpen, setControlPanelOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'Welcome to the **Nexus Workbench**. How can I help you explore the knowledge base today?' }
   ]);
@@ -264,6 +268,24 @@ export default function App() {
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || 'Promote failed');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['graph-index'] });
+    }
+  });
+
+  const supersedeMutation = useMutation({
+    mutationFn: async ({ oldNodeId, newNodeId, reason }: { oldNodeId: string, newNodeId: string, reason: string }) => {
+      const res = await fetch('/jarvis/node/supersede', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old_node_id: oldNodeId, new_node_id: newNodeId, reason, actor: 'user' })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Supersede failed');
       }
       return res.json();
     },
@@ -388,6 +410,7 @@ export default function App() {
     { id: 'ask', label: 'Ask & Recall', icon: MessageSquare },
     { id: 'explore', label: 'Explore Wall', icon: LayoutGrid },
     { id: 'visualize', label: 'Cortex Visualizer', icon: Maximize2 },
+    { id: 'audit', label: 'Observatory', icon: Activity },
   ];
 
   return (
@@ -411,7 +434,14 @@ export default function App() {
           ))}
         </nav>*/}
 
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col items-center gap-4">
+           <button 
+             onClick={() => setControlPanelOpen(true)}
+             className="p-3 text-white/40 hover:text-white hover:bg-white/5 rounded-lg transition-all"
+             title="System Control Plane"
+           >
+             <Terminal className="w-6 h-6" />
+           </button>
            <button className="p-3 text-white/40 hover:text-white">
              <BookOpen className="w-6 h-6" />
            </button>
@@ -539,6 +569,16 @@ export default function App() {
                   </div>
                 </div>
               </motion.div>
+            ) : mode === 'audit' ? (
+              <motion.div 
+                key="audit"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full w-full flex justify-center"
+              >
+                <AuditPanel />
+              </motion.div>
             ) : mode === 'ask' ? (
               <motion.div 
                 key="chat"
@@ -598,7 +638,7 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="h-full w-full"
+                className="h-full w-full relative"
               >
                 {viewMode === 'wall' ? (
                   <WallView 
@@ -607,7 +647,7 @@ export default function App() {
                     onSelect={setSelectedBrickId} 
                   />
                 ) : (
-                  <div style={{ width: '100%', height: '100%' }}> {/* Wrapper Fixed */}
+                  <div className="absolute inset-0 w-full h-full"> {/* Wrapper Fixed */}
                     <ReactFlow
                       nodes={nodes}
                       edges={edges}
@@ -674,6 +714,8 @@ export default function App() {
                           onUpdate={async (id, action, data) => {
                             if (action === 'promote') {
                               await promoteMutation.mutateAsync({ nodeId: id });
+                            } else if (action === 'supersede') {
+                              await supersedeMutation.mutateAsync({ oldNodeId: id, newNodeId: data?.new_node_id, reason: data?.reason });
                             } else {
                               await killMutation.mutateAsync({ nodeId: id, reason: data?.reason });
                             }
@@ -693,6 +735,8 @@ export default function App() {
           </motion.aside>
         )}
       </AnimatePresence>
+
+      <ControlPanel isOpen={controlPanelOpen} onClose={() => setControlPanelOpen(false)} />
     </div>
   );
 }

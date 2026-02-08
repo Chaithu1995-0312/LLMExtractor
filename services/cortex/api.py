@@ -26,6 +26,8 @@ except ImportError:
         # Fallback to relative import if package structure allows
         from .gateway import JarvisGateway
 
+from nexus.graph.prompt_manager import PromptManager
+
 class CortexAPI:
     def __init__(self, audit_log_path: str = "phase3_audit_trace.jsonl"):
         self.audit_log_path = audit_log_path
@@ -244,9 +246,103 @@ class CortexAPI:
             
         return min(round(score, 2), 1000.0) # Cap for normalization if needed
 
+    def get_audit_events(self, limit: int = 100, offset: int = 0, event_type: Optional[str] = None, component: Optional[str] = None, run_id: Optional[str] = None) -> Dict:
+        """Endpoint: /api/audit/events - Standardized observability stream"""
+        events = []
+        try:
+            if os.path.exists(self.audit_log_path):
+                with open(self.audit_log_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            evt = json.loads(line)
+                            # Filters
+                            if event_type and evt.get("event") != event_type: continue
+                            if component and evt.get("component") != component: continue
+                            if run_id and evt.get("run_id") != run_id: continue
+                            events.append(evt)
+                        except: continue
+            
+            # Sort DESC
+            events.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+            total = len(events)
+            return {
+                "events": events[offset:offset+limit],
+                "total": total
+            }
+        except Exception as e:
+            return {"events": [], "total": 0, "error": str(e)}
+
+    def get_run_details(self, run_id: str) -> Dict:
+        """Endpoint: /api/runs/{run_id} - Run Inspector data"""
+        try:
+            from nexus.sync.db import SyncDatabase
+            db = SyncDatabase()
+            run = db.get_run(run_id)
+            if not run:
+                return {"error": "Run not found"}
+            
+            content = run["raw_content"]
+            total_msgs = len(content.get("messages", [])) if isinstance(content, dict) else 0
+            
+            # Aggregate stats from audit log
+            stats = {"llm_calls_executed": 0, "llm_calls_skipped": 0, "bricks_created": 0}
+            if os.path.exists(self.audit_log_path):
+                with open(self.audit_log_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            evt = json.loads(line)
+                            if evt.get("run_id") == run_id:
+                                if evt.get("event") == "LLM_CALL_EXECUTED": stats["llm_calls_executed"] += 1
+                                elif evt.get("event") == "LLM_CALL_SKIPPED": stats["llm_calls_skipped"] += 1
+                                elif evt.get("event") == "BRICK_MATERIALIZED": stats["bricks_created"] += 1
+                        except: continue
+
+            return {
+                "run_id": run_id,
+                "total_messages": total_msgs,
+                "last_processed_index": run.get("last_processed_index", -1),
+                "new_messages": max(0, total_msgs - (run.get("last_processed_index", -1) + 1)),
+                "stats": stats
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def get_graph_snapshot(self) -> Dict:
+        """Endpoint: /api/graph/snapshot - Read-only wall view"""
+        try:
+            from nexus.graph.manager import GraphManager
+            gm = GraphManager()
+            return {
+                "nodes": gm.get_all_nodes_raw(),
+                "edges": gm.get_all_edges_raw()
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     def get_all_prompts(self, min_score: float = 0.0) -> List[Dict]:
-        """Crawl output/nexus/trees/ and return all user/assistant messages with complexity scores."""
+        """Crawl output/nexus/trees/ and return all user/assistant messages + system prompts."""
         prompts = []
+        
+        # 1. System Prompts (Governance)
+        try:
+            pm = PromptManager()
+            system_prompts = pm.get_all_system_prompts()
+            for sp in system_prompts:
+                meta = json.loads(sp['metadata']) if sp['metadata'] else {}
+                prompts.append({
+                    "conversation_id": "GOVERNANCE",
+                    "title": f"System Prompt: {sp['slug']}",
+                    "message_id": f"{sp['slug']}_v{sp['version']}",
+                    "role": sp['role'],
+                    "content": sp['content'],
+                    "model_name": meta.get('model', 'governance'),
+                    "created_at": sp['created_at'],
+                    "complexity_score": self.calculate_complexity_score(sp['content'])
+                })
+        except Exception as e:
+            print(f"WARN: Failed to fetch system prompts: {e}")
+
+        # 2. Trace Trees (Historical)
         # Relative to project root
         trees_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "output", "nexus", "trees"))
         
