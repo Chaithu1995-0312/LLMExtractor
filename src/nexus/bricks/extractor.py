@@ -3,8 +3,18 @@ import os
 import hashlib
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
-from unstructured.partition.auto import partition
-from unstructured.cleaners.core import clean, clean_extra_whitespace, group_broken_paragraphs
+
+def classify_brick_type(role: str, text: str) -> str:
+    """Classify brick type based on role and punctuation (deterministic)."""
+    if role == "assistant" and "?" in text:
+        return "query"
+    if role == "assistant":
+        return "answer"
+    if role == "user":
+        return "input"
+    if role == "system":
+        return "doctrine"
+    return "unknown"
 
 def generate_brick_id(source_file: str, content: str, index: int) -> str:
     """Generate a unique, stable brick ID."""
@@ -37,13 +47,11 @@ def extract_bricks_from_file(tree_file_path: str, output_dir: str):
                     continue
 
                 if b_type == "text":
-                    # For text blocks, use semantic distillation (splitting only)
-                    candidates = [c.strip() for c in b_val.split("\n\n") if c.strip()]
-                    for c_idx, candidate in enumerate(candidates):
-                        bricks.append(_create_brick(
-                            tree_file_path, candidate, msg["message_id"], 
-                            b_idx, b_type, sub_index=c_idx
-                        ))
+                    # One Message = One Brick (No paragraph splitting)
+                    bricks.append(_create_brick(
+                        tree_file_path, b_val.strip(), msg["message_id"], 
+                        b_idx, b_type, role=msg.get("role")
+                    ))
                 else:
                     # For non-text blocks (code, tool_output), 1:1 mapping
                     # b_val might be a dict for tool outputs, stringify it
@@ -52,26 +60,19 @@ def extract_bricks_from_file(tree_file_path: str, output_dir: str):
                     
                     bricks.append(_create_brick(
                         tree_file_path, b_val, msg["message_id"], 
-                        b_idx, b_type
+                        b_idx, b_type, role=msg.get("role")
                     ))
         else:
             # LEGACY: Fallback to concatenated content string
             content = msg.get("content", "")
             if not content.strip():
                 continue
-
-            try:
-                cleaned_content = clean(content, extra_whitespace=True, dashes=True, bullets=True)
-                cleaned_content = group_broken_paragraphs(cleaned_content)
-                candidates = [c.strip() for c in cleaned_content.split("\n\n") if c.strip() and len(c.strip()) > 20]
-            except Exception:
-                candidates = [c.strip() for c in content.split("\n\n") if c.strip()]
             
-            for c_idx, candidate in enumerate(candidates):
-                bricks.append(_create_brick(
-                    tree_file_path, candidate, msg["message_id"], 
-                    0, "text", sub_index=c_idx
-                ))
+            # One Message = One Brick
+            bricks.append(_create_brick(
+                tree_file_path, content.strip(), msg["message_id"], 
+                0, "text", role=msg.get("role")
+            ))
 
     # Save bricks
     if bricks:
@@ -92,15 +93,25 @@ def extract_bricks_from_file(tree_file_path: str, output_dir: str):
     
     return None
 
-def _create_brick(file_path: str, content: str, msg_id: str, b_idx: int, b_type: str, sub_index: int = 0) -> Dict:
+def _create_brick(file_path: str, content: str, msg_id: str, b_idx: int, b_type: str, sub_index: int = 0, role: str = None) -> Dict:
     """Helper to construct a standardized Brick object."""
     # Ensure stable ID even with sub-indexing
     seed = f"{os.path.basename(file_path)}:{msg_id}:{b_idx}:{sub_index}:{content}"
     brick_id = hashlib.sha256(seed.encode()).hexdigest()[:32]
     
+    # Classify brick type strictly if role is provided
+    brick_type = b_type
+    state = "PENDING"
+    if role:
+        brick_type = classify_brick_type(role, content)
+        if brick_type == "query":
+            state = "LOOSE"
+
     return {
-        "brick_id": brick_id,
-        "brick_kind": b_type,
+        "id": brick_id, # Normalize to 'id' for graph compatibility
+        "brick_type": brick_type,
+        "brick_kind": b_type, # Original block type
+        "state": state,
         "intent": "unknown", # Compiler-owned
         "source_file": os.path.abspath(file_path),
         "source_span": {
@@ -110,9 +121,9 @@ def _create_brick(file_path: str, content: str, msg_id: str, b_idx: int, b_type:
             "sub_index": sub_index,
             "text_sample": content[:50] + "..." if len(content) > 50 else content
         },
-        "tags": [f"kind:{b_type}"],
+        "tags": [f"kind:{b_type}", f"type:{brick_type}"],
         "scope": "PRIVATE",
-        "status": "PENDING",
+        "status": state,
         "content": content,
         "hash": hashlib.sha256(content.encode()).hexdigest(),
         "created_at": datetime.now(timezone.utc).isoformat()

@@ -29,7 +29,7 @@ export const AuditPanel: React.FC = () => {
 
   const fetchEvents = async () => {
     try {
-      const resp = await fetch('/api/audit/events?limit=50');
+      const resp = await fetch('/api/audit-trail?limit=50');
       const data = await resp.json();
       setEvents(data.events || []);
     } catch (e) {

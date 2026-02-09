@@ -4,6 +4,7 @@ import os
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime, timezone
 from nexus.graph.schema import AuditEventType, ModelTier, DecisionAction
+from nexus.bricks.resolver import UserTriggeredResolver
 
 # For JSONPath, we might need a library like jsonpath-ng.
 try:
@@ -13,12 +14,16 @@ except ImportError:
 
 from nexus.sync.db import SyncDatabase
 from nexus.graph.prompt_manager import PromptManager
+from nexus.cognition.coverage_sentinel import CoverageSentinel
+from nexus.governance.alert_manager import AlertManager
 
 class NexusCompiler:
     def __init__(self, db_connection: SyncDatabase, llm_client: Any = None):
         self.db = db_connection
         self.llm_client = llm_client # Should be an interface with a .generate(prompt) method
         self.prompt_manager = PromptManager()
+        self.coverage_sentinel = CoverageSentinel(llm_client) if llm_client else None
+        self.alert_manager = AlertManager()
 
     def compile_run(self, run_id: str, topic_id: str) -> int:
         """
@@ -116,6 +121,63 @@ class NexusCompiler:
             topic_id=topic_id,
             metadata={"new_bricks": len(new_bricks)}
         )
+
+        # 7. Coverage Sentinel Analysis (Local Intelligence)
+        if self.coverage_sentinel and new_bricks:
+            try:
+                # Fetch existing intents for context
+                intents = graph_manager.get_intents_by_topic(f"topic_{topic_id}")
+                intent_dicts = []
+                for i in intents:
+                    intent_dicts.append({
+                        "id": i.id,
+                        "statement": i.statement,
+                        "lifecycle": i.lifecycle.value
+                    })
+                
+                alerts = self.coverage_sentinel.analyze_topic(topic['display_name'], new_bricks, intent_dicts)
+                
+                for alert in alerts:
+                    if alert.get("is_duplicate"):
+                        # Skip Pulse, Log Duplicate
+                        graph_manager._log_audit_event(
+                            event_type=AuditEventType.COVERAGE_ALERT_SKIPPED_DUPLICATE,
+                            agent="CoverageSentinel",
+                            component="cognition",
+                            decision_action=DecisionAction.SKIPPED,
+                            reason=f"Duplicate alert suppressed: {alert.get('details', {}).get('summary', 'Unknown')}",
+                            topic_id=topic_id,
+                            metadata={
+                                "alert_id": alert.get("alert_id"),
+                                "suppressed_fingerprint": alert.get("fingerprint")
+                            }
+                        )
+                        continue
+
+                    # Emit Pulse
+                    graph_manager._emit_pulse(
+                        event_type=alert.get("type", "COVERAGE_ALERT"),
+                        payload=alert.get("details", {}),
+                        topic_id=topic_id,
+                        severity=alert.get("severity", "info"),
+                        source="CoverageSentinel"
+                    )
+                    
+                    # Persist Alert (New Governance Layer)
+                    self.alert_manager.persist_alert(alert)
+
+                    # Log Audit
+                    graph_manager._log_audit_event(
+                        event_type=AuditEventType.COVERAGE_ALERT_EMITTED,
+                        agent="CoverageSentinel",
+                        component="cognition",
+                        decision_action=DecisionAction.ACCEPTED,
+                        reason=alert.get("details", {}).get("summary", "Coverage Alert"),
+                        topic_id=topic_id,
+                        metadata=alert
+                    )
+            except Exception as e:
+                print(f"[Compiler] Coverage Sentinel Error: {e}")
                 
         return len(new_bricks)
 
@@ -329,12 +391,19 @@ SOURCE JSON TO SCAN:
         node_checksum = hashlib.sha256(node_text.encode()).hexdigest()
         brick_id = hashlib.sha256((topic_id + fingerprint).encode()).hexdigest()
 
+        # Deterministic lifecycle initialization
+        # If it contains a question mark and is from assistant, it's LOOSE
+        # But here we are materializing based on LLM pointers, so we need to check the source node
+        state = "IMPROVISE"
+        if "?" in pointer['verbatim_quote'] and "assistant" in pointer['json_path']:
+             state = "LOOSE"
+
         return {
             "id": brick_id,
             "topic_id": topic_id,
             "content": pointer['verbatim_quote'],
             "fingerprint": fingerprint,
-            "state": "IMPROVISE",
+            "state": state,
             "source_address": {
                 "run_id": run_id,
                 "json_path": pointer['json_path'],

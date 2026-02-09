@@ -274,19 +274,37 @@ class GraphManager:
             return (row[0], json.loads(row[1]))
         return None
 
-    def _emit_pulse(self, event_type: str, data: Dict):
+    def _emit_pulse(
+        self, 
+        event_type: str, 
+        payload: Dict[str, Any], 
+        topic_id: Optional[str] = None, 
+        severity: str = "info", 
+        source: str = "GraphManager"
+    ):
         """
         Fire-and-forget call to the L1 Narrator.
-        In a real app, use a background task queue (Celery/RQ).
-        For this script, we can do a quick POST or print.
+        Emits a standardized Pulse Envelope.
         """
+        import uuid
+        
+        envelope = {
+            "pulse_id": str(uuid.uuid4()),
+            "pulse_type": event_type,
+            "topic_id": topic_id,
+            "severity": severity,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": source,
+            "payload": payload
+        }
+        
         try:
             # We assume the gateway is running or we import it for a quick local call
             # For simplicity, we just print the 'Intent' of the pulse here.
             # In full implementation, this calls JarvisGateway.pulse()
-            print(f"⚡ [PULSE L1] {event_type}: {data}")
-        except:
-            pass
+            print(f"⚡ [PULSE L1] {json.dumps(envelope)}")
+        except Exception as e:
+            print(f"Failed to emit pulse: {e}")
 
     def _log_audit_event(
         self, 
@@ -689,6 +707,97 @@ class GraphManager:
             return False
         finally:
             conn.close()
+
+    def get_loose_bricks(self, topic_id: str) -> List[Dict]:
+        """
+        Governance helper: Fetch LOOSE query bricks for a specific topic.
+        """
+        conn = self._get_conn()
+        c = conn.cursor()
+        
+        # We check both 'bricks' sync table and unified 'nodes' table
+        # If sync_bricks_to_nodes has run, they are in 'nodes'.
+        # For robustness, we query the unified nodes table filtered by brick type and lifecycle.
+        query = """
+            SELECT id, type, data, created_at 
+            FROM nodes 
+            WHERE type = 'brick' 
+            AND json_extract(data, '$.lifecycle') = 'loose'
+            AND json_extract(data, '$.metadata.sync_topic_id') = ?
+        """
+        c.execute(query, (topic_id,))
+        rows = c.fetchall()
+        conn.close()
+        
+        results = []
+        for r in rows:
+            data = json.loads(r[1])
+            results.append({
+                "id": r[0],
+                "type": r[1],
+                "created_at": r[2],
+                **data
+            })
+        return results
+
+    def mark_forming(self, brick_id: str, resolved_by: str, actor: str):
+        """
+        Transition a brick to FORMING state with resolution metadata.
+        """
+        data = self._get_node_data(brick_id)
+        if not data:
+            # Fallback to checking 'bricks' table if unified sync hasn't happened
+            conn = self._get_conn()
+            c = conn.cursor()
+            c.execute("SELECT content, state, topic_id FROM bricks WHERE id = ?", (brick_id,))
+            row = c.fetchone()
+            if row:
+                # Materialize as node first
+                data = {
+                    "statement": row[0],
+                    "lifecycle": "forming",
+                    "metadata": {
+                        "sync_topic_id": row[2],
+                        "resolved_by": resolved_by,
+                        "actor": actor,
+                        "resolved_at": datetime.now(timezone.utc).isoformat()
+                    }
+                }
+                self.register_node("brick", brick_id, data)
+                # Also update sync table for consistency
+                c.execute("UPDATE bricks SET state = 'FORMING' WHERE id = ?", (brick_id,))
+                conn.commit()
+                conn.close()
+                return
+            conn.close()
+            raise ValueError(f"Brick {brick_id} not found")
+
+        # Monotonic check
+        if data.get("lifecycle") != "loose":
+            return # Already moved forward
+
+        data["lifecycle"] = "forming"
+        data.setdefault("metadata", {})
+        data["metadata"]["resolved_by"] = resolved_by
+        data["metadata"]["actor"] = actor
+        data["metadata"]["resolved_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Update in DB
+        conn = self._get_conn()
+        with GraphTransaction(conn) as c:
+            c.execute("UPDATE nodes SET data=? WHERE id=?", (json.dumps(data), brick_id))
+            # Keep 'bricks' table in sync if it exists
+            c.execute("UPDATE bricks SET state = 'FORMING' WHERE id = ?", (brick_id,))
+        conn.close()
+
+        self._log_audit_event(
+            event_type="BRICK_RESOLVED",
+            agent=actor,
+            component="resolver",
+            decision_action=DecisionAction.ACCEPTED,
+            reason="Deterministic structural match with user input",
+            metadata={"brick_id": brick_id, "resolved_by": resolved_by}
+        )
 
     def get_all_nodes_raw(self) -> List[Dict]:
         """

@@ -52,7 +52,58 @@ CREATE TABLE IF NOT EXISTS prompts (
     PRIMARY KEY (slug, version)
 );
 
+-- 5. Coverage Alerts (Lifecycle)
+CREATE TABLE IF NOT EXISTS coverage_alerts (
+    alert_id TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    topic_id TEXT NOT NULL,
+
+    type TEXT NOT NULL, -- FLOW_REDUNDANCY | COVERAGE_GAP | ORPHAN_BRICKS | CONTRADICTION | LOW_SIGNAL_TOPIC
+    severity TEXT NOT NULL, -- info | warning | critical
+    signal_score REAL NOT NULL,
+
+    state TEXT NOT NULL CHECK (state IN ('NEW', 'ACKNOWLEDGED', 'RESOLVED', 'DISMISSED', 'ARCHIVED')),
+
+    summary TEXT,
+
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+
+    acknowledged_by TEXT,
+    resolved_by TEXT,
+
+    resolution_action TEXT,
+    resolution_metadata JSON,
+
+    dismissed_reason TEXT,
+
+    UNIQUE(fingerprint)
+);
+
+-- 6. Coverage Prompt Attempts
+CREATE TABLE IF NOT EXISTS coverage_prompt_attempts (
+    id TEXT PRIMARY KEY,
+    alert_id TEXT NOT NULL,
+    topic_id TEXT NOT NULL,
+
+    prompt TEXT NOT NULL,
+    attempted_at TEXT NOT NULL,
+
+    outcome TEXT CHECK (outcome IN ('SUCCESS', 'NO_DATA', 'ABORTED')),
+    bricks_created INTEGER DEFAULT 0,
+
+    FOREIGN KEY(alert_id) REFERENCES coverage_alerts(alert_id)
+);
+
 -- Indexes for Speed
 CREATE INDEX IF NOT EXISTS idx_bricks_topic ON bricks(topic_id);
 CREATE INDEX IF NOT EXISTS idx_bricks_fingerprint ON bricks(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_prompts_slug ON prompts(slug);
+CREATE INDEX IF NOT EXISTS idx_coverage_alerts_topic ON coverage_alerts(topic_id);
+CREATE INDEX IF NOT EXISTS idx_coverage_alerts_state ON coverage_alerts(state);
+
+-- Views
+CREATE VIEW IF NOT EXISTS active_alerts AS
+SELECT *
+FROM coverage_alerts
+WHERE state IN ('NEW', 'ACKNOWLEDGED');

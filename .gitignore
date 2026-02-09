@@ -10,6 +10,10 @@ __pycache__/
 .eggs/
 dist/
 build/
+my_chatgpt_history/
+output/
+conversations.json
+src/nexus/graph/graph.db
 
 ############################
 # Virtual Environments

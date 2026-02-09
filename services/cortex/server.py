@@ -453,6 +453,47 @@ def get_governance_prompts():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# --- New Governance API Endpoints ---
+
+@app.route("/api/topics/<topic_id>/alerts", methods=["GET"])
+def get_topic_alerts(topic_id):
+    return jsonify(cortex_api.get_alerts(topic_id))
+
+@app.route("/api/alerts/<alert_id>/acknowledge", methods=["POST"])
+def acknowledge_alert(alert_id):
+    data = request.json
+    actor = data.get("actor", "user")
+    return jsonify(cortex_api.acknowledge_alert(alert_id, actor))
+
+@app.route("/api/alerts/<alert_id>/resolve", methods=["POST"])
+def resolve_alert(alert_id):
+    data = request.json
+    actor = data.get("actor", "user")
+    action = data.get("action", "UNKNOWN")
+    metadata = data.get("metadata", {})
+    return jsonify(cortex_api.resolve_alert(alert_id, actor, action, metadata))
+
+@app.route("/api/alerts/<alert_id>/dismiss", methods=["POST"])
+def dismiss_alert(alert_id):
+    data = request.json
+    actor = data.get("actor", "user")
+    reason = data.get("reason", "No reason provided")
+    return jsonify(cortex_api.dismiss_alert(alert_id, actor, reason))
+
+@app.route("/api/alerts/<alert_id>/archive", methods=["POST"])
+def archive_alert(alert_id):
+    return jsonify(cortex_api.archive_alert(alert_id))
+
+@app.route("/api/alerts/<alert_id>/suggest-prompts", methods=["POST"])
+def suggest_prompts(alert_id):
+    data = request.json
+    actor = data.get("actor", "user")
+    return jsonify(cortex_api.suggest_prompts(alert_id, actor))
+
+@app.route("/api/topics/<topic_id>/score", methods=["GET"])
+def get_topic_coverage_score(topic_id):
+    return jsonify(cortex_api.get_coverage_score(topic_id))
+
 if __name__ == "__main__":
     print("Prewarming embedder...")
     get_embedder()

@@ -28,6 +28,12 @@ except ImportError:
 
 from nexus.graph.prompt_manager import PromptManager
 from nexus.config import AUDIT_LOG_PATH, TREES_DIR
+from nexus.governance.alert_manager import AlertManager
+from nexus.cognition.coverage_scorer import CoverageScorer
+from nexus.cognition.prompt_generator import PromptGenerator
+from nexus.sync.llm import LLMClient
+from nexus.graph.manager import GraphManager
+from nexus.graph.schema import AuditEventType, DecisionAction
 
 class CortexAPI:
     def __init__(self, audit_log_path: str = None):
@@ -36,6 +42,13 @@ class CortexAPI:
         # Initialize the Multi-Tier Gateway
         self.gateway = JarvisGateway()
         
+        # Initialize Governance & Cognition Components
+        self.alert_manager = AlertManager()
+        self.graph_manager = GraphManager() # Needed for scorer
+        self.coverage_scorer = CoverageScorer(self.graph_manager, self.alert_manager)
+        self.llm_client = LLMClient()
+        self.prompt_generator = PromptGenerator(self.llm_client, self.alert_manager, self.coverage_scorer)
+
         self.agent_profiles = {
             "Jarvis": "Expert in financial markets, trading, stocks, and economic analysis.",
             "Architect": "Expert in software architecture, code implementation, design patterns, and system engineering.",
@@ -168,10 +181,19 @@ class CortexAPI:
         
         print(f"[{datetime.now(timezone.utc).isoformat()}] [CortexAPI] ask_preview found {len(recalled_bricks)} bricks.")
 
-        top_bricks_output = [
-            {"brick_id": brick["brick_id"], "confidence": round(brick["confidence"], 4)}
-            for brick in recalled_bricks
-        ]
+        top_bricks_output = []
+        for brick in recalled_bricks:
+            brick_id = brick["brick_id"]
+            # Enrichment: Fetch actual content from BrickStore
+            full_brick = self.brick_store.get_brick(brick_id)
+            statement = full_brick.get("statement", "No content available") if full_brick else "Brick not found"
+            
+            top_bricks_output.append({
+                "brick_id": brick_id,
+                "confidence": round(brick["confidence"], 4),
+                "statement": statement,
+                "metadata": full_brick.get("metadata", {}) if full_brick else {}
+            })
 
         return {
             "query": query,
@@ -380,3 +402,67 @@ class CortexAPI:
         }
         with open(self.audit_log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
+
+    # --- Governance / Coverage API Methods ---
+
+    def get_alerts(self, topic_id: str) -> Dict:
+        alerts = self.alert_manager.get_alerts_for_topic(topic_id)
+        # Filter active? User prompt said GET alerts for a topic. 
+        # Usually UI wants all or active. I'll return all and let UI filter or add filter param.
+        # But for 'active_alerts' view behavior, maybe filter?
+        # I'll return all and let UI handle states.
+        return {"alerts": alerts}
+
+    def acknowledge_alert(self, alert_id: str, actor: str) -> Dict:
+        success = self.alert_manager.acknowledge_alert(alert_id, actor)
+        if success:
+            self.graph_manager._log_audit_event(
+                event_type=AuditEventType.COVERAGE_ALERT_ACKNOWLEDGED,
+                agent=actor,
+                component="governance",
+                decision_action=DecisionAction.ACCEPTED,
+                reason="User acknowledged alert",
+                metadata={"alert_id": alert_id}
+            )
+            return {"status": "success"}
+        return {"error": "Failed to acknowledge alert", "status": "failed"}
+
+    def resolve_alert(self, alert_id: str, actor: str, action: str, metadata: Dict) -> Dict:
+        success = self.alert_manager.resolve_alert(alert_id, actor, action, metadata)
+        if success:
+            self.graph_manager._log_audit_event(
+                event_type=AuditEventType.COVERAGE_ALERT_ACTION_TAKEN,
+                agent=actor,
+                component="governance",
+                decision_action=DecisionAction.ACCEPTED,
+                reason=f"Alert resolved via {action}",
+                metadata={"alert_id": alert_id, "action": action}
+            )
+            return {"status": "success"}
+        return {"error": "Failed to resolve alert", "status": "failed"}
+
+    def dismiss_alert(self, alert_id: str, actor: str, reason: str) -> Dict:
+        success = self.alert_manager.dismiss_alert(alert_id, actor, reason)
+        if success:
+            self.graph_manager._log_audit_event(
+                event_type=AuditEventType.COVERAGE_ALERT_DISMISSED,
+                agent=actor,
+                component="governance",
+                decision_action=DecisionAction.REJECTED,
+                reason=reason,
+                metadata={"alert_id": alert_id}
+            )
+            return {"status": "success"}
+        return {"error": "Failed to dismiss alert", "status": "failed"}
+
+    def archive_alert(self, alert_id: str) -> Dict:
+        success = self.alert_manager.archive_alert(alert_id)
+        if success:
+            return {"status": "success"}
+        return {"error": "Failed to archive alert (must be RESOLVED or DISMISSED)", "status": "failed"}
+
+    def suggest_prompts(self, alert_id: str, actor: str) -> Dict:
+        return self.prompt_generator.generate_prompts(alert_id, actor)
+
+    def get_coverage_score(self, topic_id: str) -> Dict:
+        return self.coverage_scorer.compute_score(topic_id)
