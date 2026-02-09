@@ -108,6 +108,7 @@ class SyncDatabase:
         return None
 
     def update_run_boundary(self, run_id: str, last_index: int):
+        # BOUNDARY ADVANCEMENT — FROZEN
         conn = self._get_conn()
         try:
             conn.execute(

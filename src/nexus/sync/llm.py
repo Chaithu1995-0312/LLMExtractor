@@ -42,16 +42,25 @@ class LLMRoutingError(Exception):
 # --- ROUTER ---
 
 class LLMRouter:
+    # LLM ROUTING — FROZEN
     def __init__(self):
+        # Load .env explicitly to ensure config is picked up
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except ImportError:
+            pass
+
         self.local_enabled = os.getenv("LOCAL_LLM_ENABLED", "true").lower() == "true"
         self.local_provider = os.getenv("LOCAL_LLM_PROVIDER", "ollama")
-        self.local_model = os.getenv("LOCAL_LLM_MODEL", "llama3")
+        self.local_model = os.getenv("LOCAL_LLM_MODEL", "mistral:latest") # Prefer Mistral as default for this env
         self.api_key = os.getenv("OPENAI_API_KEY")
 
     def route(self, req: LLMRequest) -> LLMRoute:
         """
         Determines the execution path for an LLM request based on the Canonical Routing Table.
         """
+        # LLM ROUTING — FROZEN
         
         # 1. TEST -> L0 (Mock)
         if req.intent_class == "TEST":
@@ -97,7 +106,7 @@ class LLMClient:
             
         self.provider = provider
         self.router = LLMRouter()
-        self.ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.ollama_host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
         self.strict_mode = os.getenv("LLM_STRICT_MODE", "false").lower() == "true"
 
     def generate(self, system_prompt: str, user_prompt: str, 
@@ -152,7 +161,9 @@ class LLMClient:
         """
         Calls local Ollama instance via HTTP.
         """
-        url = f"{self.ollama_host}/api/chat"
+        url = f"{self.ollama_host}/api/generate"
+        timeout = int(os.getenv("LLM_TIMEOUT", "60"))
+        
         payload = {
             "model": model,
             "messages": [
@@ -161,26 +172,44 @@ class LLMClient:
             ],
             "stream": False,
             "options": {
-                "temperature": 0.0 # Deterministic
+                "temperature": 0.0, # Deterministic
+                "num_ctx": 4096
             }
         }
+        
+        print(f"--- [OLLAMA REQUEST] ---\n{json.dumps(payload, indent=2)}\n-----------------------")
         
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req) as response:
+            # Adding explicit timeout to avoid blocking indefinitely
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 if response.status == 200:
-                    result = json.loads(response.read().decode("utf-8"))
+                    raw_body = response.read().decode("utf-8")
+                    if not raw_body or not raw_body.strip():
+                        print("[LLMClient] Ollama returned empty response body.")
+                        return self._mock_response(user_prompt)
+                        
+                    result = json.loads(raw_body)
+                    print(f"--- [OLLAMA RESPONSE] ---\n{json.dumps(result, indent=2)}\n------------------------")
                     return result.get("message", {}).get("content", "")
                 else:
                     print(f"[LLMClient] Ollama Error: {response.status}")
                     return self._mock_response(user_prompt)
-        except urllib.error.URLError as e:
-            print(f"[LLMClient] Ollama Connection Failed: {e}")
-            # Fallback to mock if local LLM is down (soft fail for dev experience, but hard fail in strict mode)
+        except (urllib.error.HTTPError, urllib.error.URLError) as e:
+            print(f"[LLMClient] Ollama Connection Failed/Timed Out: {e}")
+            if self.strict_mode:
+                raise e
+            return self._mock_response(user_prompt)
+        except TimeoutError as e:
+            print(f"[LLMClient] Ollama Request Timed Out (>{timeout}s)")
+            if self.strict_mode:
+                raise e
             return self._mock_response(user_prompt)
         except Exception as e:
             print(f"[LLMClient] Ollama Exception: {e}")
+            if self.strict_mode:
+                raise e
             return self._mock_response(user_prompt)
 
     def _mock_response(self, prompt: str) -> str:

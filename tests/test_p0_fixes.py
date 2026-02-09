@@ -41,9 +41,9 @@ def test_p0_incremental_boundary():
     run_id = "test_run_incremental"
     raw_content = {
         "messages": [
-            {"role": "user", "content": "Message 0"},
-            {"role": "user", "content": "Message 1"},
-            {"role": "user", "content": "Message 2"}
+            {"role": "user", "content": "Message 0 must follow rule A"},
+            {"role": "user", "content": "Message 1 should be B"},
+            {"role": "user", "content": "Message 2 cannot do C"}
         ]
     }
     
@@ -82,7 +82,7 @@ def test_p0_incremental_boundary():
     
     # 3. Add more messages and re-register (update raw_content)
     print("Adding new messages...")
-    raw_content["messages"].append({"role": "user", "content": "Message 3"})
+    raw_content["messages"].append({"role": "user", "content": "Message 3 must follow rule D"})
     # Manual update for test
     conn = sync_db._get_conn()
     conn.execute("UPDATE source_runs SET raw_content = ? WHERE id = ?", (json.dumps(raw_content), run_id))
@@ -93,14 +93,60 @@ def test_p0_incremental_boundary():
     print("Third compile (1 new message)...")
     compiler.compile_run(run_id, topic_id)
     print(f"LLM calls: {mock_llm.calls} (Expected: 2)")
-    if "Message 3" in mock_llm.last_content and "Message 0" not in mock_llm.last_content:
+    if mock_llm.last_content and "Message 3" in mock_llm.last_content and "Message 0" not in mock_llm.last_content:
         print("✅ SUCCESS: Incremental filtering worked.")
     else:
-        print("❌ FAILED: Incremental filtering failed.")
+        print(f"❌ FAILED: Incremental filtering failed. last_content={mock_llm.last_content}")
+
+def test_p0_assistant_guard():
+    print("\n--- Testing P0.3: Assistant Role Guard ---")
+    db_path = "test_nexus_p0.db"
+    sync_db = SyncDatabase(db_path)
+    
+    run_id = "test_run_assistant"
+    raw_content = {
+        "messages": [
+            {"role": "user", "content": "User says rule must be A"},
+            {"role": "assistant", "content": "Assistant analysis: This architecture is complex."},
+            {"role": "system", "content": "System constraint: Rule B must apply"}
+        ]
+    }
+    
+    sync_db.register_run(run_id, raw_content)
+    
+    class MockLLM:
+        def __init__(self):
+            self.calls = 0
+            self.scanned_content = []
+        def generate(self, system, user):
+            self.calls += 1
+            self.scanned_content.append(user)
+            return json.dumps({"extracted_pointers": []})
+
+    mock_llm = MockLLM()
+    compiler = NexusCompiler(sync_db, mock_llm)
+    topic_id = "test_topic_guard"
+    sync_db.create_topic(topic_id, "Test Guard", {"scope_description": "test"})
+    
+    print("Compiling run with assistant message...")
+    compiler.compile_run(run_id, topic_id)
+    
+    all_scanned_text = "".join(mock_llm.scanned_content)
+    
+    if "Assistant analysis" not in all_scanned_text:
+        print("✅ SUCCESS: Assistant message was ignored.")
+    else:
+        print("❌ FAILED: Assistant message was found in LLM scan.")
+        
+    if "User says rule" in all_scanned_text and "System constraint" in all_scanned_text:
+        print("✅ SUCCESS: User and System messages were included.")
+    else:
+        print("❌ FAILED: User or System messages were missing.")
 
 if __name__ == "__main__":
     test_p0_cycle_prevention()
     test_p0_incremental_boundary()
+    test_p0_assistant_guard()
     # Clean up
     if os.path.exists("test_nexus_p0.db"):
         os.remove("test_nexus_p0.db")

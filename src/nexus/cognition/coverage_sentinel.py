@@ -47,9 +47,10 @@ Your task:
 2. Detect missing implied questions.
 3. Detect high-signal bricks not used in any intent.
 4. Detect contradictions if present.
+5. Detect "Analysis without Declaration": If you observe extensive analysis, explanation, or synthesis without any explicit user or system declaration of rules, invariants, constraints, or guarantees, emit an ANALYSIS_WITHOUT_DECLARATION alert.
 
 Rules:
-- Be conservative. If unsure, do not emit an alert.
+- Be conservative but firm on declarations. If analysis exists without explicit rules, flag it.
 - Never hallucinate missing content.
 - Use short, precise language.
 - Output MUST be valid JSON only.
@@ -59,7 +60,7 @@ Rules:
 Schema for Alert Object:
 {
   "alert_id": "string (uuid)",
-  "type": "FLOW_REDUNDANCY | COVERAGE_GAP | ORPHAN_BRICKS | CONTRADICTION | LOW_SIGNAL_TOPIC",
+  "type": "FLOW_REDUNDANCY | COVERAGE_GAP | ORPHAN_BRICKS | CONTRADICTION | LOW_SIGNAL_TOPIC | ANALYSIS_WITHOUT_DECLARATION",
   "topic_id": "string",
   "severity": "info | warning | critical",
   "signal_score": number (0.0 to 1.0),

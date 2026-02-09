@@ -1,4 +1,11 @@
 import argparse
+import sys
+import os
+
+print(f"[DEBUG] sys.path: {sys.path}", flush=True)
+print(f"[DEBUG] Current working directory: {os.getcwd()}", flush=True)
+sys.dont_write_bytecode = True # Prevent .pyc files
+
 from nexus.sync.runner import run_sync
 
 if __name__ == "__main__":

@@ -86,12 +86,23 @@ def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
                 
                 # C. Compile against ALL Active Topics
                 for topic in topics:
-                    # check if this run needs compilation for this topic?
-                    # For now, we compile everything. Optimization: check timestamps or state.
-                    new_cnt = compiler.compile_run(run_id, topic['id'])
-                    total_bricks += new_cnt
-                    if new_cnt > 0:
-                        print(f"   -> Extracted {new_cnt} bricks for '{topic['id']}' from {run_id}")
+                    # Loop compilation to handle batched processing (Incremental Boundary Guard)
+                    # This ensures full processing of long conversation paths in a single sync session.
+                    while True:
+                        new_cnt = compiler.compile_run(run_id, topic['id'])
+                        total_bricks += new_cnt
+                        if new_cnt > 0:
+                            print(f"   -> Extracted {new_cnt} bricks for '{topic['id']}' from {run_id}")
+                        
+                        # Check if more messages remain in this run
+                        run_state = db.get_run(run_id)
+                        last_idx = run_state.get('last_processed_index', -1)
+                        total_msgs = len(run_state.get('raw_content', {}).get('messages', []))
+                        
+                        if last_idx >= total_msgs - 1:
+                            break # Fully processed
+                        
+                        print(f"   -> Continuing compilation for '{topic['id']}' (batch completed)...")
 
             processed_count += 1
 
