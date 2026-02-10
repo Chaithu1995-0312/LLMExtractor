@@ -161,7 +161,7 @@ class LLMClient:
         """
         Calls local Ollama instance via HTTP.
         """
-        url = f"{self.ollama_host}/api/generate"
+        url = f"{self.ollama_host}/api/chat"
         timeout = int(os.getenv("LLM_TIMEOUT", "60"))
         
         payload = {

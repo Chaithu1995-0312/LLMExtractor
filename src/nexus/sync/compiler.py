@@ -21,9 +21,9 @@ from nexus.governance.alert_manager import AlertManager
 # Changes here require epistemic review
 
 # Performance and Determinism Constants
-MAX_MESSAGES_PER_BATCH = 5
-MAX_CHARS_PER_BATCH = 8000
-MAX_SINGLE_MESSAGE_CHARS = 2000
+MAX_MESSAGES_PER_BATCH = 3
+MAX_CHARS_PER_BATCH = 4000
+MAX_SINGLE_MESSAGE_CHARS = 1500
 
 SIGNAL_TOKENS = [
     "must", "should", "cannot", "never",

@@ -1,25 +1,18 @@
-# Nexus: Gaps and TODOs
+# GAPS_AND_TODOS
 
-## Knowledge & System Gaps 🔴
-- **Missing Self-Healing**: The `trigger_self_healing` method in `CortexAPI` is a placeholder. It needs logic to resolve conflicts identified by `RelationshipSynthesizer`.
-- **Incomplete Ingest History**: `NexusIngestor.ingest_history` lacks support for non-JSON formats (e.g., Markdown, PDF).
-- **Static Coverage Sentinel**: `CoverageSentinel.analyze_topic` generates alerts but doesn't yet trigger automated `PromptGenerator` runs.
-- **Weak Reranking**: Current reranker implementations are simplistic; missing cross-encoder integration in the primary `recall` path.
+## 1. Critical Gaps (🔴 High Priority)
 
-## Technical Debt 🟡
-- **Vector Index Staleness**: Local vector index requires manual rebuilds via script; needs an event-driven update trigger in `GraphManager`.
-- **Logging Verbosity**: `utils_logging` is inconsistent across modules; some use `logging` while others use custom print wrappers.
-- **Test Coverage**: UI component tests (Jarvis) are missing for the `AuditPanel` and `WallView`.
-- **Auth/Security**: `services/cortex/server.py` lacks API key validation or JWT integration.
+- [ ] **Security / Auth**: The Cortex API (`server.py`) currently appears to lack robust authentication/authorization mechanisms. API keys or JWTs should be implemented before exposing to a network.
+- [ ] **Task Reliability**: Background tasks (`tasks.py`) need a proper queue (e.g., Celery + Redis) instead of potential in-process execution, to ensure reliability during restarts.
+- [ ] **Database Migration System**: While schemas exist, a formal migration tool (like Alembic) is not clearly visible. Changing `schema.py` is currently risky.
 
-## Immediate TODOs (Agent-Executable)
-1. [ ] Implement `CortexAPI.trigger_self_healing` using a "Conflicting Intent Resolver" DSPy module.
-2. [ ] Add `AUTO_REBUILD_VECTOR` flag to `GraphManager` to trigger `LocalVectorIndex.add_bricks` on node promotion.
-3. [ ] Formalize `AlertManager.archive_alert` state transition logic to prevent database bloat.
-4. [ ] Standardize the `audit_trace` output format between `CortexAPI` and `SyncCompiler`.
-5. [ ] (IMPLIED) Create a `Prune` method in `GraphManager` to handle `KILLED` nodes and their associated edges.
+## 2. Functionality Gaps (🟡 Medium Priority)
 
-## Future Research 🧪
-- **Recursive Decomposition**: Investigating multi-hop graph traversals for complex "how-to" intent generation.
-- **Agentic Refactoring**: Developing a "Graph-to-Code" pipeline that generates API stubs based on `FROZEN` intent definitions.
-- **Cross-Topic Synthesis**: discovering relationships between disjoint topics via a global "Topic Hub" node.
+- [ ] **UI Feature Parity**: The `Jarvis` UI allows viewing and some editing, but full graph manipulation (adding arbitrary edges, merging nodes visually) is likely incomplete.
+- [ ] **Cognitive Feedback Loop**: The "Self-Healing" loop (`CoverageSentinel` -> `PromptGenerator`) exists in code but needs rigorous testing to prove it actually improves graph quality over time without human intervention.
+- [ ] **Multi-User Support**: The current design seems single-player or single-tenant.
+
+## 3. Technical Debt (🧪 Low Priority)
+
+- [ ] **Test Coverage**: While tests exist, coverage for edge cases in the `Cognition` layer (which is non-deterministic) is likely low.
+- [ ] **Frontend Optimization**: Large graphs might cause performance issues in `CortexVisualizer` or `WallView`. Virtualization or canvas-based rendering may be needed.

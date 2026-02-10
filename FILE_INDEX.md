@@ -1,49 +1,69 @@
-# Nexus: File Index
+# FILE_INDEX
 
-## Sync Module (`src/nexus/sync/`)
-| File | Class → Methods | Risk |
-|------|-----------------|------|
-| `compiler.py` | `NexusCompiler`: `compile_run` (Main flow), `_llm_extract_pointers` (Extractive), `_materialize_brick` (DB Write). | MED/HIGH |
-| `db.py` | `SyncDatabase`: `create_topic` (Schema), `save_brick` (State), `get_bricks_for_topic` (Read). | MED |
-| `llm.py` | `LLMClient`: `generate` (External API), `_call_ollama` (Local API). | HIGH |
-| `runner.py` | `run_sync` (Orchestrator): Top-level sync execution. | MED |
+## 1. Core Logic (`src/nexus`)
 
-## Graph Module (`src/nexus/graph/`)
-| File | Class → Methods | Risk |
-|------|-----------------|------|
-| `manager.py` | `GraphManager`: `register_node` (Write), `register_edge` (Write), `promote_node_to_frozen` (Lifecycle). | HIGH |
-| `projection.py` | `project_intent` (Pure): Transforms graph nodes into UI/Wall structures. | LOW |
-| `prompt_manager.py`| `PromptManager`: `get_prompt` (Read), `save_prompt` (Write/Gov). | MED |
-| `validation.py` | `run_full_validation` (Read): Ensures no cycles/orphans. | LOW |
+### `src/nexus/sync/compiler.py`
+**Class:** `NexusCompiler`
+**Responsibility:** Compiles raw messages into structured Bricks.
+| Method | Responsibility | Risk | Inputs | Output | Idempotency | State Impact |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `compile_run` | Orchestrates the compilation of a run. | MED | `run_id`, `topic_id` | `count` (int) | ✅ | Writes Bricks to DB. |
+| `_reject_message` | Filters out low-value messages. | LOW | `msg` (dict) | `bool` | ✅ | None. |
+| `_materialize_brick` | Converts a pointer into a persisted Brick. | MED | `run_data`, `pointer` | `Optional[Dict]` | ✅ | Saves Brick to DB. |
 
-## Cognition Module (`src/nexus/cognition/`)
-| File | Class → Methods | Risk |
-|------|-----------------|------|
-| `assembler.py` | `assemble_topic` (Orchestrator): RAG + DSPy synthesis pipeline. | HIGH |
-| `dspy_modules.py` | `CognitiveExtractor`: `forward` (LLM), `RelationshipSynthesizer`: `forward` (LLM). | HIGH |
-| `coverage_scorer.py`| `CoverageScorer`: `compute_score` (State Analytics). | LOW |
-| `prompt_generator.py`| `PromptGenerator`: `generate_prompts` (Autonomous Write). | HIGH |
+### `src/nexus/sync/db.py`
+**Class:** `SyncDatabase`
+**Responsibility:** Low-level SQLite wrapper for Ingestion data.
+| Method | Responsibility | Risk | Inputs | Output | Idempotency | State Impact |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `create_topic` | Creates a new topic record. | MED | `topic_id`, `display_name` | None | ✅ | INSERT Topic. |
+| `register_run` | Logs a new ingestion run. | MED | `run_id`, `content` | None | ✅ | INSERT Run. |
+| `save_brick` | Persists a Brick. | MED | `brick` (dict) | None | ✅ | INSERT/UPDATE Brick. |
 
-## Governance Module (`src/nexus/governance/`)
-| File | Class → Methods | Risk |
-|------|-----------------|------|
-| `alert_manager.py` | `AlertManager`: `persist_alert` (State), `resolve_alert` (Lifecycle), `_transition_state` (Invariants). | MED |
+### `src/nexus/graph/manager.py`
+**Class:** `GraphManager`
+**Responsibility:** Manages the Knowledge Graph (Nodes, Edges).
+| Method | Responsibility | Risk | Inputs | Output | Idempotency | State Impact |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `register_node` | Creates or updates a graph node. | MED | `type`, `id`, `attrs` | None | ✅ | UPSERT Node. |
+| `register_edge` | Creates a directed edge. | MED | `src`, `dst`, `type` | None | ✅ | INSERT Edge. |
+| `kill_node` | Marks a node as deprecated/killed. | HIGH | `node_id`, `reason` | None | ❌ | UPDATE Node Status. |
+| `_check_for_cycle` | Detects cycles before edge creation. | LOW | `start`, `target` | `List[str]` | ✅ | None. |
 
-## Cortex Service (`services/cortex/`)
-| File | Class → Methods | Risk |
-|------|-----------------|------|
-| `api.py` | `CortexAPI`: `route` (Gateway), `ask_preview` (Read), `synthesize` (Task Trigger). | HIGH |
-| `server.py` | Flask App: Maps REST endpoints to `CortexAPI` methods. | MED |
-| `tasks.py` | Celery/Async Tasks: Wrappers for sync/synthesis background jobs. | MED |
+### `src/nexus/graph/schema.py`
+**Classes:** `Intent`, `Source`, `ScopeNode`, `Edge`
+**Responsibility:** Data Transfer Objects and Enums.
+- **Pure Data Classes:** No risk, purely structural definitions.
 
-## Bricks Module (`src/nexus/bricks/`)
-| File | Class → Methods | Risk |
-|------|-----------------|------|
-| `brick_store.py` | `BrickStore`: `get_brick_text` (Read), `get_brick_metadata` (Read). | LOW |
-| `resolver.py` | `UserTriggeredResolver`: `resolve` (Logic): Matches user input to bricks. | MED |
+### `src/nexus/cognition/synthesizer.py`
+**Module Level Functions**
+**Responsibility:** High-level relationship extraction.
+| Method | Responsibility | Risk | Inputs | Output | Idempotency | State Impact |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `run_relationship_synthesis` | Batch process topics to find edges. | HIGH | `topic_id` | None | ✅ | Creates Edges in Graph. |
 
-## Vector Module (`src/nexus/vector/`)
-| File | Class → Methods | Risk |
-|------|-----------------|------|
-| `embedder.py` | `VectorEmbedder`: `embed_query` (ML Inference), `_rewrite_with_llm` (LLM). | MED |
-| `local_index.py` | `LocalVectorIndex`: `search` (Similarity), `save` (Disk). | MED |
+## 2. Services (`services/cortex`)
+
+### `services/cortex/api.py`
+**Class:** `CortexAPI`
+**Responsibility:** Business logic facade for the API.
+| Method | Responsibility | Risk | Inputs | Output | Idempotency | State Impact |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `route` | Determines intent of user query. | LOW | `query` | `Dict` | ✅ | None. |
+| `generate` | Generates a response using Agent/Bricks. | MED | `query`, `context` | `Dict` | ✅ | Audit Log Write. |
+| `resolve_alert` | Resolves a governance alert. | HIGH | `alert_id`, `action` | `Dict` | ❌ | UPDATE Alert Status. |
+
+### `services/cortex/gateway.py`
+**Class:** `JarvisGateway`
+**Responsibility:** Interface for external clients.
+| Method | Responsibility | Risk | Inputs | Output | Idempotency | State Impact |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `pulse` | Sends a heartbeat/status update. | LOW | `event`, `context` | `str` | ✅ | None. |
+
+## 3. UI (`ui/jarvis`)
+
+### `ui/jarvis/src/store.ts`
+**Hook:** `useNexusStore`
+**Responsibility:** Client-side state management.
+- **Actions:** `setMode`, `setSelectedBrickId`, `setSelectedNodeId`.
+- **Risk:** LOW (Client-side memory only).

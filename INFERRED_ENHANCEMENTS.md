@@ -1,32 +1,18 @@
-# Nexus: Inferred Enhancements
+# INFERRED_ENHANCEMENTS
 
-## Architectural Inferences
-Based on the current trajectory of the Nexus codebase, the following enhancements are inferred as necessary for autonomous operational maturity.
+## 1. High-Impact Architectural Upgrades
 
-### 1. Event-Driven Graph Pulse 🧪
-Currently, graph synchronization and vector indexing are batch processes. The system implies a transition to an **Event-Driven Architecture**.
-- **Inferred Method**: `GraphManager._emit_pulse(event_type, payload)`
-- **Behavior**: Every successful mutation (e.g., node promotion) should emit a pulse that triggers downstream tasks (Vector refresh, Alert re-evaluation, UI notification).
-- **Status**: 🧪 (Partially present in `GraphManager` as a skeleton).
+- **Plugin System for Ingestion:** Currently, `NexusIngestor` seems tailored for JSON history files. Creating a standardized `IngestionPlugin` interface would allow easy addition of Slack, Discord, Email, or Notion data sources.
+- **Distributed Graph Processing:** As the graph grows, `NetworkX` or in-memory processing might bottleneck. Migrating the graph query layer to a dedicated graph database (Neo4j or FalkorDB) would improve scalability.
+- **Event-Driven Architecture:** Moving from direct API calls to an Event Bus (e.g., RabbitMQ or Kafka) would decouple `Sync`, `Cognition`, and `Cortex`, allowing them to scale independently.
 
-### 2. Multi-Tier Model Routing 🧪
-The `LLMRouter` implies a more sophisticated routing logic than currently implemented.
-- **Inferred Logic**: Use `ModelTier.LOCAL` (Ollama) for extraction/filtering and `ModelTier.PREMIUM` (OpenAI) for complex relationship synthesis and prompt generation.
-- **Inferred Method**: `LLMRouter.route_by_complexity(request_payload) -> LLMRoute`
-- **Status**: 🧪 (Planned in `src/nexus/sync/llm.py`).
+## 2. User Experience Enhancements
 
-### 3. Graph-Native RAG (Recall v2) 🔴
-Current recall (`src/nexus/ask/recall.py`) relies heavily on flat vector search. The existence of the Knowledge Graph suggests a **Graph-Native RAG** approach.
-- **Inferred Behavior**: Perform vector search to find "Entry Bricks," then traverse `DEPENDS_ON` and `RELATES_TO` edges to pull context that vector similarity might miss.
-- **Status**: 🔴 (MISSING_FROM_CONTEXT).
+- **Natural Language Command Interface:** Implementing a "Chat with your Graph" feature where users can issue natural language commands to mutate the graph (e.g., "Merge these two nodes", "Find all contradictions in this topic").
+- **Real-Time Collaboration:** Using WebSockets (already present in `CortexAPI`) to sync state across multiple `Jarvis` clients, enabling team-based knowledge graph curation.
+- **3D Visualization:** Upgrading `CortexVisualizer` to use `Three.js` or `React Force Graph 3D` for navigating complex, high-dimensional relationship clusters.
 
-### 4. Self-Correcting Ingest Pipeline 🔴
-Given the noise in conversation history, a self-correcting ingest layer is implied.
-- **Inferred Method**: `NexusCompiler._validate_materialization(brick_data)`
-- **Behavior**: Use a DSPy "Validator" to check if a materialized brick contradicts existing `FROZEN` intents before allowing it into the sync database.
-- **Status**: 🔴 (MISSING_FROM_CONTEXT).
+## 3. Cognitive Capabilities
 
-### 5. Intent Clustering (Unsupervised Cognition) 🧪
-The `CognitiveExtractor` currently works on a topic-by-topic basis. A cross-topic clustering mechanism is inferred.
-- **Inferred Logic**: Periodically run unsupervised clustering on all `PROPOSED` intents to identify emerging topics that haven't been manually defined.
-- **Status**: 🧪 (Implied by `scripts/maintenance/rebuild_unified_graph.py`).
+- **Active Learning:** The system could prompt the user for clarification when confidence is low ("Is 'Project X' the same as 'Initiative Y'?"), learning from the feedback.
+- **Multi-Modal Bricks:** Extending `Brick` schema to support images, audio, and PDF attachments, using multimodal LLMs for extraction.

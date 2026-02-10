@@ -1,26 +1,35 @@
-# Nexus: Rules and Invariants
+# RULES_AND_INVARIANTS
 
-## Agent Safety Rails
-These are mandatory constraints that MUST be verified before any write operation to the Graph or Prompt database.
+## 1. Safety Rails & "Do Not Touch" Zones
 
-| Zone | Constraint | Verification Hook |
-|------|------------|-------------------|
-| **Graph Mutations** | No circular dependencies allowed for `DEPENDS_ON` edges. | `GraphManager._check_for_cycle` |
-| **Lifecycle** | `FROZEN` nodes cannot be deleted; they must be `SUPERSEDED` or `KILLED`. | `GraphManager.delete_node` check |
-| **Prompts** | System prompts must pass a "Safety Score" threshold (>0.7) before production use. | `PromptManager.save_prompt` / `GovernanceViolation` |
-| **Bricks** | Duplicate bricks (by content hash) are rejected during materialization. | `NexusCompiler._materialize_brick` unique index |
+### 🔴 Critical Infrastructure
+The following components are core to the system's integrity. **Do not modify without running the full test suite.**
 
-## Mandatory Verification Hooks
-- **Post-Sync Audit**: After `run_sync`, `validation.run_full_validation` must be executed to ensure graph integrity.
-- **Write-Authoritative Boundary**: Only the `GraphManager` is permitted to execute `INSERT` or `UPDATE` statements on the graph schema. Direct SQL is prohibited for autonomous agents.
-- **Lifecycle Gatekeeper**: The transition to `FROZEN` requires a successful execution of the `CoverageScorer` to ensure the topic is sufficiently documented.
+- **`src/nexus/graph/schema.py`**: Changing the schema of `GraphNode` or `Edge` will break all persistence and graph traversal logic. Migration scripts are required for any change.
+- **`src/nexus/sync/db.py`**: The SQLite schema is the source of truth for ingestion. Altering table structures without migration will cause data loss.
+- **`src/nexus/utils_logging.py`**: The logging infrastructure is used by all services. Breaking this blinds the entire system.
 
-## "Do Not Touch" Zones
-1. **`src/nexus/graph/schema.py`**: The core data structures are immutable for automation. Any schema change requires a human architectural audit.
-2. **`src/nexus/sync/db.py`**: Raw brick storage schema is locked to maintain historical provenance.
-3. **Audit Trails**: The `graph_audit_log` table is append-only. Agents are strictly forbidden from modifying or deleting audit records.
+### 🟡 Managed Zones
+Can be modified with caution, but require adherence to strict patterns.
 
-## Structural Invariants
-- **Orphan Prevention**: Every `Intent` node must have at least one edge of type `DERIVED_FROM` (to a Source/Brick) or `MEMBER_OF` (to a Scope).
-- **Unique Identification**: Brick IDs are deterministic based on source file, content hash, and sequence index.
-- **Atomic Transactions**: All multi-node graph updates MUST use the `GraphTransaction` context manager to ensure all-or-nothing persistence.
+- **`src/nexus/cognition/dspy_modules.py`**: Prompt signatures can be tuned, but input/output types must remain consistent to avoid breaking the `Synthesizer`.
+- **`services/cortex/api.py`**: Adding new endpoints is safe; changing existing method signatures breaks the frontend.
+
+## 2. Graph Invariants
+The `GraphManager` enforces these strict rules:
+
+1. **Acyclicity:** The graph must remain a DAG (Directed Acyclic Graph) for certain edge types (e.g., `DEPENDS_ON`).
+   - *Enforced by:* `_check_for_cycle` in `manager.py`.
+2. **Referential Integrity:** An edge cannot exist without valid source and destination nodes.
+   - *Enforced by:* `register_edge` validation.
+3. **Lifecycle Progression:** Nodes can only move forward in the lifecycle (Forming -> Frozen -> Superseded). They cannot revert.
+   - *Enforced by:* `promote_node`, `supersede_node`.
+
+## 3. Data Integrity & Persistence
+1. **Append-Only Bricks:** Once a Brick is materialized and saved, its content should be treated as immutable. Updates should create new Bricks or new versions.
+2. **Audit Trails:** All significant graph mutations (Create, Update, Delete) must be logged to the `audit_logs` table.
+   - *Enforced by:* `GraphManager._log_audit_event`.
+
+## 4. Operational Constraints
+1. **Environment Variables:** API keys (OpenAI, etc.) must NEVER be hardcoded. They must be loaded from `.env` via `src/nexus/config.py`.
+2. **Database Locking:** SQLite is single-writer. High-concurrency write operations should be serialized or handled via a queue (e.g., `GraphTransaction`).
