@@ -1,96 +1,83 @@
-# MODULE_DEEP_DIVES
+# MODULE DEEP DIVES
 
-## 1. Ingestion & Compilation (`src/nexus/sync`)
+This document provides deep dives into selected critical modules, detailing their class and method intelligence, control flow, and authority boundaries.
 
-### Deep Dive: `NexusCompiler`
-The Compiler is the heart of the ingestion process. It transforms raw unstructured text into structured "Bricks".
+## `nexus.sync.compiler` Module
 
-#### Control Flow
-1. **Input:** Receives a batch of messages or a JSON object.
-2. **Filtering:** Calls `_reject_message` to discard noise (short messages, system logs).
-3. **Signal Detection:** Checks for meaningful content using `_has_signal`.
-4. **Pointer Extraction:** Uses LLM (`_llm_extract_pointers`) to identify potential concepts.
-5. **Materialization:** Converts pointers into Bricks via `_materialize_brick`, persisting them to `SyncDatabase`.
+### Class: `NexusCompiler`
 
-```mermaid
-sequenceDiagram
-    participant Source as Raw Data
-    participant Compiler as NexusCompiler
-    participant LLM as LLMClient
-    participant DB as SyncDatabase
+#### Responsibility
+The `NexusCompiler` class orchestrates the core ingestion pipeline, transforming raw conversational data into structured "bricks." It enforces "Zero-Trust Validation" to prevent LLM hallucination and integrates with governance components for auditing and alerts.
 
-    Source->>Compiler: compile_run(run_id)
-    loop Each Message
-        Compiler->>Compiler: _reject_message?
-        alt valid
-            Compiler->>LLM: _llm_extract_pointers(content)
-            LLM-->>Compiler: [Pointer A, Pointer B]
-            loop Each Pointer
-                Compiler->>Compiler: _materialize_brick(Pointer)
-                Compiler->>DB: save_brick(Brick)
-            end
-        end
-    end
-```
+#### Method Intelligence Table
 
-## 2. Graph Lifecycle Management (`src/nexus/graph`)
+| Method Name           | Responsibility                                                                   | Inputs                                     | Outputs / Side Effects                                                                      | Invariants Enforced                                                                                                                                                                                                                                                         | Failure Modes                                                                 | Lifecycle Impact     | Layer       | Attributes         |
+|-----------------------|--------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------|---------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|----------------------|-------------|--------------------|
+| `__init__`            | Initializes the compiler.                                                        | `db_connection`, `llm_client`                               | Initializes instance variables.                                                             | None                                                                                                                                                                                                                  | Client initialization failures.                               | Instantiation        | Ingestion   | Stateful           |
+| `compile_run`         | Orchestrates end-to-end compilation of a source run into bricks.                       | `run_id`, `topic_id`                                        | New bricks, DB updates, audit events, coverage alerts. | Ingestion authority, Zero-Trust Validation.                                                                                                                                       | Run/Topic not found, LLM/brick failures. | Creates `bricks` | Ingestion   | Stateful, Transactional, Write-authoritative |
+| `_pre_filter_nodes`   | Filters raw messages based on boundaries and authority.                       | `raw_content`, `last_processed`                             | Filtered messages, max index seen.                                 | Incremental Boundary Guard, Ingestion Authority (user/system roles).                                                                                                                                    | None                                                              | Filtering            | Ingestion   | Pure               |
+| `_build_batches`      | Groups filtered messages into token-bounded batches.                                          | `messages` (list of dicts)                          | List of message batches.                                                      | Max message/char count per batch.                                                                                                                            | None                                                              | Batching             | Ingestion   | Pure               |
+| `_llm_extract_pointers` | Uses structured LLM for data pointer extraction.       | `content` (batch), `topic` (definition)       | Extracted pointers, audit event.                         | Grammar-constrained output.                                                                                                                                 | LLM call failure.                                             | Extraction           | Ingestion   | Stateful (LLM call) |
+| `_materialize_brick`  | Zero-Trust Gate: Verifies LLM pointers and materializes a brick. | `run_data`, `run_id`, `pointer`, `topic_id`, `scanned_indices` | New brick, audit events. | Topic ID Mismatch, JSON Path Out of Bounds, Verbatim Quote Existence (anti-hallucination). | JSONPath/quote not found (hallucination). | Brick Creation       | Ingestion   | Stateful, Invariant Enforcer, Write-authoritative |
 
-### Deep Dive: `GraphManager`
-Manages the lifecycle of nodes within the Knowledge Graph. It ensures referential integrity and enforces invariants.
+#### Method Usage Graph
 
-#### Node Lifecycle
-1. **Forming:** A node starts as a loose collection of Bricks.
-2. **Frozen:** Once sufficient confidence is reached, it is promoted to `Frozen`.
-3. **Superseded:** If a better node replaces it, it transitions to `Superseded`.
-4. **Killed:** If invalid, it is `Killed`.
+##### `__init__`
+- **Called by**: `nexus.sync.runner.run_sync`
+- **Layer**: Ingestion
+- **Type**: Stateful
 
-#### Visual Logic: Cycle Detection
-Before adding an edge, `_check_for_cycle` runs a DFS to ensure no circular dependencies are introduced.
+##### `compile_run`
+- **Called by**: `nexus.sync.runner.run_sync`
+- **Layer**: Ingestion
+- **Type**: Stateful, Transactional, Write-authoritative
 
-```mermaid
-stateDiagram-v2
-    [*] --> Forming
-    Forming --> Frozen: promote_node()
-    Frozen --> Superseded: supersede_node()
-    Frozen --> Killed: kill_node()
-    Forming --> Killed: kill_node()
-    Superseded --> [*]
-    Killed --> [*]
-```
+##### `_pre_filter_nodes`
+- **Called by**: `nexus.sync.compiler.compile_run`
+- **Layer**: Ingestion
+- **Type**: Pure
 
-## 3. Cognition & Synthesis (`src/nexus/cognition`)
+##### `_build_batches`
+- **Called by**: `nexus.sync.compiler.compile_run`
+- **Layer**: Ingestion
+- **Type**: Pure
 
-### Deep Dive: `RelationshipSynthesizer`
-This module runs asynchronously to discover hidden connections between graph nodes.
+##### `_llm_extract_pointers`
+- **Called by**: `nexus.sync.compiler.compile_run`
+- **Layer**: Ingestion
+- **Type**: Stateful
 
-#### Process
-1. **Scan:** Iterates over topics/intents in the graph.
-2. **DSPy Execution:** Uses `RelationshipSignature` to ask the LLM "How are A and B related?".
-3. **Edge Creation:** If a relationship is found, calls `GraphManager.register_edge`.
+##### `_materialize_brick`
+- **Called by**: `nexus.sync.compiler.compile_run`
+- **Layer**: Ingestion
+- **Type**: Stateful, Invariant Enforcer, Write-authoritative
 
-### Deep Dive: `CoverageSentinel`
-Monitors the "completeness" of a topic.
-1. **Score:** Calculates a coverage score (0.0 - 1.0) based on brick density and conflicts.
-2. **Alert:** If score < Threshold, raises an Alert via `AlertManager`.
-3. **Heal:** `PromptGenerator` creates specific prompts to fill the gap.
+--- 
 
-## 4. Service Orchestration (`services/cortex`)
+## `nexus.graph.manager` Module
 
-### Deep Dive: `CortexAPI`
-Acts as the brain, routing user requests to the appropriate subsystem.
+### Class: `GraphManager`
 
-#### Request Routing
-- **`ask_preview`**: Fast path, RAG-only.
-- **`generate`**: Full agentic path, might trigger graph updates.
-- **`synthesize`**: Triggers background cognition tasks.
+#### Responsibility
+The `GraphManager` is the authoritative data access layer for the knowledge graph. It manages nodes and edges within an SQLite database, enforcing graph invariants and lifecycle of intents. It also centralizes audit logging and communication to the L1 Narrator.
 
-```mermaid
-graph LR
-    UserRequest --> API[CortexAPI.route]
-    API -->|Intent: QUESTION| RAG[Vector Search]
-    API -->|Intent: COMMAND| Task[Task Runner]
-    API -->|Intent: EXPLORE| Graph[Graph Query]
-    RAG --> Response
-    Task --> Response
-    Graph --> Response
-```
+#### Method Intelligence Table
+
+| Method Name           | Responsibility                                                                                                     | Inputs (Logical)                                            | Outputs / Side Effects                                                                      | Invariants Enforced                                                                                                                                                                                                                                                         | Failure Modes                                                                 | Lifecycle Impact     | Layer       | Attributes         |
+|-----------------------|--------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------|---------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|----------------------|-------------|--------------------|
+| `__init__`            | Initializes the GraphManager and database.                        | `db_path` (optional)                                        | Initializes DB, creates tables, calls `sync_bricks_to_nodes`.                               | Ensures `nodes` and `edges` tables exist and `schema_sync.sql` is applied.                  | SQLite connection failures.                                   | Instantiation        | Graph       | Stateful, Write-authoritative |
+| `register_node`       | Idempotently adds a new node or merges data.                                    | `node_type`, `node_id`, `attrs` (dict), `merge` (bool)      | Inserts/updates `nodes` table.                                                              | Node ID uniqueness.                                                                                                                                                                                                   | Database insertion/update errors.                             | Node Management      | Graph       | Write-authoritative |
+| `get_intents_by_topic` | Retrieves all intents linked to a topic.                                          | `topic_node_id`                                             | `List[Intent]` objects.                                                                     | None                                                                                                                                                                                                                  | None                                                              | Retrieval            | Graph       | Read-only          |
+| `_check_for_cycle`    | Detects cycles for specific edge types.                | `start_node_id`, `target_node_id`, `edge_type_str`          | `Optional[List[str]]` cycle path.                                 | Prevents cyclic relationships for `OVERRIDES`, `SUPERSEDED_BY`.     | None                                                              | Graph Traversal      | Graph       | Pure, Invariant Enforcer |
+| `register_edge`       | Idempotently adds an edge with real-time cycle prevention.       | `src` (tuple), `dst` (tuple), `edge_type` (Enum/str), `attrs` (dict) | Inserts into `edges` table. Raises `ValueError` on cycle.                       | Edge uniqueness, cycle prevention.                    | Database errors, `ValueError` on cycle.   | Edge Management      | Graph       | Write-authoritative, Invariant Enforcer |
+| `_log_audit_event`    | Appends structured audit events to a file.                                         | `event_type`, `agent`, `component`, `decision_action`, `reason`, ... | Appends to audit log file.                                                                  | **Economic Cognition Invariant**: Non-free models must emit cost metadata. | File I/O errors.                                              | Audit                | Governance  | Write-authoritative, Invariant Enforcer |
+| `promote_intent`      | Manages intent lifecycle state transitions.            | `intent_id`, `new_lifecycle`                                | Updates node lifecycle.                                                                     | Monotonic state transitions, `FROZEN` intents require `APPLIES_TO` edges. | Intent not found, invalid transition/invariant.    | Node Lifecycle       | Graph       | Stateful, Lifecycle Gatekeeper, Invariant Enforcer |
+| `sync_bricks_to_nodes` | Migrates bricks to the unified `nodes` table.                            | `limit` (int)                                               | Inserts/updates `nodes` and `edges` tables, prints status.                             | Ensures data consistency.                 | Database errors. | Data Migration       | Graph       | Write-authoritative |
+
+#### Cross-Class Interaction Notes
+- `GraphManager` is a **lifecycle gatekeeper** for `Intent` objects, enforcing state transitions.
+- It acts as a **write boundary** for all graph operations, encapsulating direct database interactions.
+- `_check_for_cycle` and `register_edge` are **invariant enforcers** for graph integrity.
+- `_log_audit_event` enforces the **Economic Cognition Invariant** for LLM cost transparency.
+
+---

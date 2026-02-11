@@ -1,78 +1,48 @@
-# CANONICAL_OVERVIEW
+# CANONICAL OVERVIEW
 
-## 1. Architectural Summary
-Nexus is an Agentic Cognitive Architecture designed to ingest, structure, and synthesize disparate information into a coherent Knowledge Graph. It operates through a multi-stage pipeline: **Ingestion (Sync)**, **Structuring (Graph)**, **Cognition (Synthesis)**, and **Interaction (Cortex/Jarvis)**. The system transitions raw unstructured data into structured "Bricks," which are then woven into a graph of Intents, Sources, and Scopes, enabling high-level reasoning and visualization.
+## System Name: Nexus
 
-### Core Philosophy
-- **Data as Bricks:** Atomic units of information.
-- **Graph as Truth:** The source of truth is a directed graph enforcing relationships.
-- **Cognition as a Layer:** Higher-order reasoning (synthesis, coverage) runs atop the graph.
-- **Agentic Governance:** Automated sentinels monitor and heal the graph.
+## Purpose
+Nexus is a productivity backbone system designed to transform raw conversational data (e.g., ChatGPT exports) into structured, discoverable, and governed knowledge assets. It aims to prevent knowledge drift, ensure consistency, and enable efficient recall and synthesis of technical rules, architectural decisions, and factual statements.
 
-## 2. System Boundaries & External Surface Map
+## Core Principles
+- **Deterministic Processing**: All ingestion and transformation pipelines are designed to be deterministic, ensuring repeatable results and auditability.
+- **Zero-Trust Validation**: Mechanisms are in place to prevent LLM hallucination and ensure that extracted knowledge is verifiably present in source data.
+- **Layered Architecture**: Components are organized into distinct layers (Ingestion, Graph, Cognition, Service) with clear responsibilities and interaction boundaries.
+- **Knowledge Governance**: Lifecycle management for intents, alert systems for quality issues, and prompt management ensure the integrity and relevance of the knowledge base.
+- **Semantic Search**: Utilizes vector embeddings and reranking to provide context-aware and relevant information retrieval.
 
-### External Dependencies
-| Dependency | Type | Usage | Failure Mode |
-| :--- | :--- | :--- | :--- |
-| **OpenAI API** | External Service | LLM for extraction, ranking, synthesis | **CRITICAL:** Pipeline stalls; fallback to Ollama if configured. |
-| **Ollama** | Local Service | Local LLM inference (fallback/cost-saving) | **degraded:** High latency or lower quality; system remains functional. |
-| **SQLite** | Local Database | Primary persistence for Sync and Graph data | **CRITICAL:** System halt if corrupt or locked. |
-| **ChromaDB / Vector Store** | Local Database | Semantic search & embeddings | **PARTIAL:** Recall quality drops; core graph traversal unaffected. |
-| **Browser (React)** | Client | UI for visualization and control | **COSMETIC:** Backend continues; user loses visual interactability. |
+## High-Level Architecture
+The Nexus system can be broadly categorized into the following layers:
 
-### Entry Points
-| Module | Entry Point | Type | Purpose |
-| :--- | :--- | :--- | :--- |
-| **Sync** | `src/nexus/sync/runner.py` | CLI | Ingests JSON/History, compiles to Bricks. |
-| **Cortex** | `services/cortex/server.py` | HTTP API | Exposes Graph & Cognition capabilities to UI/Agents. |
-| **Jarvis** | `ui/jarvis/src/App.tsx` | UI | Frontend dashboard for human-in-the-loop interaction. |
-| **CLI** | `src/nexus/cli/main.py` | CLI | Manual administration and debugging. |
+### 1. Ingestion Layer
+Responsible for taking raw conversational data, splitting it into manageable units, extracting atomic facts and rules, and persisting them.
+- **Components**: `nexus.extract.tree_splitter`, `nexus.bricks.extractor`, `nexus.sync.compiler`, `nexus.sync.db`, `nexus.sync.runner`, `nexus.sync.ingest_history`, `nexus.vector.embedder`, `nexus.vector.local_index`, `nexus.walls.builder`.
+- **Key Functionality**: Data loading from conversational exports, message filtering based on authority and signal, content chunking into atomic 'bricks', generation of vector embeddings for semantic search, structured extraction of rules/facts using LLMs with zero-trust validation, incremental processing of source data, and building of token-aware 'walls' for large-context processing.
 
-## 3. High-Level Data Flow
+### 2. Graph Layer
+Serves as the central knowledge store, representing extracted information as a governed knowledge graph. It enforces data integrity, lifecycle management, and auditability.
+- **Components**: `nexus.graph.manager`, `nexus.graph.schema`, `nexus.graph.prompt_manager`, `nexus.graph.projection`, `nexus.governance.alert_manager`, `nexus.sync.db` (for schema).
+- **Key Functionality**: Node and edge management, lifecycle transitions for intents (LOOSE, FORMING, FROZEN, SUPERSEDED, KILLED), conflict detection and prevention (e.g., cyclic overrides), versioning and governance of LLM prompts, comprehensive audit logging of system decisions and LLM interactions, and the projection of knowledge onto a visual 'Wall' grid for categorization and overview.
 
-```mermaid
-graph TD
-    A[Raw Data (JSON/Chat)] -->|Ingest| B(Sync Engine)
-    B -->|Compile| C[Bricks (Atomic Data)]
-    C -->|Project| D(Graph Manager)
-    D -->|Structure| E[Knowledge Graph (Nodes/Edges)]
-    E -->|Synthesize| F(Cognition Layer)
-    F -->|Enrich| E
-    G[User / Agent] <-->|Query/Mutate| H(Cortex API)
-    H <--> E
-    H <--> F
-```
+### 3. Cognition Layer
+Focuses on higher-order reasoning, synthesis, and quality assurance of the knowledge graph, leveraging LLMs and heuristic mechanisms.
+- **Components**: `nexus.cognition.assembler`, `nexus.cognition.coverage_scorer`, `nexus.cognition.coverage_sentinel`, `nexus.cognition.dspy_modules`, `nexus.cognition.prompt_generator`, `nexus.cognition.synthesizer`, `nexus.ask.recall`, `nexus.rerank.orchestrator`, `nexus.rerank.llm_reranker`, `nexus.rerank.cross_encoder`, `nexus.rerank.heuristic`.
+- **Key Functionality**: Assembling topic-specific cognition artifacts from retrieved bricks, calculating knowledge coverage scores, detecting structural weaknesses (e.g., semantic redundancy, coverage gaps, orphan bricks, contradictions, analysis without explicit declarations) and emitting actionable alerts, automatically synthesizing relationships between intents to enrich the graph, generating targeted ingestion prompts for knowledge gaps, and a multi-stage reranking pipeline for semantic search results (LLM-based, cross-encoder, heuristic).
 
-## 4. Key Subsystems
+### 4. Service Layer (Implied)
+While not explicitly defined as a separate Python package, this layer represents the operational endpoints and external interfaces of the Nexus system, such as a CLI or a Gateway for UI interaction and external system integration. (Implied from CLI and Cortex integration points).
+- **Components**: `nexus.cli.main`, `services.cortex.api` (implied interaction with Cortex).
+- **Key Functionality**: Providing command-line access to Nexus functionalities (extract, wall, sync, ask), and serving as an interface for broader system interaction (e.g., via Cortex for generation and question answering).
 
-### 1. Nexus Sync (Ingestion)
-**Responsibility:** Raw data normalization and atomization.
-- **Input:** JSON exports, chat logs.
-- **Process:** Splits content into "Bricks", extracts pointers, assigns fingerprints.
-- **Output:** SQLite records (Bricks, Runs, Topics).
-
-### 2. Nexus Graph (Structure)
-**Responsibility:** Enforcing structure and relationships.
-- **Core Entities:** `Intent`, `Source`, `ScopeNode`.
-- **Logic:** Manages node lifecycles (Forming -> Frozen), edge creation, and cycle detection.
-- **Persistence:** SQLite (Relational structure of the graph).
-
-### 3. Nexus Cognition (Reasoning)
-**Responsibility:** Insight generation and self-correction.
-- **Components:** `Assembler`, `Synthesizer`, `CoverageSentinel`.
-- **Logic:** Uses LLMs (DSPy) to detect patterns, score topic coverage, and generate prompts.
-
-### 4. Cortex (Service Layer)
-**Responsibility:** Orchestration and API gateway.
-- **Functions:** Routing, Task Scheduling, Audit Logging.
-- **Interface:** REST/WebSocket API for the Jarvis UI.
-
-### 5. Jarvis (UI)
-**Responsibility:** Human interface.
-- **Features:** Node visualization (`NodeEditor`), Wall projection (`WallView`), Control panel.
-- **State:** Zustand store managing modes (Ask, Explore, Visualize).
-
-## 5. Deployment Architecture
-- **Monolithic Repo:** All code in one repository.
-- **Local-First:** Heavily relies on SQLite and local execution.
-- **Hybrid AI:** Switches between Cloud (OpenAI) and Local (Ollama) inference.
+## Interaction Flow (Simplified)
+1.  **Raw Data Ingestion**: Conversational data is loaded via `nexus.sync.runner`.
+2.  **Extraction & Brickification**: `nexus.extract.tree_splitter` breaks down conversations. `nexus.bricks.extractor` creates atomic 'bricks'.
+3.  **Embedding**: `nexus.vector.embedder` and `nexus.vector.local_index` create vector representations of bricks.
+4.  **LLM Compilation & Validation**: `nexus.sync.compiler` uses `nexus.sync.llm` (with `StructuredIngestLLM`) to extract and validate facts/rules, ensuring zero-trust against hallucination.
+5.  **Graph Persistence**: `nexus.sync.db` and `nexus.graph.manager` store bricks, topics, intents, and relationships in the knowledge graph.
+6.  **Governance & Alerts**: `nexus.cognition.coverage_sentinel` and `nexus.governance.alert_manager` monitor for knowledge gaps and quality issues.
+7.  **Cognitive Synthesis**: `nexus.cognition.assembler` and `nexus.cognition.synthesizer` generate higher-level insights and relationships.
+8.  **Query & Recall**: `nexus.ask.recall` uses embeddings and reranking (via `nexus.rerank.orchestrator`) to find relevant bricks.
+9.  **Prompt Management**: `nexus.graph.prompt_manager` ensures all LLM prompts adhere to governance policies.
+10. **Wall Generation**: `nexus.walls.builder` creates curated summaries for review or further processing.

@@ -1,18 +1,12 @@
-# INFERRED_ENHANCEMENTS
+# INFERRED_ENHANCEMENTS.md
 
-## 1. High-Impact Architectural Upgrades
+## 1. Inferred Enhancements and Refactoring Opportunities
 
-- **Plugin System for Ingestion:** Currently, `NexusIngestor` seems tailored for JSON history files. Creating a standardized `IngestionPlugin` interface would allow easy addition of Slack, Discord, Email, or Notion data sources.
-- **Distributed Graph Processing:** As the graph grows, `NetworkX` or in-memory processing might bottleneck. Migrating the graph query layer to a dedicated graph database (Neo4j or FalkorDB) would improve scalability.
-- **Event-Driven Architecture:** Moving from direct API calls to an Event Bus (e.g., RabbitMQ or Kafka) would decouple `Sync`, `Cognition`, and `Cortex`, allowing them to scale independently.
+This document outlines potential enhancements, refactoring opportunities, and architectural improvements inferred from the codebase analysis.
 
-## 2. User Experience Enhancements
+### 1.1. Potential Refactoring
 
-- **Natural Language Command Interface:** Implementing a "Chat with your Graph" feature where users can issue natural language commands to mutate the graph (e.g., "Merge these two nodes", "Find all contradictions in this topic").
-- **Real-Time Collaboration:** Using WebSockets (already present in `CortexAPI`) to sync state across multiple `Jarvis` clients, enabling team-based knowledge graph curation.
-- **3D Visualization:** Upgrading `CortexVisualizer` to use `Three.js` or `React Force Graph 3D` for navigating complex, high-dimensional relationship clusters.
+*   **Centralized Error Handling/Logging**: While `GraphManager` has audit logging, a more centralized, standardized error handling and logging mechanism across all modules could improve observability and debuggability.*   **Asynchronous Operations**: Many LLM calls and potentially graph operations are I/O bound. Converting more operations to be truly asynchronous (e.g., using `async/await` throughout `LLMClient` and graph interactions) could improve performance and responsiveness.*   **Strict Schema Enforcement**: The `GraphManager` uses `json.dumps` and `json.loads` on node/edge data, which is flexible but less type-safe. More rigorous Pydantic models or similar for all data stored in the graph could prevent data corruption and improve consistency.
+### 1.2. New Feature Ideas / Architectural Improvements
 
-## 3. Cognitive Capabilities
-
-- **Active Learning:** The system could prompt the user for clarification when confidence is low ("Is 'Project X' the same as 'Initiative Y'?"), learning from the feedback.
-- **Multi-Modal Bricks:** Extending `Brick` schema to support images, audio, and PDF attachments, using multimodal LLMs for extraction.
+*   **Dynamic LLM Routing Configuration**: The `LLMRouter` is currently \\\\'FROZEN\\\\". Introducing a mechanism for dynamic (but audited) updates to the routing table (e.g., via configuration files or an admin API) could allow for more flexible LLM management without code changes.*   **Graph Visualization Tooling**: Enhanced integration with UI components (like `ui/jarvis/`) to visualize the knowledge graph and its evolution in real-time, aiding in debugging and understanding agent behavior.*   **Advanced Invariant Checking**: Implement more sophisticated static analysis or runtime monitors to automatically detect violations of critical invariants (e.g., cyclical dependencies, lifecycle breaches) beyond basic checks.

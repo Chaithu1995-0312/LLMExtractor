@@ -1,0 +1,2930 @@
+{
+  "src/nexus/utils_logging.py": {
+    "MultiWriter": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "getattr"
+        ]
+      },
+      "write": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "write",
+          "flush"
+        ]
+      },
+      "flush": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "flush"
+        ]
+      },
+      "isatty": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      }
+    }
+  },
+  "src/nexus/bricks\\brick_store.py": {
+    "BrickStore": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "SyncDatabase"
+        ]
+      },
+      "_load_all_bricks_metadata": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "get_brick_metadata": {
+        "responsibility": "Retrieves brick metadata from the DB.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "cursor",
+          "execute"
+        ]
+      },
+      "get_brick_text": {
+        "responsibility": "Retrieves the raw text content of a brick from the DB.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "cursor",
+          "execute"
+        ]
+      }
+    }
+  },
+  "src/nexus/bricks\\resolver.py": {
+    "UserTriggeredResolver": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "is_triggered": {
+        "responsibility": "Detect if the resolution logic should be triggered.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "strip",
+          "lower"
+        ]
+      },
+      "split_user_blocks": {
+        "responsibility": "Split user text into potential answer blocks.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "split",
+          "strip",
+          "startswith",
+          "append",
+          "splitlines"
+        ]
+      },
+      "is_covered": {
+        "responsibility": "Deterministic structural coverage check using substring overlap.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "lower",
+          "len",
+          "range"
+        ]
+      },
+      "resolve": {
+        "responsibility": "Run the resolution algorithm on LOOSE bricks.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "lower",
+          "enumerate",
+          "is_covered",
+          "len",
+          "is_triggered",
+          "split_user_blocks",
+          "sorted",
+          "isinstance",
+          "append",
+          "get"
+        ]
+      }
+    }
+  },
+  "src/nexus/cognition\\coverage_scorer.py": {
+    "CoverageScorer": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "compute_score": {
+        "responsibility": "Computes the coverage score for a topic.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "max",
+          "round",
+          "len",
+          "min"
+        ]
+      }
+    }
+  },
+  "src/nexus/cognition\\coverage_sentinel.py": {
+    "CoverageSentinel": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "deque"
+        ]
+      },
+      "analyze_topic": {
+        "responsibility": "Analyzes a topic's content (bricks and intents) for structural weaknesses.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "str",
+          "uuid4",
+          "_clean_llm_response",
+          "print",
+          "now",
+          "append",
+          "_generate_fingerprint",
+          "get",
+          "loads"
+        ]
+      },
+      "_generate_fingerprint": {
+        "responsibility": "Generates a deterministic fingerprint for an alert.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "str",
+          "encode",
+          "sorted",
+          "sha256",
+          "get"
+        ]
+      },
+      "_clean_llm_response": {
+        "responsibility": "Helper to extract JSON from LLM markdown.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "split",
+          "strip"
+        ]
+      }
+    }
+  },
+  "src/nexus/cognition\\dspy_modules.py": {
+    "FactSignature": {},
+    "DiagramSignature": {},
+    "RelationshipSignature": {},
+    "EntitySignature": {},
+    "CognitiveExtractor": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "ChainOfThought",
+          "super"
+        ]
+      },
+      "forward": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "entity_extractor",
+          "fact_extractor",
+          "Prediction",
+          "diagram_extractor"
+        ]
+      }
+    },
+    "SentimentSignature": {},
+    "RelationshipSynthesizer": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "ChainOfThought",
+          "super"
+        ]
+      },
+      "analyze_sentiment": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "sentiment_analyzer"
+        ]
+      },
+      "forward": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "synthesizer",
+          "Prediction"
+        ]
+      }
+    }
+  },
+  "src/nexus/cognition\\prompt_generator.py": {
+    "PromptGenerator": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "generate_prompts": {
+        "responsibility": "Generates ingestion prompts for a given alert if eligibility checks pass.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "fromisoformat",
+          "timedelta",
+          "str",
+          "uuid4",
+          "_clean_llm_response",
+          "print",
+          "now",
+          "dumps",
+          "get",
+          "loads"
+        ]
+      },
+      "_clean_llm_response": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "split",
+          "strip"
+        ]
+      }
+    }
+  },
+  "src/nexus/governance\\alert_manager.py": {
+    "AlertManager": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "_get_conn": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "connect"
+        ]
+      },
+      "persist_alert": {
+        "responsibility": "Idempotent insert of a coverage alert.",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "close",
+          "print",
+          "commit",
+          "now",
+          "_get_conn",
+          "dumps",
+          "get",
+          "cursor",
+          "execute"
+        ]
+      },
+      "get_alerts_for_topic": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "zip",
+          "fetchall",
+          "dict",
+          "_get_conn",
+          "append",
+          "cursor",
+          "execute"
+        ]
+      },
+      "acknowledge_alert": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "_transition_state"
+        ]
+      },
+      "dismiss_alert": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "_transition_state"
+        ]
+      },
+      "resolve_alert": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "_transition_state"
+        ]
+      },
+      "archive_alert": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "print",
+          "commit",
+          "_get_conn",
+          "now",
+          "cursor",
+          "execute"
+        ]
+      },
+      "log_prompt_attempt": {
+        "responsibility": "Log an auto-suggested prompt attempt.",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "close",
+          "print",
+          "commit",
+          "_get_conn",
+          "get",
+          "cursor",
+          "execute"
+        ]
+      },
+      "get_recent_prompt_attempts": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "zip",
+          "fetchall",
+          "dict",
+          "_get_conn",
+          "append",
+          "cursor",
+          "execute"
+        ]
+      },
+      "get_alert": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "zip",
+          "fetchone",
+          "dict",
+          "_get_conn",
+          "cursor",
+          "execute"
+        ]
+      },
+      "_transition_state": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "close",
+          "print",
+          "commit",
+          "now",
+          "append",
+          "dumps",
+          "_get_conn",
+          "execute"
+        ]
+      }
+    }
+  },
+  "src/nexus/graph\\manager.py": {
+    "GraphTransaction": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "id"
+        ]
+      },
+      "__enter__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": []
+      },
+      "__exit__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": []
+      }
+    },
+    "GraphManager": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "_init_db",
+          "sync_bricks_to_nodes"
+        ]
+      },
+      "_init_db": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "executescript",
+          "read",
+          "open",
+          "commit",
+          "connect",
+          "cursor",
+          "execute"
+        ]
+      },
+      "_get_conn": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "connect"
+        ]
+      },
+      "register_node": {
+        "responsibility": "Register a generic node. Idempotent by default.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "GraphTransaction",
+          "print",
+          "_get_conn",
+          "update",
+          "dumps",
+          "loads",
+          "execute"
+        ]
+      },
+      "get_intents_by_topic": {
+        "responsibility": "Retrieve all intents linked to a specific topic.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "IntentLifecycle",
+          "fetchall",
+          "get",
+          "_get_conn",
+          "append",
+          "IntentType",
+          "Intent",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "_check_for_cycle": {
+        "responsibility": "DFS to detect cycles for a specific edge type.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "set",
+          "add",
+          "fetchall",
+          "_get_conn",
+          "dfs",
+          "cursor",
+          "execute"
+        ]
+      },
+      "register_edge": {
+        "responsibility": "Register an edge. Idempotent.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "close",
+          "str",
+          "_check_for_cycle",
+          "execute",
+          "fetchone",
+          "ValueError",
+          "GraphTransaction",
+          "print",
+          "hasattr",
+          "dumps",
+          "_get_conn"
+        ]
+      },
+      "add_intent": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "register_node"
+        ]
+      },
+      "add_source": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "register_node"
+        ]
+      },
+      "add_scope": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "register_node"
+        ]
+      },
+      "_get_node_data": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "_get_conn",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "get_node": {
+        "responsibility": "Retrieve node type and data.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "_get_conn",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "_emit_pulse": {
+        "responsibility": "Fire-and-forget call to the L1 Narrator.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "str",
+          "uuid4",
+          "print",
+          "now",
+          "dumps"
+        ]
+      },
+      "_log_audit_event": {
+        "responsibility": "Log a standardized audit event. Appends to phase3_audit_trace.jsonl.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "str",
+          "makedirs",
+          "print",
+          "hasattr",
+          "now",
+          "dumps",
+          "open",
+          "write"
+        ]
+      },
+      "kill_node": {
+        "responsibility": "Explicitly reject a node, moving it to KILLED lifecycle.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "close",
+          "_emit_pulse",
+          "IntentLifecycle",
+          "execute",
+          "ValueError",
+          "GraphTransaction",
+          "now",
+          "dumps",
+          "get",
+          "_log_audit_event",
+          "_get_node_data",
+          "_get_conn"
+        ]
+      },
+      "promote_node_to_frozen": {
+        "responsibility": "Promote a FORMING node to FROZEN.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "close",
+          "set",
+          "_emit_pulse",
+          "IntentLifecycle",
+          "execute",
+          "ValueError",
+          "GraphTransaction",
+          "now",
+          "dumps",
+          "get",
+          "_log_audit_event",
+          "list",
+          "_get_node_data",
+          "_get_conn"
+        ]
+      },
+      "supersede_node": {
+        "responsibility": "Declare that one node replaces another.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "close",
+          "set",
+          "IntentLifecycle",
+          "execute",
+          "ValueError",
+          "GraphTransaction",
+          "register_edge",
+          "now",
+          "dumps",
+          "get",
+          "_log_audit_event",
+          "list",
+          "_get_node_data",
+          "_get_conn"
+        ]
+      },
+      "promote_intent": {
+        "responsibility": "Promote an intent to a new lifecycle state, enforcing monotonicity and invariants.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "close",
+          "get_edges_for_node",
+          "IntentLifecycle",
+          "execute",
+          "ValueError",
+          "GraphTransaction",
+          "dumps",
+          "get",
+          "any",
+          "_get_node_data",
+          "_get_conn"
+        ]
+      },
+      "add_typed_edge": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "close",
+          "str",
+          "IntentLifecycle",
+          "execute",
+          "fetchall",
+          "ValueError",
+          "register_edge",
+          "_log_audit_event",
+          "get",
+          "cursor",
+          "_get_node_data",
+          "_get_conn"
+        ]
+      },
+      "get_all_intents": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "IntentLifecycle",
+          "fetchall",
+          "get",
+          "_get_conn",
+          "append",
+          "IntentType",
+          "Intent",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "get_all_edges": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "EdgeType",
+          "_get_conn",
+          "append",
+          "Edge",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "get_edges_for_node": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "EdgeType",
+          "_get_conn",
+          "append",
+          "Edge",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "get_all_scopes": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "_get_conn",
+          "ScopeNode",
+          "get",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "get_all_sources": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "Source",
+          "_get_conn",
+          "get",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "delete_node": {
+        "responsibility": "Delete a node and all connected edges.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "close",
+          "GraphTransaction",
+          "print",
+          "_get_conn",
+          "execute"
+        ]
+      },
+      "get_loose_bricks": {
+        "responsibility": "Governance helper: Fetch LOOSE query bricks for a specific topic.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "_get_conn",
+          "append",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "mark_forming": {
+        "responsibility": "Transition a brick to FORMING state with resolution metadata.",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "close",
+          "setdefault",
+          "fetchone",
+          "ValueError",
+          "GraphTransaction",
+          "register_node",
+          "_get_conn",
+          "now",
+          "commit",
+          "dumps",
+          "_log_audit_event",
+          "get",
+          "cursor",
+          "_get_node_data",
+          "execute"
+        ]
+      },
+      "get_all_nodes_raw": {
+        "responsibility": "Retrieve all nodes as dictionaries suitable for API response.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "_get_conn",
+          "append",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "sync_bricks_to_nodes": {
+        "responsibility": "Migrate bricks from the 'bricks' sync table into the unified 'nodes' table.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "close",
+          "len",
+          "fetchone",
+          "fetchall",
+          "GraphTransaction",
+          "print",
+          "_get_conn",
+          "dumps",
+          "get",
+          "execute"
+        ]
+      },
+      "get_all_edges_raw": {
+        "responsibility": "Retrieve all edges as dictionaries suitable for API response.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "_get_conn",
+          "append",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "query_audit_logs": {
+        "responsibility": "Governance Analytics: Query the audit JSONL file.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "items",
+          "open",
+          "append",
+          "get",
+          "loads"
+        ]
+      }
+    }
+  },
+  "src/nexus/graph\\projection.py": {
+    "WallCell": {}
+  },
+  "src/nexus/graph\\prompt_manager.py": {
+    "GovernanceViolation": {},
+    "PromptManager": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "_get_conn": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "connect"
+        ]
+      },
+      "get_prompt": {
+        "responsibility": "Retrieves a prompt by slug.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "GraphManager",
+          "GovernanceViolation",
+          "print",
+          "_get_conn",
+          "_log_audit_event",
+          "cursor",
+          "execute"
+        ]
+      },
+      "save_prompt": {
+        "responsibility": "Saves a new prompt version.",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "commit",
+          "_get_conn",
+          "dumps",
+          "cursor",
+          "execute"
+        ]
+      },
+      "get_all_system_prompts": {
+        "responsibility": "Retrieves latest version of all system prompts.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "dict",
+          "_get_conn",
+          "cursor",
+          "execute"
+        ]
+      }
+    }
+  },
+  "src/nexus/graph\\schema.py": {
+    "IntentLifecycle": {},
+    "IntentType": {},
+    "EdgeType": {},
+    "AuditEventType": {},
+    "ModelTier": {},
+    "DecisionAction": {},
+    "GraphNode": {},
+    "Source": {},
+    "ScopeNode": {},
+    "Intent": {},
+    "Edge": {}
+  },
+  "src/nexus/index\\conversation_index.py": {
+    "ConversationIndex": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "load"
+        ]
+      },
+      "load": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "open",
+          "print",
+          "load"
+        ]
+      },
+      "save": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "open",
+          "dump",
+          "makedirs"
+        ]
+      },
+      "add_conversation": {
+        "responsibility": "Register or update a conversation in the index.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "now"
+        ]
+      },
+      "get_metadata": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "list_conversations": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "list"
+        ]
+      },
+      "export_chat_mapping": {
+        "responsibility": "Export the index as a simple {chat_id: title} mapping for the UI.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "dump",
+          "makedirs",
+          "print",
+          "open",
+          "now",
+          "get"
+        ]
+      }
+    }
+  },
+  "src/nexus/rerank\\cross_encoder.py": {
+    "CrossEncoderReranker": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "Error handling / exception-based invariants",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "RuntimeError",
+          "CrossEncoder",
+          "manual_seed",
+          "ImportError"
+        ]
+      },
+      "rank": {
+        "responsibility": "Ranks candidates using CrossEncoder.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "len",
+          "enumerate",
+          "max",
+          "array",
+          "float",
+          "isinstance",
+          "min",
+          "sort",
+          "get"
+        ]
+      }
+    }
+  },
+  "src/nexus/rerank\\heuristic.py": {
+    "HeuristicReranker": {
+      "rank": {
+        "responsibility": "Ranks candidates based on heuristic signals.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "intersection",
+          "lower",
+          "set",
+          "len",
+          "max",
+          "findall",
+          "min",
+          "sort",
+          "get"
+        ]
+      }
+    }
+  },
+  "src/nexus/rerank\\llm_reranker.py": {
+    "LlmReranker": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "FileNotFoundError",
+          "RuntimeError",
+          "ImportError",
+          "Llama"
+        ]
+      },
+      "_get_cached_score": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "lru_cache"
+        ]
+      },
+      "rank": {
+        "responsibility": "Ranks using LLM scoring with latency guard.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "max",
+          "encode",
+          "float",
+          "time",
+          "md5",
+          "llm",
+          "print",
+          "group",
+          "min",
+          "sort",
+          "search",
+          "get"
+        ]
+      }
+    }
+  },
+  "src/nexus/rerank\\orchestrator.py": {
+    "RerankOrchestrator": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "LlmReranker",
+          "HeuristicReranker",
+          "CrossEncoderReranker"
+        ]
+      },
+      "rerank": {
+        "responsibility": "Executes reranking with fallback logic.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": []
+      }
+    }
+  },
+  "src/nexus/sync\\compiler.py": {
+    "NexusCompiler": {
+      "_run_async": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "run",
+          "get_running_loop",
+          "submit"
+        ]
+      },
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "AlertManager",
+          "StructuredIngestLLM",
+          "CoverageSentinel",
+          "PromptManager"
+        ]
+      },
+      "compile_run": {
+        "responsibility": "Main entry point for the compiler.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "get_intents_by_topic",
+          "set",
+          "len",
+          "enumerate",
+          "_pre_filter_nodes",
+          "range",
+          "_materialize_brick",
+          "_emit_pulse",
+          "GraphManager",
+          "_build_batches",
+          "print",
+          "append",
+          "_llm_extract_pointers",
+          "get",
+          "_log_audit_event",
+          "extend"
+        ]
+      },
+      "_reject_message": {
+        "responsibility": "Cheap structural rejection logic.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "strip",
+          "get"
+        ]
+      },
+      "_has_signal": {
+        "responsibility": "Lexical signal gate.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "lower",
+          "any"
+        ]
+      },
+      "_pre_filter_nodes": {
+        "responsibility": "Filters the raw content to reduce context window usage.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "get",
+          "_reject_message",
+          "isinstance",
+          "print",
+          "append",
+          "copy",
+          "enumerate",
+          "_has_signal"
+        ]
+      },
+      "_build_batches": {
+        "responsibility": "Bounded batch construction algorithm.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "len",
+          "isinstance",
+          "append",
+          "dumps",
+          "copy"
+        ]
+      },
+      "_llm_extract_pointers": {
+        "responsibility": "Grammar-constrained pointer extraction using a structured LLM.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "_run_async",
+          "dict",
+          "dumps",
+          "print"
+        ]
+      },
+      "_clean_llm_response": {
+        "responsibility": "Helper to extract JSON from LLM markdown.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "split",
+          "strip"
+        ]
+      },
+      "_materialize_brick": {
+        "responsibility": "The Zero-Trust Validation Gate.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "split",
+          "_resolve_json_path",
+          "str",
+          "len",
+          "encode",
+          "isinstance",
+          "find",
+          "sha256",
+          "int",
+          "get",
+          "list"
+        ]
+      },
+      "_resolve_json_path": {
+        "responsibility": "Robust JSONPath resolver with support for content_blocks using jsonpath-ng.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "split",
+          "ImportError",
+          "ValueError",
+          "print",
+          "isinstance",
+          "find",
+          "startswith",
+          "parse",
+          "int"
+        ]
+      }
+    }
+  },
+  "src/nexus/sync\\db.py": {
+    "SyncDatabase": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "_init_db"
+        ]
+      },
+      "_init_db": {
+        "responsibility": "Initialize the database with the schema.",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "close",
+          "executescript",
+          "read",
+          "print",
+          "open",
+          "commit",
+          "_get_conn"
+        ]
+      },
+      "_get_conn": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "connect"
+        ]
+      },
+      "create_topic": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "commit",
+          "_get_conn",
+          "dumps",
+          "execute"
+        ]
+      },
+      "get_topic": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "_get_conn",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "get_all_topics": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "_get_conn",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "register_run": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "commit",
+          "_get_conn",
+          "dumps",
+          "execute"
+        ]
+      },
+      "get_run": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchone",
+          "_get_conn",
+          "cursor",
+          "loads",
+          "execute"
+        ]
+      },
+      "update_run_boundary": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u2705 Yes",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "execute",
+          "commit",
+          "close",
+          "_get_conn"
+        ]
+      },
+      "save_brick": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "commit",
+          "_get_conn",
+          "dumps",
+          "get",
+          "execute"
+        ]
+      },
+      "get_fingerprints_for_topic": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "_get_conn",
+          "cursor",
+          "execute"
+        ]
+      },
+      "get_bricks_for_topic": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "close",
+          "fetchall",
+          "_get_conn",
+          "cursor",
+          "execute"
+        ]
+      },
+      "truncate_sync_data": {
+        "responsibility": "Clears all bricks and resets source runs for a full rebuild.",
+        "risk_profile": "HIGH: DB Write/External API",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "close",
+          "rollback",
+          "print",
+          "commit",
+          "_get_conn",
+          "execute"
+        ]
+      }
+    }
+  },
+  "src/nexus/sync\\ingest_history.py": {
+    "NexusIngestor": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "PineconeVectorIndex",
+          "get_embedder",
+          "ValueError",
+          "print"
+        ]
+      },
+      "brickify": {
+        "responsibility": "Chunks text into atomic bricks for the vector index.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "split",
+          "str",
+          "uuid4",
+          "len",
+          "strip",
+          "append"
+        ]
+      },
+      "ingest_history": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "exists",
+          "len",
+          "read_text",
+          "rglob",
+          "print",
+          "append",
+          "assemble_topic",
+          "Path",
+          "brickify",
+          "tolist"
+        ]
+      }
+    }
+  },
+  "src/nexus/sync\\llm.py": {
+    "LLMRequest": {},
+    "LLMRoute": {},
+    "LLMRoutingError": {},
+    "LLMRouter": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "load_dotenv",
+          "getenv"
+        ]
+      },
+      "route": {
+        "responsibility": "Determines the execution path for an LLM request based on the Canonical Routing Table.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "LLMRoutingError",
+          "LLMRoute"
+        ]
+      }
+    },
+    "LLMClient": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "LLMRouter",
+          "getenv"
+        ]
+      },
+      "generate": {
+        "responsibility": "Generates a response from the LLM based on intent and routing.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants",
+          "Explicit error raising for invalid states"
+        ],
+        "calls": [
+          "RuntimeError",
+          "print",
+          "_call_ollama",
+          "_mock_response",
+          "LLMRequest"
+        ]
+      },
+      "_call_ollama": {
+        "responsibility": "Calls local Ollama instance via HTTP.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "strip",
+          "read",
+          "print",
+          "dumps",
+          "_mock_response",
+          "int",
+          "get",
+          "getenv",
+          "loads"
+        ]
+      },
+      "_mock_response": {
+        "responsibility": "Returns a valid JSON response for testing purposes.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "split",
+          "len",
+          "print",
+          "isinstance",
+          "dumps",
+          "loads"
+        ]
+      }
+    },
+    "PointerObject": {},
+    "ExtractionResponse": {},
+    "StructuredIngestLLM": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "Ollama",
+          "getenv"
+        ]
+      },
+      "_mock_extract": {
+        "responsibility": "Returns a valid JSON response for testing purposes.",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "split",
+          "strip",
+          "print",
+          "isinstance",
+          "append",
+          "dumps",
+          "get",
+          "loads"
+        ]
+      }
+    }
+  },
+  "src/nexus/vector\\embedder.py": {
+    "VectorEmbedder": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "_get_model": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "SentenceTransformer",
+          "print"
+        ]
+      },
+      "_rewrite_with_llm": {
+        "responsibility": "Optional GENAI call to expand or refine the query.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "OpenAI",
+          "print",
+          "replace"
+        ]
+      },
+      "embed_query": {
+        "responsibility": "Embeds a single query string into a 1x384 vector.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "_get_model",
+          "astype",
+          "_rewrite_with_llm",
+          "encode"
+        ]
+      },
+      "embed_texts": {
+        "responsibility": "Embeds a list of texts into a Nx384 matrix.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "astype",
+          "len",
+          "array",
+          "encode",
+          "append",
+          "_get_model"
+        ]
+      }
+    }
+  },
+  "src/nexus/vector\\local_index.py": {
+    "LocalVectorIndex": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "print",
+          "load",
+          "now",
+          "Path",
+          "IndexFlatL2"
+        ]
+      },
+      "load": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "load",
+          "read_index",
+          "str",
+          "open"
+        ]
+      },
+      "save": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "write_index",
+          "open",
+          "str",
+          "dump"
+        ]
+      },
+      "add_bricks": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "get_embedder",
+          "len",
+          "embed_texts",
+          "print",
+          "now",
+          "get"
+        ]
+      },
+      "search": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      }
+    }
+  },
+  "services/cortex/api.py": {
+    "CortexAPI": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "LLMClient",
+          "JarvisGateway",
+          "BrickStore",
+          "GraphManager",
+          "_init_agent_embeddings",
+          "PromptGenerator",
+          "CoverageScorer",
+          "AlertManager"
+        ]
+      },
+      "_init_agent_embeddings": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "get_embedder",
+          "embed_query",
+          "print"
+        ]
+      },
+      "route": {
+        "responsibility": "Endpoint: /route - Urgency-aware Intent routing",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "get_embedder",
+          "RelationshipSynthesizer",
+          "lower",
+          "float",
+          "print",
+          "analyze_sentiment",
+          "embed_query",
+          "dot",
+          "flatten",
+          "get",
+          "any"
+        ]
+      },
+      "generate": {
+        "responsibility": "Endpoint: /generate - Now uses Tier 2 (The Voice)",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "_reload_source_text",
+          "print",
+          "_fetch_graph_context",
+          "now",
+          "_audit_trace",
+          "get"
+        ]
+      },
+      "ask_preview": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "recall_bricks_readonly",
+          "len",
+          "round",
+          "print",
+          "now",
+          "append",
+          "get"
+        ]
+      },
+      "assemble": {
+        "responsibility": "Endpoint: /cognition/assemble - Trigger topic assembly",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "str",
+          "len",
+          "print",
+          "load",
+          "open",
+          "now",
+          "assemble_topic",
+          "get"
+        ]
+      },
+      "synthesize": {
+        "responsibility": "Endpoint: /cognition/synthesize - Trigger relationship discovery",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "str",
+          "now",
+          "run_relationship_synthesis",
+          "print"
+        ]
+      },
+      "calculate_complexity_score": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')"
+        ],
+        "calls": [
+          "split",
+          "count",
+          "set",
+          "len",
+          "lower",
+          "round",
+          "isinstance",
+          "min"
+        ]
+      },
+      "get_audit_events": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "str",
+          "len",
+          "open",
+          "append",
+          "sort",
+          "get",
+          "loads"
+        ]
+      },
+      "get_run_details": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "str",
+          "len",
+          "isinstance",
+          "open",
+          "get",
+          "SyncDatabase",
+          "loads",
+          "get_run"
+        ]
+      },
+      "get_graph_snapshot": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "get_all_edges_raw",
+          "GraphManager",
+          "str",
+          "get_all_nodes_raw"
+        ]
+      },
+      "stream_audit_websocket": {
+        "responsibility": "Placeholder for real-time audit streaming.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "print"
+        ]
+      },
+      "trigger_self_healing": {
+        "responsibility": "Monitors vector index drift and triggers rebuild if necessary.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "print"
+        ]
+      },
+      "get_all_prompts": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\u274c No",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "get_all_system_prompts",
+          "endswith",
+          "calculate_complexity_score",
+          "print",
+          "walk",
+          "load",
+          "open",
+          "append",
+          "sort",
+          "get",
+          "loads",
+          "PromptManager"
+        ]
+      },
+      "_reload_source_text": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "append",
+          "print"
+        ]
+      },
+      "_fetch_graph_context": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Input validation (e.g., 'if not x')",
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "get_related_intents",
+          "print"
+        ]
+      },
+      "_audit_trace": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "open",
+          "now",
+          "dumps",
+          "write"
+        ]
+      },
+      "get_alerts": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "acknowledge_alert": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "resolve_alert": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "dismiss_alert": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "archive_alert": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "suggest_prompts": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      },
+      "get_coverage_score": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": []
+      }
+    }
+  },
+  "services/cortex/gateway.py": {
+    "JarvisGateway": {
+      "__init__": {
+        "responsibility": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "Mutates instance/global state",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "PromptManager"
+        ]
+      },
+      "pulse": {
+        "responsibility": "TIER L1: The Pulse (Cost: $0.00)",
+        "risk_profile": "MED: Local State/Disk",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "post",
+          "print",
+          "dumps",
+          "json",
+          "replace"
+        ]
+      },
+      "explain": {
+        "responsibility": "TIER L2: The Voice (Cost: ~$0.01/call)",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "_call_proxy"
+        ]
+      },
+      "synthesize": {
+        "responsibility": "TIER L3: The Sage (Cost: ~$0.15/call)",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "\ud83d\udd34 MISSING_FROM_CONTEXT"
+        ],
+        "calls": [
+          "_call_proxy"
+        ]
+      },
+      "_call_proxy": {
+        "responsibility": "Helper to hit the budget-gated proxy.",
+        "risk_profile": "LOW: Pure/Safe",
+        "inputs_outputs": "\ud83d\udd34 MISSING_FROM_CONTEXT",
+        "idempotency": "\ud83d\udfe1 Partial",
+        "state_impact": "No direct state mutation detected",
+        "validation_invariants": [
+          "Error handling / exception-based invariants"
+        ],
+        "calls": [
+          "post",
+          "json",
+          "str",
+          "get"
+        ]
+      }
+    }
+  },
+  "services/cortex/orchestration.py": {
+    "AgentState": {}
+  }
+}

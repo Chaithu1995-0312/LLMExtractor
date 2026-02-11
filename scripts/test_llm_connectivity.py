@@ -5,11 +5,15 @@ import json
 # Add src to path
 sys.path.append(os.path.join(os.getcwd(), "src"))
 
-from nexus.sync.llm import LLMClient
+from nexus.sync.llm import LLMClient, StructuredIngestLLM
 
-def test_connectivity():
+async def test_connectivity(): # Make the function async
     client = LLMClient()
     
+    # Use StructuredIngestLLM for INGEST_EXTRACT intent
+    # This bypasses the RuntimeError in LLMClient.generate for INGEST_EXTRACT
+    structured_client = StructuredIngestLLM()
+
     system_prompt = """You are a Deterministic Data Extraction Engine.
 You are NOT a chat assistant. You are a compiler component.
 
@@ -63,9 +67,11 @@ SOURCE JSON TO SCAN:
 
     print("Running LLM Connectivity Test...")
     print("About to call Ollama...")
-    response = client.generate(system_prompt, user_prompt)
+    # Use the structured_client for extraction
+    response = await structured_client.extract(system_prompt + "\n\n" + user_prompt) # structured_client expects a single prompt string
     print("Returned from Ollama.")
     print("Test Completed.")
 
 if __name__ == "__main__":
-    test_connectivity()
+    import asyncio
+    asyncio.run(test_connectivity()) # Run the async function
