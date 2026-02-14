@@ -305,39 +305,81 @@ class ExtractionResponse(BaseModel):
 
 class StructuredIngestLLM:
     """
-    Deterministic, grammar-constrained ingestion LLM.
-    This is a compiler pass, not a conversational client.
+    High-performance deterministic ingestion LLM.
+    No grammar decoding.
+    Strict post-validation.
     """
 
     def __init__(self):
         model = os.getenv("LOCAL_LLM_MODEL", "phi3:mini")
+
         self._llm = Ollama(
             model=model,
             temperature=0.0,
-            request_timeout=600.0, # Increased for CPU-bound inference
+            request_timeout=300.0,
             base_url="http://15.206.213.205:11434",
-            additional_kwargs={"num_ctx": 2048,"num_thread": 2} # Further reduced context to speed up CPU inference
+            additional_kwargs={
+                "num_ctx": 2048,
+                "num_thread": 2
+            }
         )
-        self._structured_llm = self._llm.as_structured_llm(ExtractionResponse)
 
     async def extract(self, prompt: str) -> ExtractionResponse:
-        print(f"[OLLAMA-STRUCTURED] Connecting with model: {self._llm.model}")
+        print(f"[OLLAMA-FAST] Model: {self._llm.model}")
+
+        # Check for mock environment variable first
         if os.getenv("LLM_MOCK_INGEST", "false").lower() == "true":
-            # Mock implementation for speed/low-memory environments
-            mock_json = self._mock_extract(prompt)
-            return ExtractionResponse.model_validate_json(mock_json)
+             mock_json = self._mock_extract(prompt)
+             return ExtractionResponse.model_validate_json(mock_json)
+
+        # Force JSON-only output
+        enhanced_prompt = (
+            "Return ONLY valid JSON. No markdown. No explanation.\n\n"
+            + prompt
+        )
 
         try:
-            response = await self._structured_llm.acomplete(prompt)
-            return response.text
+            # First attempt
+            response = await self._llm.acomplete(enhanced_prompt)
+            raw = response.text.strip()
+            # Handle potential markdown code blocks
+            if raw.startswith("```json"):
+                raw = raw[7:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+
+            return ExtractionResponse.model_validate_json(raw)
         except Exception as e:
-            print(f"[LLM] Error in structured extraction: {e}")
+            print(f"[LLM] First parse failed: {e}. Retrying once...")
+
             # Recovery: try to extract a verbatim quote if it's a memory error
             if "memory" in str(e).lower() or "500" in str(e):
                  print("[LLM] Memory error detected. Using local fallback.")
                  mock_json = self._mock_extract(prompt)
                  return ExtractionResponse.model_validate_json(mock_json)
-            raise e
+
+            # Retry with stronger instruction
+            retry_prompt = (
+                "Your previous output was invalid JSON.\n"
+                "Return ONLY valid JSON matching the schema exactly.\n\n"
+                + prompt
+            )
+
+            try:
+                response = await self._llm.acomplete(retry_prompt)
+                raw = response.text.strip()
+                # Handle potential markdown code blocks
+                if raw.startswith("```json"):
+                    raw = raw[7:]
+                if raw.endswith("```"):
+                    raw = raw[:-3]
+                raw = raw.strip()
+
+                return ExtractionResponse.model_validate_json(raw)
+            except Exception as retry_e:
+                print(f"[LLM] Second attempt failed: {retry_e}. Raising.")
+                raise retry_e
 
     def _mock_extract(self, prompt: str) -> str:
         """Returns a valid JSON response for testing purposes."""
