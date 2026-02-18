@@ -55,7 +55,7 @@ class LLMRouter:
 
         self.local_enabled = os.getenv("LOCAL_LLM_ENABLED", "true").lower() == "true"
         self.local_provider = os.getenv("LOCAL_LLM_PROVIDER", "ollama")
-        self.local_model = os.getenv("LOCAL_LLM_MODEL", "phi3:mini") # Prefer Phi-3 as default for this env
+        self.local_model = os.getenv("LOCAL_LLM_MODEL", "phi3:latest") # Prefer Phi-3 as default for this env
         self.api_key = os.getenv("OPENAI_API_KEY")
 
     def route(self, req: LLMRequest) -> LLMRoute:
@@ -108,7 +108,7 @@ class LLMClient:
             
         self.provider = provider
         self.router = LLMRouter()
-        self.ollama_host = os.getenv("OLLAMA_HOST", "http://15.206.213.205:11434")
+        self.ollama_host = os.getenv("OLLAMA_HOST", "http://3.109.146.63:11434")
         self.strict_mode = os.getenv("LLM_STRICT_MODE", "false").lower() == "true"
 
     def generate(self, system_prompt: str, user_prompt: str, 
@@ -143,26 +143,60 @@ class LLMClient:
             if self.strict_mode:
                 raise e
             
-            # Fallback for now to avoid crashing everything if local LLM isn't actually running
-            # But technically this violates "No silent fallbacks"
-            # We will log loudly and return mock to unblock, but this is technical debt.
-            print("[LLMClient] CRITICAL: Falling back to MOCK due to routing failure.")
-            return self._mock_response(user_prompt)
+            # No more mock fallbacks for routing failures.
+            return json.dumps({
+                "error": "ROUTING_FAILED",
+                "details": str(e),
+                "status": "HARD_FAIL"
+            })
 
         print(f"[LLMClient] Routing: {request.intent_class} -> {route.tier} ({route.provider}/{route.model})")
 
         if route.provider == "mock":
+            # Explicit mocks are still allowed if requested via routing (e.g. intent=TEST)
             return self._mock_response(user_prompt)
         
         elif route.provider == "ollama":
             return self._call_ollama(route.model, system_prompt, user_prompt)
             
         elif route.provider == "api":
-            # TODO: Implement actual API call
-            print(f"[LLMClient] simulating call to API ({route.model})...")
-            return self._mock_response(user_prompt) # Placeholder for now
+            return self._call_genai_api(route.model, system_prompt, user_prompt)
 
-        return self._mock_response(user_prompt)
+        raise LLMRoutingError(f"Unsupported provider: {route.provider}")
+
+    def _call_genai_api(self, model: str, system_prompt: str, user_prompt: str) -> str:
+        """
+        Calls GENAI API (OpenAI/Anthropic) based on model name.
+        Saves as 'GENAI Review Pending' if keys are missing or call fails.
+        """
+        if not self.api_key:
+            print(f"[LLMClient] API Key missing for {model}. Marking as GENAI Review Pending.")
+            return json.dumps({"genai_review_status": "PENDING", "reason": "API_KEY_MISSING"})
+
+        try:
+            if "gpt" in model.lower():
+                return self._call_openai(model, system_prompt, user_prompt)
+            elif "claude" in model.lower():
+                return self._call_claude(model, system_prompt, user_prompt)
+            else:
+                print(f"[LLMClient] Unsupported API model: {model}")
+                return json.dumps({"genai_review_status": "PENDING", "reason": "UNSUPPORTED_MODEL"})
+        except Exception as e:
+            print(f"[LLMClient] GENAI API call failed: {e}")
+            return json.dumps({"genai_review_status": "PENDING", "reason": str(e)})
+
+    def _call_openai(self, model: str, system_prompt: str, user_prompt: str) -> str:
+        # Placeholder for real OpenAI SDK call
+        # In actual implementation: 
+        # client = OpenAI(api_key=self.api_key)
+        # response = client.chat.completions.create(...)
+        print(f"[LLMClient] (Stub) Calling OpenAI {model}...")
+        return json.dumps({"genai_review_status": "STUB_OPENAI", "model": model})
+
+    def _call_claude(self, model: str, system_prompt: str, user_prompt: str) -> str:
+        # Placeholder for real Anthropic SDK call
+        print(f"[LLMClient] (Stub) Calling Claude {model}...")
+        return json.dumps({"genai_review_status": "STUB_CLAUDE", "model": model})
 
     def _call_ollama(self, model: str, system_prompt: str, user_prompt: str) -> str:
         """
@@ -199,29 +233,29 @@ class LLMClient:
                     raw_body = response.read().decode("utf-8")
                     if not raw_body or not raw_body.strip():
                         print("[LLMClient] Ollama returned empty response body.")
-                        return self._mock_response(user_prompt)
+                        return json.dumps({"error": "EMPTY_RESPONSE", "status": "HARD_FAIL"})
                         
                     result = json.loads(raw_body)
                     print(f"--- [OLLAMA RESPONSE] ---\n{json.dumps(result, indent=2)}\n------------------------")
                     return result.get("message", {}).get("content", "")
                 else:
                     print(f"[LLMClient] Ollama Error: {response.status}")
-                    return self._mock_response(user_prompt)
+                    return json.dumps({"error": "HTTP_ERROR", "code": response.status, "status": "HARD_FAIL"})
         except (urllib.error.HTTPError, urllib.error.URLError) as e:
             print(f"[LLMClient] Ollama Connection Failed/Timed Out: {e}")
             if self.strict_mode:
                 raise e
-            return self._mock_response(user_prompt)
+            return json.dumps({"error": "CONNECTION_FAILED", "details": str(e), "status": "HARD_FAIL"})
         except TimeoutError as e:
             print(f"[LLMClient] Ollama Request Timed Out (>{timeout}s)")
             if self.strict_mode:
                 raise e
-            return self._mock_response(user_prompt)
+            return json.dumps({"error": "TIMEOUT", "status": "HARD_FAIL"})
         except Exception as e:
             print(f"[LLMClient] Ollama Exception: {e}")
             if self.strict_mode:
                 raise e
-            return self._mock_response(user_prompt)
+            return json.dumps({"error": "UNEXPECTED_EXCEPTION", "details": str(e), "status": "HARD_FAIL"})
 
     def _mock_response(self, prompt: str) -> str:
         """
@@ -311,13 +345,13 @@ class StructuredIngestLLM:
     """
 
     def __init__(self):
-        model = os.getenv("LOCAL_LLM_MODEL", "phi3:mini")
+        model = os.getenv("LOCAL_LLM_MODEL", "phi3:latest")
 
         self._llm = Ollama(
             model=model,
             temperature=0.0,
             request_timeout=300.0,
-            base_url="http://15.206.213.205:11434",
+            base_url="http://3.109.146.63:11434",
             additional_kwargs={
                 "num_ctx": 2048,
                 "num_thread": 2

@@ -18,7 +18,7 @@ class JarvisGateway:
     Enforces the $2.00/day budget via the LiteLLM Proxy.
     """
     
-    def __init__(self, local_url="http://15.206.213.205:11434", proxy_url="http://0.0.0.0:4000"):
+    def __init__(self, local_url="http://3.109.146.63:11434", proxy_url="http://0.0.0.0:4000"):
         self.local_url = local_url
         self.proxy_url = proxy_url
         self.local_model = "phi3:mini"  # or "mistral"

@@ -79,11 +79,19 @@ export const NexusNode: React.FC<NexusNodeProps> = ({
             {chatName}
           </div>
         )}
-        <div className="flex justify-between items-start">
-          <h3 className="font-bold text-sm tracking-wide leading-tight drop-shadow-md truncate">
+        <div className="flex justify-between items-start gap-2">
+          <h3 className="font-bold text-sm tracking-wide leading-tight drop-shadow-md truncate flex-1">
             {title}
           </h3>
-          <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] ${currentVar.indicator} shrink-0 ml-2`} />
+          
+          <div className="flex items-center gap-1 shrink-0">
+             {lifecycle === 'FROZEN' && (
+                <div className="px-1 py-0.5 rounded text-[8px] font-bold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 tracking-wider">
+                  IMMUTABLE
+                </div>
+             )}
+             <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] ${currentVar.indicator}`} />
+          </div>
         </div>
       </div>
 

@@ -1,12 +1,41 @@
-# INFERRED_ENHANCEMENTS.md
+# Inferred Enhancements
 
-## 1. Inferred Enhancements and Refactoring Opportunities
+## 1. High-Impact Architecture Changes
 
-This document outlines potential enhancements, refactoring opportunities, and architectural improvements inferred from the codebase analysis.
+### A. Migration to PostgreSQL
+*   **Current**: SQLite (`graph.db`) with file-level locking.
+*   **Proposed**: PostgreSQL with `pgvector` extension.
+*   **Benefit**:
+    -   Handles concurrent writes from Sync and API.
+    -   Native vector search (replacing FAISS/`local_index.py` for simpler stack).
+    -   Row-level locking for better performance.
 
-### 1.1. Potential Refactoring
+### B. Parallel Ingestion Pipeline
+*   **Current**: Sequential processing in `runner.py`.
+*   **Proposed**: Use `concurrent.futures.ProcessPoolExecutor` for the `process_conversation` and `compile_run` steps.
+*   **Benefit**: 5-10x speedup for initial ingestion of large history dumps.
 
-*   **Centralized Error Handling/Logging**: While `GraphManager` has audit logging, a more centralized, standardized error handling and logging mechanism across all modules could improve observability and debuggability.*   **Asynchronous Operations**: Many LLM calls and potentially graph operations are I/O bound. Converting more operations to be truly asynchronous (e.g., using `async/await` throughout `LLMClient` and graph interactions) could improve performance and responsiveness.*   **Strict Schema Enforcement**: The `GraphManager` uses `json.dumps` and `json.loads` on node/edge data, which is flexible but less type-safe. More rigorous Pydantic models or similar for all data stored in the graph could prevent data corruption and improve consistency.
-### 1.2. New Feature Ideas / Architectural Improvements
+## 2. Cognitive Enhancements
 
-*   **Dynamic LLM Routing Configuration**: The `LLMRouter` is currently \\\\'FROZEN\\\\". Introducing a mechanism for dynamic (but audited) updates to the routing table (e.g., via configuration files or an admin API) could allow for more flexible LLM management without code changes.*   **Graph Visualization Tooling**: Enhanced integration with UI components (like `ui/jarvis/`) to visualize the knowledge graph and its evolution in real-time, aiding in debugging and understanding agent behavior.*   **Advanced Invariant Checking**: Implement more sophisticated static analysis or runtime monitors to automatically detect violations of critical invariants (e.g., cyclical dependencies, lifecycle breaches) beyond basic checks.
+### A. Semantic Caching
+*   **Concept**: Cache LLM responses for `NexusCompiler` based on the semantic similarity of the source block.
+*   **Benefit**: Drastically reduces cost and time for re-runs of the sync pipeline.
+
+### B. Active Learning Loop
+*   **Concept**: When a user "Rejects" a node via `jarvis_anchor`, automatically generate a negative example for the DSPy `CognitiveExtractor`.
+*   **Benefit**: System gets smarter over time without code changes.
+
+## 3. Operational Improvements
+
+### A. Structured Logging & Tracing
+*   **Current**: `utils_logging.py` prints to stdout/file.
+*   **Proposed**: OpenTelemetry integration for distributed tracing across Flask and Celery.
+
+### B. Containerization
+*   **Current**: Local python scripts.
+*   **Proposed**: Docker Compose setup with services:
+    -   `nexus-api` (Flask)
+    -   `nexus-worker` (Celery)
+    -   `nexus-db` (Postgres)
+    -   `nexus-redis` (Redis)
+    -   `nexus-ui` (React/Nginx)

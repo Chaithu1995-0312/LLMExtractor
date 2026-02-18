@@ -81,3 +81,5 @@ htmlcov/
 tmp/
 temp/
 scratch/
+cognitive_shards/
+processed_shards/

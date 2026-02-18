@@ -2,21 +2,10 @@ import { useState, useRef, useEffect, useMemo, memo } from 'react';
 import { useNexusStore } from './store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  MessageSquare, 
-  Share2, 
-  ChevronRight, 
-  ChevronLeft, 
-  Search, 
   Send, 
-  BookOpen, 
-  Activity,
-  Maximize2,
-  ExternalLink,
-  LayoutGrid,
-  Network,
-  Menu,
-  X,
-  Terminal
+  LayoutGrid, 
+  Network, 
+  X
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -48,6 +37,8 @@ import { CortexVisualizer } from './components/CortexVisualizer';
 import { NodeEditor } from './components/NodeEditor';
 import { ControlPanel } from './components/ControlPanel';
 import dagre from 'dagre';
+import { AppLayout } from './layout/AppLayout';
+import OverviewPage from './pages/OverviewPage';
 
 // --- Adapters ---
 
@@ -188,7 +179,7 @@ const panelTransition = {
 };
 
 export default function App() {
-  const { mode, setMode, rightPanelOpen, toggleRightPanel, selectedBrickId, setSelectedBrickId, selectedNodeId, setSelectedNodeId } = useNexusStore();
+  const { mode, rightPanelOpen, toggleRightPanel, selectedBrickId, setSelectedBrickId } = useNexusStore();
   const [chatMapping, setChatMapping] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -198,8 +189,8 @@ export default function App() {
       .catch(err => console.error('Failed to load chat mapping:', err));
   }, []);
   const [query, setQuery] = useState('');
-  const [useGenAI, setUseGenAI] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // const [useGenAI, setUseGenAI] = useState(false);
+  const useGenAI = false; // Hardcoded for now until UI restored
   const [controlPanelOpen, setControlPanelOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'Welcome to the **Nexus Workbench**. How can I help you explore the knowledge base today?' }
@@ -281,7 +272,7 @@ export default function App() {
       const res = await fetch('/jarvis/node/supersede', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ old_node_id: oldNodeId, new_node_id: newNodeId, reason, actor: 'user' })
+        body: JSON.stringify({ old_node_id: oldNodeId, new_node_id: newNodeId, reason: reason, actor: 'user' })
       });
       if (!res.ok) {
         const err = await res.json();
@@ -406,95 +397,65 @@ export default function App() {
     askMutation.mutate(userQ);
   };
 
-  const navItems = [
-    { id: 'ask', label: 'Ask & Recall', icon: MessageSquare },
-    { id: 'explore', label: 'Explore Wall', icon: LayoutGrid },
-    { id: 'visualize', label: 'Cortex Visualizer', icon: Maximize2 },
-    { id: 'audit', label: 'Observatory', icon: Activity },
-  ];
-
   return (
-    <div className="flex h-screen w-screen overflow-hidden flex-col md:flex-row">
-      {/* Sidebar - Desktop */}
-      <aside className="hidden md:flex w-16 flex-col items-center py-6 glass-panel border-r z-20">
-      {  
-      /*  <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center mb-10 shadow-[0_0_20px_rgba(0,128,255,0.4)]">
-          <Activity className="text-primary-foreground w-6 h-6" />
-        </div>
-        <nav className="flex flex-col gap-6">
-          {navItems.map((item) => (
-            <button 
-              key={item.id}
-              onClick={() => setMode(item.id as any)}
-              className={`p-3 rounded-xl transition-all ${mode === item.id ? 'bg-white/10 text-white shadow-inner' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
-              title={item.label}
-            >
-              <item.icon className="w-6 h-6" />
-            </button>
-          ))}
-        </nav>*/}
-
-        <div className="mt-auto flex flex-col items-center gap-4">
-           <button 
-             onClick={() => setControlPanelOpen(true)}
-             className="p-3 text-white/40 hover:text-white hover:bg-white/5 rounded-lg transition-all"
-             title="System Control Plane"
-           >
-             <Terminal className="w-6 h-6" />
-           </button>
-           <button className="p-3 text-white/40 hover:text-white">
-             <BookOpen className="w-6 h-6" />
-           </button>
-        </div>
-      </aside>
-
-      {/* Mobile Top Nav */}
-      <div className="md:hidden h-14 glass-panel border-b flex items-center justify-between px-4 z-30">
-        <div className="flex items-center gap-2">
-           <Activity className="text-primary w-5 h-5" />
-           <span className="font-bold tracking-tighter uppercase text-sm">Nexus Workbench</span>
-        </div>
-        <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-          {mobileMenuOpen ? <X /> : <Menu />}
-        </button>
-      </div>
-
-      {/* Mobile Dropdown Menu */}
-      <AnimatePresence>
-        {mobileMenuOpen && (
-          <motion.div 
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="md:hidden absolute top-14 left-0 w-full glass-panel border-b z-20 flex flex-col p-4 gap-4"
-          >
-            {navItems.map((item) => (
-               <button 
-                key={item.id}
-                onClick={() => { setMode(item.id as any); setMobileMenuOpen(false); }}
-                className={`flex items-center gap-4 p-3 rounded-lg ${mode === item.id ? 'bg-primary/20 text-white' : 'text-white/60'}`}
-               >
-                 <item.icon className="w-5 h-5" />
-                 <span className="font-semibold uppercase text-xs tracking-widest">{item.label}</span>
-               </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Main Stage */}
-      <main className="flex-1 flex flex-col relative bg-background overflow-hidden">
-        <header className="hidden md:flex h-16 border-b border-white/5 items-center justify-between px-8 glass-panel sticky top-0 z-10">
-       {/*   <div className="flex items-center gap-3">
-            <h1 className="font-bold text-lg tracking-tighter uppercase">
-              {mode === 'ask' ? 'Ask & Recall' : mode === 'explore' ? 'Knowledge Wall' : 'Visualizer'}
-            </h1>
-            <span className="px-2 py-0.5 rounded text-[10px] bg-primary/20 text-primary uppercase font-bold tracking-widest">Nexus v3</span>
-          </div>*/}
+    <AppLayout>
+      <div className="h-full w-full relative">
+        <AnimatePresence mode="wait">
           
-          <div className="flex items-center gap-4">
-             {mode === 'explore' && (
-              <div className="flex bg-black/40 rounded-lg p-1 border border-white/10">
+          {mode === 'overview' && (
+            <motion.div 
+              key="overview"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="h-full w-full"
+            >
+              <OverviewPage />
+            </motion.div>
+          )}
+
+          {mode === 'ingestion' && (
+            <motion.div key="ingestion" className="h-full w-full flex items-center justify-center text-white/40 uppercase tracking-widest text-sm">
+              Ingestion Pipeline (Pending Implementation)
+            </motion.div>
+          )}
+
+          {mode === 'cognition' && (
+             <motion.div 
+              key="visualize"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="h-full w-full p-4 md:p-8"
+            >
+              <div className="flex flex-col h-full gap-4 md:gap-6">
+                <div className="hidden md:block">
+                  <h2 className="text-2xl font-bold glitch-text uppercase tracking-widest" data-text="Cortex Visualizer">Cortex Visualizer</h2>
+                  <p className="text-xs text-white/40 font-mono-data mt-1">LOCKED RULES: MODE-1 ACTIVE // NON-GENAI TOPIC LINKING</p>
+                </div>
+                
+                <div className="flex-1 min-h-0">
+                  <CortexVisualizer 
+                    data={{
+                      nodes: graphData?.nodes || [],
+                      edges: graphData?.edges || [],
+                      type: 'graph'
+                    }} 
+                  />
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {mode === 'graph' && (
+             <motion.div 
+              key="explore"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="h-full w-full relative"
+            >
+              <div className="absolute top-4 right-4 z-10 flex bg-black/40 rounded-lg p-1 border border-white/10">
                 <button
                   onClick={() => setViewMode('wall')}
                   className={`p-1.5 rounded-md transition-all ${viewMode === 'wall' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}
@@ -505,172 +466,102 @@ export default function App() {
                 <button
                   onClick={() => setViewMode('graph')}
                   className={`p-1.5 rounded-md transition-all ${viewMode === 'graph' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}
-                  title="Graph View (Legacy)"
+                  title="Graph View"
                 >
                   <Network className="w-4 h-4" />
                 </button>
               </div>
-            )}
 
-            <div className="relative group">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20 group-focus-within:text-primary transition-colors" />
-              <input 
-                type="text" 
-                placeholder="Quick search..." 
-                className="bg-black/40 border border-white/5 rounded-md py-1.5 pl-10 pr-4 text-xs w-64 focus:outline-none focus:border-primary/50 transition-all font-mono-data uppercase tracking-widest"
-              />
-            </div>
-            <button 
-              onClick={() => toggleRightPanel()}
-              className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/60"
+              {viewMode === 'wall' ? (
+                <WallView 
+                  bricks={wallBricks} 
+                  selectedId={selectedBrickId} 
+                  onSelect={setSelectedBrickId} 
+                />
+              ) : (
+                <div className="absolute inset-0 w-full h-full"> 
+                  <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={onConnect}
+                    nodeTypes={nodeTypes}
+                    onNodeClick={(_, node) => setSelectedBrickId(node.id)}
+                    fitView
+                    minZoom={0.1}
+                  >
+                    <Background color="#222" gap={20} />
+                    <Controls />
+                  </ReactFlow>
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {mode === 'governance' && (
+            <motion.div key="governance" className="h-full w-full flex items-center justify-center text-white/40 uppercase tracking-widest text-sm">
+              Governance & Prompts (Pending Implementation)
+            </motion.div>
+          )}
+
+          {mode === 'recall' && (
+             <motion.div 
+              key="chat"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="h-full flex flex-col max-w-4xl mx-auto w-full px-4 md:px-6 pt-6"
             >
-              {rightPanelOpen ? <ChevronRight /> : <ChevronLeft />}
-            </button>
-          </div>
-        </header>
-
-        {/* Mobile Subheader */}
-        <div className="md:hidden flex items-center justify-between px-4 py-2 border-b border-white/5 glass-panel">
-            <h1 className="font-bold text-[10px] tracking-tighter uppercase text-white/60">
-               {mode === 'ask' ? 'Ask & Recall' : mode === 'explore' ? 'Wall' : 'Visualizer'}
-            </h1>
-            <button 
-              onClick={() => toggleRightPanel()}
-              className="p-1 hover:bg-white/5 rounded transition-colors text-white/60"
-            >
-               <Activity className={`w-4 h-4 ${selectedBrickId ? 'text-primary' : 'opacity-20'}`} />
-            </button>
-        </div>
-
-        <div className="flex-1 overflow-hidden relative">
-          <AnimatePresence mode="wait">
-            {mode === 'visualize' ? (
-              <motion.div 
-                key="visualize"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="h-full w-full p-4 md:p-8"
-              >
-                <div className="flex flex-col h-full gap-4 md:gap-6">
-                  <div className="hidden md:block">
-                    <h2 className="text-2xl font-bold glitch-text uppercase tracking-widest" data-text="Cortex Visualizer">Cortex Visualizer</h2>
-                    <p className="text-xs text-white/40 font-mono-data mt-1">LOCKED RULES: MODE-1 ACTIVE // NON-GENAI TOPIC LINKING</p>
-                  </div>
-                  
-                  <div className="flex-1 min-h-0">
-                    <CortexVisualizer 
-                      data={{
-                        nodes: graphData?.nodes || [],
-                        edges: graphData?.edges || [],
-                        type: 'graph'
-                      }} 
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            ) : mode === 'audit' ? (
-              <motion.div 
-                key="audit"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="h-full w-full flex justify-center"
-              >
-                <AuditPanel />
-              </motion.div>
-            ) : mode === 'ask' ? (
-              <motion.div 
-                key="chat"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                className="h-full flex flex-col max-w-4xl mx-auto w-full px-4 md:px-6"
-              >
-                <div className="flex-1 overflow-y-auto py-4 md:py-8 no-scrollbar">
-                  {messages.map((msg, i) => (
-                    <ChatMessage key={i} {...msg} />
-                  ))}
-                </div>
-                
-                <div className="pb-6 md:p-8">
-                  {/* GenAI Toggle */}
-                  <div className="flex items-center gap-4 md:gap-6 mb-4 px-2">
-                    <span className="text-[9px] md:text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">Mode:</span>
-                    <div className="flex bg-black/40 rounded-md p-1 border border-white/5">
-                      <button
-                        onClick={() => setUseGenAI(false)}
-                        className={`px-2 md:px-3 py-1 rounded text-[9px] md:text-[10px] font-bold transition-all uppercase tracking-widest ${!useGenAI ? 'bg-white/10 text-white shadow-inner' : 'text-white/30'}`}
-                      >
-                        STD
-                      </button>
-                      <button
-                        onClick={() => setUseGenAI(true)}
-                        className={`px-2 md:px-3 py-1 rounded text-[9px] md:text-[10px] font-bold transition-all uppercase tracking-widest flex items-center gap-2 ${useGenAI ? 'bg-primary/20 text-primary shadow-[0_0_10px_rgba(59,130,246,0.3)]' : 'text-white/30'}`}
-                      >
-                        <Activity className="w-3 h-3" />
-                        AI+
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="relative glass-panel rounded-lg p-2 shadow-2xl border-white/5">
-                    <textarea 
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      placeholder="CONSULT KNOWLEDGE ENGINE..."
-                      className="w-full bg-transparent p-3 md:p-4 pr-12 md:pr-16 focus:outline-none resize-none text-white/90 text-sm font-mono-data tracking-tight"
-                      rows={2}
-                      onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                    />
-                    <button 
-                      onClick={handleSend}
-                      className="absolute right-3 bottom-3 md:right-4 md:bottom-4 p-2 md:p-3 bg-primary rounded-md text-primary-foreground hover:scale-105 active:scale-95 transition-all shadow-[0_0_15px_rgba(0,128,255,0.5)]"
-                    >
-                      <Send className="w-4 h-4 md:w-5 md:h-5" />
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div 
-                key="explore"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="h-full w-full relative"
-              >
-                {viewMode === 'wall' ? (
-                  <WallView 
-                    bricks={wallBricks} 
-                    selectedId={selectedBrickId} 
-                    onSelect={setSelectedBrickId} 
+              <div className="flex-1 overflow-y-auto py-4 md:py-8 no-scrollbar">
+                {messages.map((msg, i) => (
+                  <ChatMessage key={i} {...msg} />
+                ))}
+              </div>
+              
+              <div className="pb-6 md:p-8">
+                <div className="relative glass-panel rounded-lg p-2 shadow-2xl border-white/5">
+                  <textarea 
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="CONSULT KNOWLEDGE ENGINE..."
+                    className="w-full bg-transparent p-3 md:p-4 pr-12 md:pr-16 focus:outline-none resize-none text-white/90 text-sm font-mono-data tracking-tight"
+                    rows={2}
+                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
                   />
-                ) : (
-                  <div className="absolute inset-0 w-full h-full"> {/* Wrapper Fixed */}
-                    <ReactFlow
-                      nodes={nodes}
-                      edges={edges}
-                      onNodesChange={onNodesChange}
-                      onEdgesChange={onEdgesChange}
-                      onConnect={onConnect}
-                      nodeTypes={nodeTypes}
-                      onNodeClick={(_, node) => setSelectedBrickId(node.id)}
-                      fitView
-                      minZoom={0.1}
-                    >
-                      <Background color="#222" gap={20} />
-                      <Controls />
-                    </ReactFlow>
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </main>
+                  <button 
+                    onClick={handleSend}
+                    className="absolute right-3 bottom-3 md:right-4 md:bottom-4 p-2 md:p-3 bg-primary rounded-md text-primary-foreground hover:scale-105 active:scale-95 transition-all shadow-[0_0_15px_rgba(0,128,255,0.5)]"
+                  >
+                    <Send className="w-4 h-4 md:w-5 md:h-5" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
-      {/* Right Panel - Context & Evidence (Desktop Sidebar / Mobile Overlay) */}
+          {mode === 'audit' && (
+             <motion.div 
+              key="audit"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="h-full w-full flex justify-center"
+            >
+              <AuditPanel />
+            </motion.div>
+          )}
+
+          {mode === 'health' && (
+            <motion.div key="health" className="h-full w-full flex items-center justify-center text-white/40 uppercase tracking-widest text-sm">
+              Detailed System Health (Pending Implementation)
+            </motion.div>
+          )}
+
+        </AnimatePresence>
+      </div>
+
+      {/* Right Panel - Context & Evidence (Overlay) */}
       <AnimatePresence>
         {rightPanelOpen && selectedBrickId && (
           <motion.aside 
@@ -679,8 +570,8 @@ export default function App() {
             exit={window.innerWidth < 768 ? { y: '100%' } : { x: 300, opacity: 0 }}
             transition={panelTransition}
             className={`
-               glass-panel border-white/10 flex flex-col overflow-hidden relative z-40
-               ${window.innerWidth < 768 ? 'fixed bottom-0 left-0 w-full h-[80vh] rounded-t-3xl border-t' : 'border-l w-[400px]'}
+               glass-panel border-white/10 flex flex-col overflow-hidden relative z-40 bg-background/95 backdrop-blur
+               ${window.innerWidth < 768 ? 'fixed bottom-0 left-0 w-full h-[80vh] rounded-t-3xl border-t' : 'absolute right-0 top-0 h-full border-l w-[400px] shadow-2xl'}
             `}
           >
             <div className="p-4 md:p-6 border-b border-white/5 flex items-center justify-between">
@@ -737,6 +628,6 @@ export default function App() {
       </AnimatePresence>
 
       <ControlPanel isOpen={controlPanelOpen} onClose={() => setControlPanelOpen(false)} />
-    </div>
+    </AppLayout>
   );
 }

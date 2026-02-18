@@ -1,9 +1,12 @@
 from flask import Flask, request, jsonify
+from flask_socketio import SocketIO, emit
 import os
 import sys
 import logging
 from datetime import datetime, timezone
 import json
+import sqlite3
+from typing import Dict, Any
 
 from nexus.utils_logging import setup_logging
 # Initialize logging as early as possible
@@ -36,7 +39,8 @@ try:
     from nexus.ask.recall import recall_bricks_readonly, get_recall_brick_metadata
     from nexus.cognition.assembler import assemble_topic
     from nexus.graph.manager import GraphManager
-    from nexus.config import REPO_ROOT
+    from nexus.graph.prompt_manager import PromptManager
+    from nexus.config import REPO_ROOT, GRAPH_DB_PATH
 except ImportError:
     # Fallback for development if not installed
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -44,7 +48,8 @@ except ImportError:
     from nexus.ask.recall import recall_bricks_readonly, get_recall_brick_metadata
     from nexus.cognition.assembler import assemble_topic
     from nexus.graph.manager import GraphManager
-    from nexus.config import REPO_ROOT
+    from nexus.graph.prompt_manager import PromptManager
+    from nexus.config import REPO_ROOT, GRAPH_DB_PATH
 
 # Import Celery Tasks
 try:
@@ -55,6 +60,7 @@ except ImportError:
     HAS_CELERY = False
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
 cortex_api = CortexAPI()
 
 @app.before_request
@@ -90,6 +96,135 @@ def log_response_info(response):
 
 def get_utc_now():
     return datetime.now(timezone.utc).isoformat()
+
+# --- Helper for direct DB access (Read-Only) ---
+def get_db_metrics():
+    """
+    Direct SQLite access for fast metric aggregation.
+    """
+    stats = {
+        "conversations": 0,
+        "source_runs": 0,
+        "bricks": 0,
+        "nodes": 0,
+        "edges": 0
+    }
+    
+    try:
+        conn = sqlite3.connect(GRAPH_DB_PATH)
+        c = conn.cursor()
+        
+        # Nodes count
+        c.execute("SELECT COUNT(*) FROM nodes")
+        stats["nodes"] = c.fetchone()[0]
+        
+        # Edges count
+        c.execute("SELECT COUNT(*) FROM edges")
+        stats["edges"] = c.fetchone()[0]
+        
+        # Bricks count (if using unified nodes table, count type='brick')
+        c.execute("SELECT COUNT(*) FROM nodes WHERE type='brick'")
+        stats["bricks"] = c.fetchone()[0]
+        
+        # Conversations (topics)
+        c.execute("SELECT COUNT(*) FROM nodes WHERE type='topic'")
+        stats["conversations"] = c.fetchone()[0]
+        
+        # Source runs (approximation using source nodes or sync metadata)
+        # Assuming 'source' nodes represent ingestion events or files
+        c.execute("SELECT COUNT(*) FROM nodes WHERE type='source'")
+        stats["source_runs"] = c.fetchone()[0]
+        
+        conn.close()
+    except Exception as e:
+        print(f"Error fetching DB metrics: {e}")
+        
+    return stats
+
+def get_lifecycle_distribution():
+    """
+    Aggregate lifecycle states from node JSON data.
+    """
+    distribution = {
+        "LOOSE": 0,
+        "FORMING": 0,
+        "FROZEN": 0,
+        "SUPERSEDED": 0,
+        "KILLED": 0
+    }
+    
+    try:
+        conn = sqlite3.connect(GRAPH_DB_PATH)
+        c = conn.cursor()
+        
+        # SQLite JSON extract for performance
+        query = """
+            SELECT json_extract(data, '$.lifecycle') as state, COUNT(*)
+            FROM nodes
+            WHERE type IN ('intent', 'brick')
+            GROUP BY state
+        """
+        c.execute(query)
+        rows = c.fetchall()
+        
+        for r in rows:
+            state = r[0]
+            count = r[1]
+            if state:
+                key = state.upper()
+                if key in distribution:
+                    distribution[key] = count
+                else:
+                    # Handle unknown states safely
+                    distribution[key] = count
+            else:
+                # Default to LOOSE if not specified
+                distribution["LOOSE"] += count
+                
+        conn.close()
+    except Exception as e:
+        print(f"Error fetching lifecycle stats: {e}")
+        
+    return distribution
+
+# --- Metrics Endpoints (Task 1) ---
+
+@app.route("/api/metrics/overview", methods=["GET"])
+def metrics_overview():
+    return jsonify(get_db_metrics())
+
+@app.route("/api/metrics/lifecycle", methods=["GET"])
+def metrics_lifecycle():
+    return jsonify(get_lifecycle_distribution())
+
+@app.route("/api/health", methods=["GET"])
+def system_health():
+    # Check DB
+    db_status = "healthy"
+    try:
+        conn = sqlite3.connect(GRAPH_DB_PATH)
+        conn.cursor().execute("SELECT 1")
+        conn.close()
+    except:
+        db_status = "unhealthy"
+        
+    # Check Redis/Celery (Simplified)
+    celery_status = "active" if HAS_CELERY else "disabled"
+    
+    # Check LLM (Simplified availability check)
+    llm_status = "available" 
+    # In a real scenario, we might ping Ollama or the configured LLM provider
+    
+    health = {
+        "db": db_status,
+        "redis": "healthy", # Assuming healthy if server runs, strictly would check connection
+        "celery_workers": 1 if HAS_CELERY else 0, # Placeholder
+        "llm": llm_status,
+        "last_sync": datetime.now(timezone.utc).isoformat() # Placeholder for actual sync timestamp
+    }
+    return jsonify(health)
+
+# --- Existing Endpoints ---
 
 @app.route("/jarvis/graph-index", methods=["GET"])
 def jarvis_graph_index():
@@ -494,6 +629,14 @@ def suggest_prompts(alert_id):
 def get_topic_coverage_score(topic_id):
     return jsonify(cortex_api.get_coverage_score(topic_id))
 
+@socketio.on("connect")
+def handle_connect():
+    emit("connected", {"status": "Audit stream connected"})
+
+@socketio.on("disconnect")
+def handle_disconnect():
+    print("Client disconnected from audit stream")
+
 if __name__ == "__main__":
     print("Prewarming embedder...")
     get_embedder()
@@ -508,4 +651,5 @@ if __name__ == "__main__":
 
     # For development purposes, run with debug true
     # In production, use a production-ready WSGI server like Gunicorn
-    app.run(debug=False, port=5001)
+    print("Starting Cortex Server with SocketIO on port 5001...")
+    socketio.run(app, debug=False, port=5001)

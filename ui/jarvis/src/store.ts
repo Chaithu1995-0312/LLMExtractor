@@ -1,22 +1,32 @@
 import { create } from 'zustand';
 
+export type AppMode = 
+  | 'overview' 
+  | 'ingestion' 
+  | 'cognition' 
+  | 'graph' 
+  | 'governance' 
+  | 'recall' 
+  | 'audit' 
+  | 'health';
+
 interface NexusState {
-  mode: 'ask' | 'explore' | 'visualize' | 'audit';
+  mode: AppMode;
   selectedBrickId: string | null;
   selectedNodeId: string | null;
   rightPanelOpen: boolean;
   
-  setMode: (mode: 'ask' | 'explore' | 'visualize' | 'audit') => void;
+  setMode: (mode: AppMode) => void;
   setSelectedBrickId: (id: string | null) => void;
   setSelectedNodeId: (id: string | null) => void;
   toggleRightPanel: (force?: boolean) => void;
 }
 
 export const useNexusStore = create<NexusState>((set) => ({
-  mode: 'ask',
+  mode: 'overview',
   selectedBrickId: null,
   selectedNodeId: null,
-  rightPanelOpen: true,
+  rightPanelOpen: false,
 
   setMode: (mode) => set({ mode }),
   setSelectedBrickId: (id) => set({ selectedBrickId: id, rightPanelOpen: id !== null }),

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { NexusNode, NexusNodeProps } from "./NexusNode";
+import AuditStreamPanel from "./AuditStreamPanel";
 
 interface WallViewProps {
   bricks: NexusNodeProps[];
@@ -35,8 +36,24 @@ export const WallView: React.FC<WallViewProps> = ({ bricks, selectedId, onSelect
   }, [activeTab]);
 
   return (
-    <div className="h-full w-full flex flex-col p-4 md:p-6 lg:p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#05080a] to-black overflow-hidden">
+    <div className="h-full w-full flex flex-col p-4 md:p-6 lg:p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#05080a] to-black overflow-hidden relative">
       
+      {/* Floating Audit Stream Panel */}
+      <div style={{
+          position: "fixed",
+          bottom: 20,
+          right: 20,
+          width: 400,
+          height: 400,
+          zIndex: 1000,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+          borderRadius: 12,
+          overflow: "hidden",
+          border: "1px solid rgba(255,255,255,0.1)"
+      }}>
+          <AuditStreamPanel />
+      </div>
+
       {/* Industrial Tab Navigation */}
       <div className="flex flex-wrap lg:flex-nowrap gap-2 lg:gap-4 mb-8 border-b border-white/5 pb-4">
         {tabs.map((tab) => (

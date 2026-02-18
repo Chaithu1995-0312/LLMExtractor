@@ -1,100 +1,45 @@
-# RULES_AND_INVARIANTS.md
+# Rules and Invariants
 
-## 1. Data & State Modeling
+## 1. Intent Lifecycle
+All `Intent` nodes must adhere to the following state transition logic (`IntentLifecycle` enum):
 
-### 1.1. Core Entities (Nodes in Knowledge Graph)
+| From State | To State | Trigger | Condition |
+| :--- | :--- | :--- | :--- |
+| **LOOSE** | **FORMING** | Initial Extraction | Created by `NexusCompiler` or `CognitiveExtractor`. |
+| **FORMING** | **FROZEN** | `promote_node` | Human approval via API (`jarvis_anchor`). |
+| **FORMING** | **KILLED** | `kill_node` | Human rejection or Hallucination check. |
+| **FROZEN** | **SUPERSEDED** | `supersede_node` | New node replaces old one (Versioning). |
+| **SUPERSEDED** | **KILLED** | - | *Illegal Transition* (Superseded nodes are immutable history). |
 
-*   **Intent**: Represents a core requirement, decision, or piece of knowledge. Has a `lifecycle` (LOOSE, FORMING, FROZEN, SUPERSEDED, KILLED) and `intent_type`.
-    *   **State Transition**: LOOSE -> FORMING -> FROZEN -> SUPERSEDED / KILLED.
-    *   **Transitions**: Managed by `GraphManager.promote_intent`.
-*   **Source**: Raw input content from which intents or other nodes are extracted (e.g., code snippets, markdown sections).
-*   **ScopeNode**: Defines the applicability or context of an Intent (e.g., "Frontend UI", "Database Layer").
-*   **Brick**: A granular piece of information, potentially a precursor to an Intent or a structural element identified during ingestion.
+## 2. Graph Integrity Rules
 
-### 1.2. Relationships (Edges in Knowledge Graph)
+### Edge Constraints
+1.  **Type Safety**: All edges must have a valid `EdgeType` from `src/nexus/graph/schema.py`.
+2.  **Directionality**:
+    -   `DERIVED_FROM`: Must point from `Intent` -> `Source`.
+    -   `APPLIES_TO`: Must point from `Intent` -> `ScopeNode`.
+3.  **No Loops**: The graph should generally be a DAG for `DERIVED_FROM` edges, though circular dependencies (e.g., `CONFLICTS_WITH`) are allowed between Intents.
 
-*   **DEPENDS_ON**: One intent/node relies on another.
-*   **CONFLICTS_WITH**: Two intents/nodes are mutually exclusive or contradictory.
-*   **OVERRIDES**: A newer or more specific intent/node replaces an older/general one. Crucially, the source must be `FROZEN`, and a target can only have one `OVERRIDES` edge. This ensures a clear lineage and prevents ambiguity.
-*   **SUPERSEDED_BY**: Indicates an older node has been replaced by a newer one. Both must be `FROZEN` at the time of superseding.
-*   **ASSEMBLED_IN**: Links a node (e.g., Brick, Intent) to a `Topic` (e.g., `nexus-server-sync`).
-*   **APPLIES_TO**: Links an `Intent` to a `ScopeNode`, defining its architectural applicability.
+### Node Invariants
+1.  **Immutability**: Once a node is `FROZEN`, its `statement` and `content` fields MUST NOT be modified. Updates require creating a new node and linking via `SUPERSEDED_BY`.
+2.  **Source Tracking**: Every `Intent` node must be traceable back to a `Source` node via a chain of `DERIVED_FROM` edges.
 
-## 2. State Transition Logic (Example: `IntentLifecycle`)
+## 3. Governance Invariants
 
-```mermaid
-stateDiagram-v2
-    [*] --> LOOSE
-    LOOSE --> FORMING: promote_intent
-    LOOSE --> KILLED: kill_node / promote_intent
-    FORMING --> FROZEN: promote_node_to_frozen / promote_intent
-    FORMING --> KILLED: kill_node / promote_intent
-    FROZEN --> SUPERSEDED: supersede_node
-    FROZEN --> KILLED: kill_node / promote_intent
-    SUPERSEDED --> KILLED: kill_node / promote_intent
-    KILLED --> [*]
-```
+### Prompt Safety
+1.  **Approved List**: `PromptManager` must only serve prompts with slugs present in the `approved_slugs` list (currently hardcoded in `prompt_manager.py`).
+2.  **Violation Behavior**: If a request is made for a non-existent or unapproved prompt, a `GovernanceViolation` exception must be raised (unless a fallback is explicitly allowed and logged).
 
-*   **LOOSE**: Initial state, raw or unverified. Can be promoted to `FORMING` or `KILLED`.
-*   **FORMING**: Under active review or refinement. Can be promoted to `FROZEN` or `KILLED`.
-*   **FROZEN**: Stable, verified, and active. Can be `SUPERSEDED` or `KILLED`. Requires an `APPLIES_TO` edge.
-*   **SUPERSEDED**: Replaced by a newer `FROZEN` intent. Can be `KILLED`.  
-*   **KILLED**: Explicitly rejected or deprecated. Terminal state.
+### Audit Trail
+1.  **Event Logging**: All state changes (Create, Update, Delete) and Prompt Fallbacks MUST emit an event to `phase3_audit_trace.jsonl` via `_log_audit_event`.
+2.  **Actor Attribution**: All API mutations must include an `actor` field (User ID or System Agent Name).
 
-## 3. Entry Point Mapping
+## 4. Agent Safety Rails
 
-### 3.1. CLI Entry Points
+### 🚫 Do Not Touch Zones
+-   **`src/nexus/graph/schema.py`**: Changing Enum values here breaks the database and UI compatibility. Consult architecture team before modifying.
+-   **`src/nexus/sync/db.py`**: The raw SQL/KV schema is rigid. Do not alter table structures without a migration script.
 
-*   **`src/nexus/cli/main.py`**:
-    *   **`main()`**: The primary entry point for CLI operations, likely parsing arguments to dispatch commands.
-
-### 3.2. API Entry Points
-
-*   **`services/cortex/api.py`**:
-    *   Contains FastAPI routes for exposing core Nexus functionalities.
-    *   **Examples**: `/intents`, `/graphs`, `/query` (inferred).
-*   **`services/cortex/server.py`**:
-    *   Sets up the FastAPI application and serves the API.
-
-### 3.3. Event Entry Points
-
-*   **`services/cortex/tasks.py`**:
-    *   Defines Celery tasks that can be triggered by events (e.g., new code commit, scheduled sync, user action).
-    *   **Examples**: `process_ingestion_task`, `synthesize_relationships_task` (inferred).
-*   **`src/nexus/sync/__main__.py`**:
-    *   Likely an entry point for kick-starting the synchronization pipeline, possibly triggered by a cron job or a file system event listener.
-
-## 4. Agent Safety Rails / Invariant Enforcers
-
-This section explicitly lists critical invariants and \\\\'Do Not Touch\\\\' zones for agentic operations.
-
-*   **Cycle Prevention (GraphManager)**: The `GraphManager._check_for_cycle` method explicitly prevents cycles when adding `OVERRIDES` or `SUPERSEDED_BY` edges. Any agent attempting to create a cyclical dependency of these types **MUST** be rejected.
-    *   **Location**: `src/nexus/graph/manager.py`
-    *   **Mandatory Verification Hook**: Agents proposing graph modifications MUST call `GraphManager.register_edge` and handle `ValueError` for cycle detection.
-
-*   **LLM Routing Monotonicity (LLMRouter)**: The `LLMRouter` (`src/nexus/sync/llm.py`) implements a canonical, frozen routing table for LLM calls based on `intent_class` and `cost_tolerance`. Agents **MUST NOT** bypass this router or attempt to dynamically modify its logic.
-    *   **Location**: `src/nexus/sync/llm.py` (`LLMRouter.route` method)
-    *   **Mandatory Verification Hook**: All LLM calls involving external models **MUST** go through `LLMClient.generate` which, in turn, uses `LLMRouter.route`.
-
-*   **Intent Lifecycle Monotonicity (GraphManager)**: Intents can only transition through predefined lifecycle states (`LOOSE` -> `FORMING` -> `FROZEN` -> `SUPERSEDED` / `KILLED`). Agents **MUST NOT** attempt to force invalid state transitions.
-    *   **Location**: `src/nexus/graph/manager.py` (`GraphManager.promote_intent` method)
-    *   **Mandatory Verification Hook**: Any agent modifying an `Intent` lifecycle **MUST** use `GraphManager.promote_intent` and respect the `ValueError` for invalid transitions.
-
-*   **`FROZEN` Intent Invariants (GraphManager)**: An `Intent` cannot be `FROZEN` without an `APPLIES_TO` edge connecting it to a `ScopeNode`. This ensures all \\\\'active\\\\' intents have a defined architectural applicability.
-    *   **Location**: `src/nexus/graph/manager.py` (`GraphManager.promote_intent` method)
-    *   **Mandatory Verification Hook**: Agents proposing to `FREEZE` an `Intent` **MUST** ensure an `APPLIES_TO` edge exists or create one beforehand.
-
-*   **Single `OVERRIDES` Target Invariant (GraphManager)**: A target node can only be `OVERRIDDEN` by a single source node. This prevents ambiguous overrides.
-    *   **Location**: `src/nexus/graph/manager.py` (`GraphManager.add_typed_edge` method, for `EdgeType.OVERRIDES`)
-    *   **Mandatory Verification Hook**: Agents attempting to create `OVERRIDES` edges **MUST** handle `ValueError` if the target is already overridden.
-
-*   **Strict Structured Ingestion (StructuredIngestLLM)**: For critical ingestion tasks (`INGEST_EXTRACT` intent), agents **MUST** use `StructuredIngestLLM` to ensure deterministic, grammar-constrained output. Direct use of `LLMClient.generate` for this intent is forbidden.
-    *   **Location**: `src/nexus/sync/llm.py` (`LLMClient.generate` and `StructuredIngestLLM`)
-    *   **Mandatory Verification Hook**: Agents performing ingestion of structured data **MUST** utilize `StructuredIngestLLM.extract`.
-
-*   **Economic Cognition Invariant (GraphManager)**: Any operation that invokes a non-free LLM model (`ModelTier.L2`, `L3`) **MUST** emit explicit cost metadata in the audit log.
-    *   **Location**: `src/nexus/graph/manager.py` (`GraphManager._log_audit_event`)
-    *   **Mandatory Verification Hook**: When logging audit events for paid LLM calls, agents **MUST** populate `cost_usd`, `tokens_in`, and `tokens_out` parameters.
-
----
-
+### ✅ Mandatory Verification Hooks
+-   **Pre-Commit**: Run `scripts/test_full_loop.py` before pushing changes to Core Logic.
+-   **Schema Changes**: Must be accompanied by an update to `src/nexus/graph/schema_sync.sql`.

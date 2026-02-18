@@ -365,6 +365,15 @@ class GraphManager:
         except Exception as e:
             print(f"ERROR: Failed to write to audit log: {e}")
 
+        # Broadcast live event via SocketIO if available
+        try:
+            from services.cortex.server import socketio
+            if socketio:
+                socketio.emit("audit_event", event)
+        except (ImportError, RuntimeError):
+            # Fail silently if socketio is not available or if called outside application context
+            pass
+
     def kill_node(self, node_id: str, reason: str, actor: str):
         """
         Explicitly reject a node, moving it to KILLED lifecycle.
