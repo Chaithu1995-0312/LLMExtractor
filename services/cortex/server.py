@@ -264,7 +264,15 @@ def jarvis_graph_index():
             "anchor_overrides": overrides
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"[graph-index] Backend error: {e}")
+        # Return a valid empty graph so the UI doesn't enter a 500 retry loop
+        return jsonify({
+            "nodes": [],
+            "edges": [],
+            "index_content": "",
+            "anchor_overrides": [],
+            "_error": str(e)
+        }), 200
 
 @app.route("/jarvis/anchor", methods=["POST"])
 def jarvis_anchor():

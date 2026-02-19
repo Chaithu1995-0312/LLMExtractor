@@ -5,6 +5,7 @@ PACKAGE_ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(PACKAGE_ROOT))
 
 # Data paths
+DATABASE_URL = os.getenv("DATABASE_URL")
 DATA_DIR = os.path.join(REPO_ROOT, "data")
 LOGS_DIR = os.path.join(REPO_ROOT, "logs")
 INDEX_PATH = os.path.join(DATA_DIR, "index", "index.faiss")

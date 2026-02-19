@@ -1,187 +1,365 @@
-import { useEffect, useState } from 'react';
-import { 
-  MessageSquare, 
-  Database, 
-  Box, 
-  Network, 
-  Share2 
-} from 'lucide-react';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
+// ============================================================
+//  OverviewPage — Main JARVIS Dashboard (matches concept image)
+//  Layout: 2 rows × 3 columns
+//  Row 1: [Ingestion Pipeline] [Knowledge Graph] [Intent Focus]
+//  Row 2: [Live Stream] [Synthesis Engine] [Audit Log]
+// ============================================================
 
-// --- Types ---
-interface OverviewMetrics {
-  conversations: number;
-  source_runs: number;
-  bricks: number;
-  nodes: number;
-  edges: number;
-}
+import { useEffect, useMemo, useState, memo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import ReactFlow, {
+  Background,
+  Controls,
+  applyNodeChanges,
+  applyEdgeChanges,
+  Node,
+  Edge,
+  NodeChange,
+  EdgeChange,
+  NodeProps,
+  Handle,
+  Position,
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+import dagre from 'dagre';
 
-interface LifecycleMetrics {
-  LOOSE: number;
-  FORMING: number;
-  FROZEN: number;
-  SUPERSEDED: number;
-  KILLED: number;
-}
+import { IngestionPipelinePanel } from '../components/IngestionPipelinePanel';
+import { IntentFocusPanel } from '../components/IntentFocusPanel';
+import { LiveCognitiveStreamPanel } from '../components/LiveCognitiveStreamPanel';
+import { SynthesisEnginePanel } from '../components/SynthesisEnginePanel';
+import { AuditLogPanel } from '../components/AuditLogPanel';
+import { useSystemStore } from '../state/system-store';
+import { hydrateFromApiResponse } from '../reducers/graph-reducer';
 
-interface SystemHealth {
-  db: 'healthy' | 'unhealthy';
-  redis: 'healthy' | 'unhealthy';
-  celery_workers: number;
-  llm: 'available' | 'degraded';
-  last_sync: string;
-}
-
-// --- Components ---
-
-const KPICard = ({ title, value, icon: Icon, color }: { title: string; value: number; icon: any; color: string }) => (
-  <div className="glass-panel p-4 rounded-xl flex flex-col justify-between border-white/5 bg-white/5 relative overflow-hidden group">
-    <div className={`absolute -right-4 -top-4 w-24 h-24 rounded-full opacity-10 transition-transform group-hover:scale-150 ${color}`} />
-    <div className="flex justify-between items-start z-10">
-      <div>
-        <p className="text-[10px] uppercase font-bold tracking-widest text-white/40 mb-1">{title}</p>
-        <h3 className="text-3xl font-mono-data font-bold text-white/90">{value.toLocaleString()}</h3>
-      </div>
-      <div className={`p-2 rounded-lg bg-white/5 ${color.replace('bg-', 'text-')}`}>
-        <Icon className="w-5 h-5" />
-      </div>
-    </div>
-  </div>
-);
-
-const COLORS = {
-  LOOSE: '#9CA3AF',      // Gray
-  FORMING: '#FBBF24',    // Amber
-  FROZEN: '#10B981',     // Emerald
-  SUPERSEDED: '#6366F1', // Indigo
-  KILLED: '#EF4444',     // Red
+// ─── Lifecycle colours ─────────────────────────────────────────
+const LC_COLORS: Record<string, { node: string; border: string; glow: string; text: string }> = {
+  LOOSE:     { node: '#0f1a24', border: '#475569', glow: 'none',                        text: '#94a3b8' },
+  FORMING:   { node: '#0d1f28', border: '#22d3ee', glow: '0 0 12px rgba(34,211,238,0.5)', text: '#22d3ee' },
+  FROZEN:    { node: '#1a1500', border: '#fbbf24', glow: '0 0 12px rgba(251,191,36,0.5)', text: '#fbbf24' },
+  SUPERSEDED:{ node: '#130d1e', border: '#a78bfa', glow: '0 0 8px rgba(167,139,250,0.4)', text: '#a78bfa' },
+  KILLED:    { node: '#1a0808', border: '#ef4444', glow: '0 0 10px rgba(239,68,68,0.5)',  text: '#f87171' },
 };
 
-export default function OverviewPage() {
-  const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
-  const [lifecycle, setLifecycle] = useState<LifecycleMetrics | null>(null);
-  const [health, setHealth] = useState<SystemHealth | null>(null);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [mRes, lRes, hRes] = await Promise.all([
-          fetch('/api/metrics/overview'),
-          fetch('/api/metrics/lifecycle'),
-          fetch('/api/health')
-        ]);
-        
-        if (mRes.ok) setMetrics(await mRes.json());
-        if (lRes.ok) setLifecycle(await lRes.json());
-        if (hRes.ok) setHealth(await hRes.json());
-      } catch (e) {
-        console.error("Failed to fetch overview data", e);
-      }
-    };
-
-    fetchData();
-    const interval = setInterval(fetchData, 10000); // 10s refresh
-    return () => clearInterval(interval);
-  }, []);
-
-  if (!metrics || !lifecycle || !health) {
-    return <div className="h-full flex items-center justify-center text-white/30 text-xs uppercase tracking-widest">Loading System Telemetry...</div>;
-  }
-
-  const lifecycleData = Object.entries(lifecycle).map(([name, value]) => ({ name, value }));
+// ─── Mini graph node ───────────────────────────────────────────
+const GraphNode = memo(({ data }: NodeProps) => {
+  const lc: string = (data.lifecycle || data.status || 'LOOSE').toUpperCase();
+  const cols = LC_COLORS[lc] ?? LC_COLORS.LOOSE;
+  const label: string = data.label || data.statement || data.node_id || '?';
+  const short = label.length > 28 ? label.slice(0, 27) + '…' : label;
 
   return (
-    <div className="p-8 h-full overflow-y-auto no-scrollbar space-y-8">
-      
-      {/* KPI Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <KPICard title="Conversations" value={metrics.conversations} icon={MessageSquare} color="bg-blue-500" />
-        <KPICard title="Source Runs" value={metrics.source_runs} icon={Database} color="bg-purple-500" />
-        <KPICard title="Raw Bricks" value={metrics.bricks} icon={Box} color="bg-orange-500" />
-        <KPICard title="Graph Nodes" value={metrics.nodes} icon={Network} color="bg-emerald-500" />
-        <KPICard title="Edges" value={metrics.edges} icon={Share2} color="bg-pink-500" />
+    <div
+      style={{
+        background: cols.node,
+        border: `1px solid ${cols.border}`,
+        borderRadius: 8,
+        padding: '6px 10px',
+        minWidth: 140,
+        maxWidth: 180,
+        boxShadow: cols.glow,
+        cursor: 'pointer',
+      }}
+    >
+      <Handle type="target" position={Position.Top} style={{ background: cols.border, width: 6, height: 6 }} />
+      <div style={{ fontSize: 7, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>
+        {lc}
+      </div>
+      <div style={{ fontSize: 10, fontWeight: 700, color: cols.text, lineHeight: 1.3 }}>
+        {short}
+      </div>
+      <Handle type="source" position={Position.Bottom} style={{ background: cols.border, width: 6, height: 6 }} />
+    </div>
+  );
+});
+GraphNode.displayName = 'GraphNode';
+
+const NODE_TYPES = { nexus: GraphNode };
+
+// ─── Dagre layout ─────────────────────────────────────────────
+function layoutGraph(rawNodes: Node[], rawEdges: Edge[]) {
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: 'TB', ranksep: 60, nodesep: 30 });
+  rawNodes.forEach((n) => g.setNode(n.id, { width: 180, height: 80 }));
+  rawEdges.forEach((e) => g.setEdge(e.source, e.target));
+  dagre.layout(g);
+  return {
+    nodes: rawNodes.map((n) => {
+      const pos = g.node(n.id);
+      return { ...n, position: { x: pos.x - 90, y: pos.y - 40 } };
+    }),
+    edges: rawEdges,
+  };
+}
+
+// ─── Lifecycle legend dot ──────────────────────────────────────
+function LegendDot({ label, color }: { label: string; color: string }) {
+  return (
+    <div className="flex items-center gap-1">
+      <div
+        className="rounded-full"
+        style={{
+          width: 7,
+          height: 7,
+          background: color,
+          boxShadow: `0 0 4px ${color}`,
+        }}
+      />
+      <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
+// ─── Centre Knowledge Graph panel ─────────────────────────────
+function KnowledgeGraphPanel() {
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const { data: graphData } = useQuery({
+    queryKey: ['graph-index'],
+    queryFn: async () => {
+      const res = await fetch('/jarvis/graph-index');
+      if (!res.ok) throw new Error('graph fetch failed');
+      return res.json();
+    },
+    refetchInterval: 15_000,
+  });
+
+  useEffect(() => {
+    if (!graphData) return;
+    const rawNodes: any[] = Array.isArray(graphData.nodes) ? graphData.nodes : (graphData.nodes?.nodes ?? []);
+    const rawEdges: any[] = Array.isArray(graphData.edges) ? graphData.edges : (graphData.edges?.edges ?? []);
+
+    hydrateFromApiResponse({ nodes: rawNodes, edges: rawEdges });
+
+    const rfNodes: Node[] = rawNodes.map((n: any) => ({
+      id: n.id ?? n.node_id,
+      type: 'nexus',
+      data: { ...n, label: n.statement ?? n.label ?? n.id },
+      position: { x: 0, y: 0 },
+    }));
+
+    const rfEdges: Edge[] = rawEdges.map((e: any) => ({
+      id: `${e.source ?? e.from}-${e.target ?? e.to}`,
+      source: e.source ?? e.from,
+      target: e.target ?? e.to,
+      label: e.type,
+      style: { stroke: 'rgba(34,211,238,0.3)', strokeWidth: 1 },
+      labelStyle: { fontSize: 8, fill: 'rgba(255,255,255,0.3)' },
+    }));
+
+    const { nodes: ln, edges: le } = layoutGraph(rfNodes, rfEdges);
+    setNodes((prev) =>
+      ln.map((n) => {
+        const existing = prev.find((p) => p.id === n.id);
+        return existing ? { ...n, position: existing.position } : n;
+      })
+    );
+    setEdges(le);
+  }, [graphData]);
+
+  return (
+    <div
+      className="flex flex-col h-full relative border-r"
+      style={{ background: 'rgba(3,5,9,0.97)', borderColor: 'rgba(255,255,255,0.06)' }}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center justify-between px-3 py-2 border-b shrink-0"
+        style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+      >
+        <span
+          className="text-[9px] font-bold uppercase tracking-[0.25em]"
+          style={{ color: 'rgba(255,255,255,0.3)' }}
+        >
+          Knowledge Graph
+        </span>
+        <div className="flex items-center gap-3">
+          <input
+            placeholder="Search Nodes / Intents"
+            className="px-2 py-0.5 rounded border text-[9px] outline-none"
+            style={{
+              background: 'rgba(255,255,255,0.03)',
+              borderColor: 'rgba(255,255,255,0.1)',
+              color: 'rgba(255,255,255,0.5)',
+              width: 160,
+            }}
+          />
+          <span
+            className="text-[8px] px-2 py-0.5 rounded border"
+            style={{ color: 'rgba(255,255,255,0.3)', borderColor: 'rgba(255,255,255,0.1)' }}
+          >
+            Filter by: Lifecycle ▾
+          </span>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Lifecycle Chart */}
-        <div className="glass-panel p-6 rounded-xl col-span-2 flex flex-col">
-          <h3 className="text-xs uppercase font-bold tracking-widest text-white/40 mb-6">Intent Lifecycle Distribution</h3>
-          <div className="h-64 w-full flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={lifecycleData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {lifecycleData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[entry.name as keyof typeof COLORS] || '#fff'} stroke="none" />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#111', borderColor: '#333', borderRadius: '8px' }}
-                  itemStyle={{ color: '#fff', fontSize: '12px', textTransform: 'uppercase' }}
-                />
-                <Legend 
-                  layout="vertical" 
-                  verticalAlign="middle" 
-                  align="right"
-                  iconType="circle"
-                  formatter={(value: string) => <span className="text-xs font-bold text-white/60 ml-2">{value}</span>}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+      {/* Graph */}
+      <div className="flex-1 min-h-0 relative">
+        {nodes.length === 0 ? (
+          <div
+            className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-widest"
+            style={{ color: 'rgba(255,255,255,0.12)' }}
+          >
+            No graph data — Run Sync to populate
           </div>
-        </div>
+        ) : (
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={(changes: NodeChange[]) =>
+              setNodes((ns) => applyNodeChanges(changes, ns))
+            }
+            onEdgesChange={(changes: EdgeChange[]) =>
+              setEdges((es) => applyEdgeChanges(changes, es))
+            }
+            nodeTypes={NODE_TYPES}
+            onNodeClick={(_, node) => setSelected(node.id)}
+            fitView
+            minZoom={0.1}
+            style={{ background: 'transparent' }}
+          >
+            <Background color="rgba(255,255,255,0.03)" gap={20} />
+            <Controls
+              style={{
+                background: 'rgba(4,8,14,0.8)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 6,
+              }}
+            />
+          </ReactFlow>
+        )}
+      </div>
 
-        {/* System Health Detailed */}
-        <div className="glass-panel p-6 rounded-xl space-y-6">
-          <h3 className="text-xs uppercase font-bold tracking-widest text-white/40 mb-4">Infrastructure Status</h3>
-          
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
-              <span className="text-sm font-bold text-white/80">Database</span>
-              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${health.db === 'healthy' ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
-                {health.db}
-              </span>
-            </div>
+      {/* Legend */}
+      <div
+        className="flex items-center gap-4 px-3 py-1.5 border-t shrink-0"
+        style={{ borderColor: 'rgba(255,255,255,0.05)' }}
+      >
+        <LegendDot label="Loose"     color="#475569" />
+        <LegendDot label="Forming"   color="#22d3ee" />
+        <LegendDot label="Frozen"    color="#fbbf24" />
+        <LegendDot label="Conflicts" color="#fb923c" />
+        <LegendDot label="Killed"    color="#ef4444" />
+      </div>
+    </div>
+  );
+}
 
-            <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
-              <span className="text-sm font-bold text-white/80">Redis Queue</span>
-              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${health.redis === 'healthy' ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
-                {health.redis}
-              </span>
-            </div>
+// ─── Selected intent state (shared between graph + focus panel) ──
+function useSelectedIntent(graphData: any) {
+  return useMemo(() => {
+    if (!graphData) return null;
+    const rawNodes: any[] = Array.isArray(graphData.nodes) ? graphData.nodes : (graphData.nodes?.nodes ?? []);
+    // Pick the first FROZEN or FORMING node as the "focused" intent
+    const frozen = rawNodes.find((n: any) => (n.lifecycle ?? n.status ?? '').toUpperCase() === 'FROZEN');
+    const forming = rawNodes.find((n: any) => (n.lifecycle ?? n.status ?? '').toUpperCase() === 'FORMING');
+    const candidate = frozen ?? forming ?? rawNodes[0];
+    if (!candidate) return null;
+    const lc = ((candidate.lifecycle ?? candidate.status ?? 'LOOSE').toUpperCase()) as any;
+    return {
+      intentId: candidate.id ?? candidate.node_id ?? '—',
+      title: candidate.statement ?? candidate.label ?? 'Untitled',
+      status: lc,
+      confidence: Math.round((candidate.confidence ?? 0.5) * 100),
+      sourceChain: ['SRC-77', 'BRK-12', candidate.id?.slice(0, 6) ?? 'I-???'],
+      conflicts: (rawNodes as any[])
+        .filter((n: any) => (n.lifecycle ?? '').toUpperCase() === 'LOOSE' && n.id !== candidate.id)
+        .slice(0, 2)
+        .map((n: any) => ({ id: n.id?.slice(0, 6) ?? '??', label: n.statement?.slice(0, 20) ?? '—' })),
+    };
+  }, [graphData]);
+}
 
-            <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
-              <span className="text-sm font-bold text-white/80">Celery Workers</span>
-              <span className="px-2 py-1 rounded text-[10px] font-bold uppercase bg-blue-500/20 text-blue-500">
-                {health.celery_workers} Active
-              </span>
-            </div>
+// ─── Main OverviewPage ─────────────────────────────────────────
+export default function OverviewPage() {
+  const { cognitivePhase } = useSystemStore();
+  const [isSyncing, setIsSyncing] = useState(false);
 
-            <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
-              <span className="text-sm font-bold text-white/80">LLM Engine</span>
-              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${health.llm === 'available' ? 'bg-green-500/20 text-green-500' : 'bg-amber-500/20 text-amber-500'}`}>
-                {health.llm}
-              </span>
-            </div>
+  const stageMap: Record<string, number> = {
+    IDLE: -1, SYNCING: 0, COMPILING: 2, SYNTHESIZING: 3, STREAMING: 4,
+  };
+  const currentStage = stageMap[cognitivePhase] ?? -1;
 
-            <div className="mt-8 pt-4 border-t border-white/10">
-              <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Last Sync Timestamp</p>
-              <p className="font-mono-data text-xs text-white/80">
-                {new Date(health.last_sync).toLocaleString()}
-              </p>
-            </div>
-          </div>
-        </div>
+  const handleRunSync = async () => {
+    setIsSyncing(true);
+    try {
+      await fetch('/api/sync/run', { method: 'POST' });
+    } catch {}
+    setTimeout(() => setIsSyncing(false), 5000);
+  };
 
+  const { data: graphData } = useQuery({
+    queryKey: ['graph-index'],
+    queryFn: async () => {
+      const res = await fetch('/jarvis/graph-index');
+      if (!res.ok) throw new Error('graph fetch failed');
+      return res.json();
+    },
+    refetchInterval: 15_000,
+  });
+
+  const focusedIntent = useSelectedIntent(graphData);
+
+  return (
+    <div
+      className="h-full w-full"
+      style={{
+        display: 'grid',
+        gridTemplateRows: '1fr 220px',
+        gridTemplateColumns: '100%',
+        background: '#030609',
+      }}
+    >
+      {/* ── TOP ROW: 3 columns ── */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '220px 1fr 280px',
+          minHeight: 0,
+        }}
+      >
+        {/* Left: Ingestion Pipeline */}
+        <IngestionPipelinePanel
+          onRunSync={handleRunSync}
+          isSyncing={isSyncing}
+          currentStage={currentStage}
+        />
+
+        {/* Center: Knowledge Graph */}
+        <KnowledgeGraphPanel />
+
+        {/* Right: Intent Focus */}
+        <IntentFocusPanel
+          intentId={focusedIntent?.intentId}
+          title={focusedIntent?.title}
+          status={focusedIntent?.status}
+          confidence={focusedIntent?.confidence ?? 0}
+          sourceChain={focusedIntent?.sourceChain ?? []}
+          conflicts={focusedIntent?.conflicts ?? []}
+        />
+      </div>
+
+      {/* ── BOTTOM ROW: 3 columns ── */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr 1fr',
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          minHeight: 0,
+        }}
+      >
+        {/* Left: Live Cognitive Stream */}
+        <LiveCognitiveStreamPanel />
+
+        {/* Center: Synthesis Engine */}
+        <SynthesisEnginePanel />
+
+        {/* Right: Audit Log + System Risk */}
+        <AuditLogPanel />
       </div>
     </div>
   );

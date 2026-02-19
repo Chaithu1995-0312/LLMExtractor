@@ -1,13 +1,21 @@
 import json
 import tiktoken
+import os
 from pathlib import Path
 from src.nexus.config import COGNITIVE_SHARD_LIMIT
+from src.nexus.db import get_adapter
+from src.nexus.db.init_db import init_database
 
 INPUT = "conversations.json"
-OUT_DIR = "cognitive_shards"
 MAX_TOKENS = COGNITIVE_SHARD_LIMIT
 
-Path(OUT_DIR).mkdir(exist_ok=True)
+# Initialize DB connection
+try:
+    init_database()
+except Exception as e:
+    print(f"DB Init Warning: {e}")
+
+db = get_adapter()
 
 enc = tiktoken.get_encoding("cl100k_base")
 
@@ -28,13 +36,21 @@ def serialize_msg(m):
     return f"{role}: {content_text}"
 
 print(f"Loading {INPUT}...")
-with open(INPUT, "r", encoding="utf-8") as f:
-    conversations = json.load(f)
+try:
+    with open(INPUT, "r", encoding="utf-8") as f:
+        conversations = json.load(f)
+except FileNotFoundError:
+    print(f"Input file {INPUT} not found. Skipping shard generation.")
+    conversations = []
 
 shard_id = 0
 total_msgs_processed = 0
 
 print(f"Processing {len(conversations)} conversations...")
+
+# Clear existing shards? 
+# The script seems to be a "full rebuild" tool.
+# db.execute("DELETE FROM sync.cognitive_shards") # Safer to not delete unless requested.
 
 for conv in conversations:
     # Conversations usually have a mapping of message IDs to message objects
@@ -56,11 +72,11 @@ for conv in conversations:
         t_tokens = token_count(t)
 
         if buffer_tokens + t_tokens > MAX_TOKENS and buffer:
-            with open(f"{OUT_DIR}/shard_{shard_id}.jsonl", "w", encoding="utf-8") as o:
-                o.write(json.dumps({
-                    "shard_id": shard_id,
-                    "text": "\n".join(buffer)
-                }))
+            shard_content = "\n".join(buffer)
+            db.execute(
+                "INSERT INTO sync.cognitive_shards (shard_id, text, created_at) VALUES (%s, %s, NOW())",
+                (shard_id, shard_content)
+            )
             shard_id += 1
             buffer = []
             buffer_tokens = 0
@@ -69,11 +85,11 @@ for conv in conversations:
         buffer_tokens += t_tokens
 
     if buffer:
-        with open(f"{OUT_DIR}/shard_{shard_id}.jsonl", "w", encoding="utf-8") as o:
-            o.write(json.dumps({
-                "shard_id": shard_id,
-                "text": "\n".join(buffer)
-            }))
+        shard_content = "\n".join(buffer)
+        db.execute(
+            "INSERT INTO sync.cognitive_shards (shard_id, text, created_at) VALUES (%s, %s, NOW())",
+            (shard_id, shard_content)
+        )
         shard_id += 1
 
-print(f"Created {shard_id} cognitive shards from {total_msgs_processed} messages.")
+print(f"Created {shard_id} cognitive shards from {total_msgs_processed} messages in Database.")

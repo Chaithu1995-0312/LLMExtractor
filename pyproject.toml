@@ -16,7 +16,8 @@ dependencies = [
     "tiktoken",
     "unstructured",
     "celery",
-    "redis"
+    "redis",
+    "psycopg2-binary"
 ]
 
 [project.scripts]

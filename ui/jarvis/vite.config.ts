@@ -25,7 +25,13 @@ export default defineConfig({
         target: 'http://localhost:5001',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api/, '/jarvis'),
+        // No rewrite — /api/* is forwarded as-is to Flask's /api/* routes
+      },
+      '/socket.io': {
+        target: 'http://localhost:5001',
+        changeOrigin: true,
+        secure: false,
+        ws: true, // Enable WebSocket proxying for Socket.IO
       },
     },
   },

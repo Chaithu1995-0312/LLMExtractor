@@ -1,76 +1,59 @@
-import sqlite3
 import os
 import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
-from nexus.config import GRAPH_DB_PATH, SYNC_SCHEMA_PATH
+from nexus.db import get_adapter
+from nexus.db.init_db import init_database
 
 class SyncDatabase:
     def __init__(self, db_path: str = None):
-        self.db_path = db_path or GRAPH_DB_PATH
+        # db_path is ignored in Postgres implementation as it uses DATABASE_URL
+        self.db = get_adapter()
         self._init_db()
 
     def _init_db(self):
         """Initialize the database with the schema."""
-        conn = self._get_conn()
         try:
-            with open(SYNC_SCHEMA_PATH, "r", encoding="utf-8") as f:
-                schema_sql = f.read()
-            conn.executescript(schema_sql)
-            conn.commit()
+            init_database()
         except Exception as e:
             print(f"[SyncDB] Error initializing database: {e}")
-        finally:
-            conn.close()
-
-    def _get_conn(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path)
 
     # --- TOPICS ---
 
     def create_topic(self, topic_id: str, display_name: str, definition: Dict, ordering_rule: str = "chronological"):
-        conn = self._get_conn()
-        try:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO topics (id, display_name, definition_json, ordering_rule, state)
-                VALUES (?, ?, ?, ?, 'ACTIVE')
-                """,
-                (topic_id, display_name, json.dumps(definition), ordering_rule)
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        self.db.execute(
+            """
+            INSERT INTO sync.topics (id, display_name, definition_json, ordering_rule, state)
+            VALUES (%s, %s, %s, %s, 'ACTIVE')
+            ON CONFLICT (id) DO NOTHING
+            """,
+            (topic_id, display_name, json.dumps(definition), ordering_rule)
+        )
 
     def get_topic(self, topic_id: str) -> Optional[Dict]:
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, display_name, definition_json, ordering_rule, state FROM topics WHERE id = ?", (topic_id,))
-        row = cursor.fetchone()
-        conn.close()
+        row = self.db.fetch_one(
+            "SELECT id, display_name, definition_json, ordering_rule, state FROM sync.topics WHERE id = %s",
+            (topic_id,)
+        )
         
         if row:
             return {
                 "id": row[0],
                 "display_name": row[1],
-                "definition": json.loads(row[2]),
+                "definition": row[2] if isinstance(row[2], dict) else json.loads(row[2]),
                 "ordering_rule": row[3],
                 "state": row[4]
             }
         return None
     
     def get_all_topics(self) -> List[Dict]:
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, display_name, definition_json, ordering_rule, state FROM topics")
-        rows = cursor.fetchall()
-        conn.close()
+        rows = self.db.fetch_all("SELECT id, display_name, definition_json, ordering_rule, state FROM sync.topics")
         
         return [{
             "id": row[0],
             "display_name": row[1],
-            "definition": json.loads(row[2]),
+            "definition": row[2] if isinstance(row[2], dict) else json.loads(row[2]),
             "ordering_rule": row[3],
             "state": row[4]
         } for row in rows]
@@ -78,30 +61,25 @@ class SyncDatabase:
     # --- SOURCE RUNS ---
 
     def register_run(self, run_id: str, raw_content: Any):
-        conn = self._get_conn()
-        try:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO source_runs (id, raw_content, status)
-                VALUES (?, ?, 'CLOSED')
-                """,
-                (run_id, json.dumps(raw_content))
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        self.db.execute(
+            """
+            INSERT INTO sync.source_runs (id, raw_content, status)
+            VALUES (%s, %s, 'CLOSED')
+            ON CONFLICT (id) DO NOTHING
+            """,
+            (run_id, json.dumps(raw_content))
+        )
 
     def get_run(self, run_id: str) -> Optional[Dict]:
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, raw_content, status, last_processed_index FROM source_runs WHERE id = ?", (run_id,))
-        row = cursor.fetchone()
-        conn.close()
+        row = self.db.fetch_one(
+            "SELECT id, raw_content, status, last_processed_index FROM sync.source_runs WHERE id = %s",
+            (run_id,)
+        )
         
         if row:
             return {
                 "id": row[0],
-                "raw_content": json.loads(row[1]),
+                "raw_content": row[1] if isinstance(row[1], dict) else json.loads(row[1]),
                 "status": row[2],
                 "last_processed_index": row[3]
             }
@@ -109,27 +87,31 @@ class SyncDatabase:
 
     def update_run_boundary(self, run_id: str, last_index: int):
         # BOUNDARY ADVANCEMENT — FROZEN
-        conn = self._get_conn()
-        try:
-            conn.execute(
-                "UPDATE source_runs SET last_processed_index = ? WHERE id = ?",
-                (last_index, run_id)
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        self.db.execute(
+            "UPDATE sync.source_runs SET last_processed_index = %s WHERE id = %s",
+            (last_index, run_id)
+        )
 
     # --- BRICKS ---
 
     def save_brick(self, brick: Dict):
-        conn = self._get_conn()
-        try:
-            conn.execute(
+        with self.db.transaction() as cur:
+            cur.execute(
                 """
-                INSERT OR REPLACE INTO bricks (
+                INSERT INTO sync.bricks (
                     id, topic_id, content, fingerprint, state, 
                     run_id, json_path, start_index, end_index, source_checksum
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    topic_id = EXCLUDED.topic_id,
+                    content = EXCLUDED.content,
+                    fingerprint = EXCLUDED.fingerprint,
+                    state = EXCLUDED.state,
+                    run_id = EXCLUDED.run_id,
+                    json_path = EXCLUDED.json_path,
+                    start_index = EXCLUDED.start_index,
+                    end_index = EXCLUDED.end_index,
+                    source_checksum = EXCLUDED.source_checksum
                 """,
                 (
                     brick["id"],
@@ -160,35 +142,29 @@ class SyncDatabase:
                     "sync_topic_name": "Nexus Server Sync Architecture" # Fallback/Mock name
                 }
             }
-            conn.execute(
-                "INSERT OR REPLACE INTO nodes (id, type, data, created_at) VALUES (?, 'brick', ?, datetime('now'))",
+            cur.execute(
+                """
+                INSERT INTO graph.nodes (id, type, data, created_at) 
+                VALUES (%s, 'brick', %s, NOW())
+                ON CONFLICT (id) DO UPDATE SET
+                    data = EXCLUDED.data,
+                    updated_at = NOW()
+                """,
                 (brick["id"], json.dumps(node_data))
             )
-            
-            conn.commit()
-        finally:
-            conn.close()
 
     def get_fingerprints_for_topic(self, topic_id: str) -> List[str]:
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        cursor.execute("SELECT fingerprint FROM bricks WHERE topic_id = ?", (topic_id,))
-        rows = cursor.fetchall()
-        conn.close()
+        rows = self.db.fetch_all("SELECT fingerprint FROM sync.bricks WHERE topic_id = %s", (topic_id,))
         return [row[0] for row in rows]
 
     def get_bricks_for_topic(self, topic_id: str) -> List[Dict]:
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        cursor.execute("""
+        rows = self.db.fetch_all("""
             SELECT id, topic_id, content, fingerprint, state, 
                    run_id, json_path, start_index, end_index, source_checksum
-            FROM bricks 
-            WHERE topic_id = ?
+            FROM sync.bricks 
+            WHERE topic_id = %s
             ORDER BY created_at ASC
         """, (topic_id,))
-        rows = cursor.fetchall()
-        conn.close()
         
         return [{
             "id": row[0],
@@ -206,21 +182,18 @@ class SyncDatabase:
 
     def truncate_sync_data(self):
         """Clears all bricks and resets source runs for a full rebuild."""
-        conn = self._get_conn()
         try:
-            # Delete all bricks
-            conn.execute("DELETE FROM bricks")
-            # Reset last_processed_index in all runs to allow re-processing
-            conn.execute("UPDATE source_runs SET last_processed_index = -1")
+            with self.db.transaction() as cur:
+                # Delete all bricks
+                cur.execute("DELETE FROM sync.bricks")
+                # Reset last_processed_index in all runs to allow re-processing
+                cur.execute("UPDATE sync.source_runs SET last_processed_index = -1")
+                
+                # ALSO clear unified nodes to ensure the sync process actually populates them again
+                cur.execute("DELETE FROM graph.nodes")
+                cur.execute("DELETE FROM graph.edges")
             
-            # ALSO clear unified nodes to ensure the sync process actually populates them again
-            conn.execute("DELETE FROM nodes")
-            conn.execute("DELETE FROM edges")
-            
-            conn.commit()
             print("[SyncDB] Data truncated and runs reset for full rebuild (including unified nodes).")
         except Exception as e:
             print(f"[SyncDB] Error truncating data: {e}")
-            conn.rollback()
-        finally:
-            conn.close()
+            raise

@@ -1,0 +1,171 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "JARVIS UI Governance Rules",
+  "version": "1.0.0",
+  "generated_at": "2026-02-18T09:00:00Z",
+
+  "lifecycle_transitions": {
+    "LOOSE": {
+      "allowed_next": ["FORMING"],
+      "forbidden_next": ["FROZEN", "SUPERSEDED", "KILLED"],
+      "ui_display": {
+        "color": "cyan",
+        "immutable": false,
+        "show_promote_button": true,
+        "show_kill_button": true
+      }
+    },
+    "FORMING": {
+      "allowed_next": ["FROZEN", "KILLED"],
+      "forbidden_next": ["LOOSE", "SUPERSEDED"],
+      "ui_display": {
+        "color": "amber",
+        "immutable": false,
+        "show_promote_button": true,
+        "show_kill_button": true
+      }
+    },
+    "FROZEN": {
+      "allowed_next": ["SUPERSEDED"],
+      "forbidden_next": ["LOOSE", "FORMING", "KILLED"],
+      "ui_display": {
+        "color": "emerald",
+        "immutable": true,
+        "badge": "IMMUTABLE",
+        "show_promote_button": false,
+        "show_kill_button": false,
+        "show_supersede_button": true
+      }
+    },
+    "SUPERSEDED": {
+      "allowed_next": [],
+      "forbidden_next": ["LOOSE", "FORMING", "FROZEN", "KILLED"],
+      "ui_display": {
+        "color": "indigo",
+        "immutable": true,
+        "badge": "SUPERSEDED",
+        "show_promote_button": false,
+        "show_kill_button": false,
+        "opacity": 0.5
+      }
+    },
+    "KILLED": {
+      "allowed_next": [],
+      "forbidden_next": ["LOOSE", "FORMING", "FROZEN", "SUPERSEDED"],
+      "ui_display": {
+        "color": "red",
+        "immutable": true,
+        "badge": "TERMINATED",
+        "show_promote_button": false,
+        "show_kill_button": false,
+        "grayscale": true
+      }
+    }
+  },
+
+  "node_display_rules": [
+    {
+      "rule_id": "frozen-nodes-immutable",
+      "condition": { "lifecycle": "FROZEN" },
+      "effect": { "editable": false, "draggable": false }
+    },
+    {
+      "rule_id": "killed-nodes-greyed",
+      "condition": { "lifecycle": "KILLED" },
+      "effect": { "opacity": 0.4, "grayscale": true, "interactable": false }
+    },
+    {
+      "rule_id": "superseded-nodes-dimmed",
+      "condition": { "lifecycle": "SUPERSEDED" },
+      "effect": { "opacity": 0.5, "show_superseded_by_link": true }
+    }
+  ],
+
+  "edge_display_rules": [
+    {
+      "rule_id": "superseded-edge-style",
+      "condition": { "edge_type": "SUPERSEDES" },
+      "effect": { "animated": true, "color": "indigo", "dash": true }
+    },
+    {
+      "rule_id": "derived-edge-style",
+      "condition": { "edge_type": "DERIVED_FROM" },
+      "effect": { "animated": false, "color": "gray" }
+    },
+    {
+      "rule_id": "overrides-edge-style",
+      "condition": { "edge_type": "OVERRIDES" },
+      "effect": { "animated": true, "color": "amber", "dash": false }
+    }
+  ],
+
+  "mutation_guards": [
+    {
+      "guard_id": "no-kill-frozen",
+      "description": "FROZEN nodes cannot be directly killed. Must be superseded first.",
+      "condition": { "current_lifecycle": "FROZEN", "attempted_action": "kill" },
+      "effect": {
+        "block": true,
+        "error_message": "FROZEN nodes must be SUPERSEDED before termination. Use 'Supersede Node' to replace this node with an updated version."
+      }
+    },
+    {
+      "guard_id": "no-promote-killed",
+      "description": "KILLED nodes cannot be promoted or revived",
+      "condition": { "current_lifecycle": "KILLED", "attempted_action": "promote" },
+      "effect": {
+        "block": true,
+        "error_message": "Terminated nodes cannot be promoted. The knowledge represented here has been rejected."
+      }
+    },
+    {
+      "guard_id": "no-kill-killed",
+      "description": "KILLED nodes cannot be killed again",
+      "condition": { "current_lifecycle": "KILLED", "attempted_action": "kill" },
+      "effect": {
+        "block": true,
+        "error_message": "This node is already terminated."
+      }
+    },
+    {
+      "guard_id": "no-promote-superseded",
+      "description": "SUPERSEDED nodes cannot be promoted — they are immutable",
+      "condition": { "current_lifecycle": "SUPERSEDED", "attempted_action": "promote" },
+      "effect": {
+        "block": true,
+        "error_message": "Superseded nodes are immutable. This knowledge has been replaced by a newer version."
+      }
+    },
+    {
+      "guard_id": "no-kill-superseded",
+      "description": "SUPERSEDED nodes cannot be killed — they are already archived",
+      "condition": { "current_lifecycle": "SUPERSEDED", "attempted_action": "kill" },
+      "effect": {
+        "block": true,
+        "error_message": "Superseded nodes are archived and cannot be terminated."
+      }
+    },
+    {
+      "guard_id": "supersede-requires-new-node",
+      "description": "Supersede action requires a valid replacement node ID",
+      "condition": { "attempted_action": "supersede", "new_node_id": null },
+      "effect": {
+        "block": true,
+        "error_message": "Must specify a valid replacement node ID to supersede this node."
+      }
+    }
+  ],
+
+  "audit_requirements": {
+    "always_log_actor": true,
+    "require_reason_for": ["kill", "supersede"],
+    "min_reason_length": 10
+  },
+
+  "system_health_thresholds": {
+    "llm_degraded_warning_ms": 5000,
+    "db_lock_risk_query_count": 50,
+    "stream_gap_resync_threshold": 10,
+    "health_poll_interval_ms": 15000
+  }
+}

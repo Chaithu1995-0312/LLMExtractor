@@ -30,6 +30,8 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { NexusNode, NexusNodeProps, Lifecycle } from './components/NexusNode';
+import { preloadRules } from './protocol/validators';
+import { hydrateFromApiResponse } from './reducers/graph-reducer';
 import { WallView } from './components/WallView';
 import { Panel } from './components/Panel';
 import { AuditPanel } from './components/AuditPanel';
@@ -181,6 +183,13 @@ const panelTransition = {
 export default function App() {
   const { mode, rightPanelOpen, toggleRightPanel, selectedBrickId, setSelectedBrickId } = useNexusStore();
   const [chatMapping, setChatMapping] = useState<Record<string, string>>({});
+
+  // ── Boot: pre-load governance rules into validator cache ──
+  useEffect(() => {
+    preloadRules().catch((e) =>
+      console.warn('[App] Failed to preload ui_rules.json:', e)
+    );
+  }, []);
 
   useEffect(() => {
     fetch('/chat_mapping.json')
@@ -370,7 +379,14 @@ export default function App() {
         initialEdges
       );
 
-      // 3. Set State with Preservation Logic
+      // Hydrate the normalized graph entity store (parallel path)
+      // This populates graph-store for future delta-patch operations.
+      hydrateFromApiResponse({
+        nodes: rawNodes,
+        edges: rawEdges,
+      });
+
+      // 3. Set State with Preservation Logic (ReactFlow path — kept until Canvas migration)
       setNodes((prevNodes) => {
         // Compare new layout against existing state
         return layoutedNodes.map((newNode) => {
@@ -603,12 +619,20 @@ export default function App() {
                           nodeId={selectedBrickId}
                           currentLifecycle={selectedBrickData?.lifecycle || 'LOOSE'}
                           onUpdate={async (id, action, data) => {
+                            // Mutations only reach here after passing governance validation in NodeEditor
                             if (action === 'promote') {
                               await promoteMutation.mutateAsync({ nodeId: id });
                             } else if (action === 'supersede') {
-                              await supersedeMutation.mutateAsync({ oldNodeId: id, newNodeId: data?.new_node_id, reason: data?.reason });
+                              await supersedeMutation.mutateAsync({
+                                oldNodeId: id,
+                                newNodeId: (data?.new_node_id as string) ?? '',
+                                reason: (data?.reason as string) ?? '',
+                              });
                             } else {
-                              await killMutation.mutateAsync({ nodeId: id, reason: data?.reason });
+                              await killMutation.mutateAsync({
+                                nodeId: id,
+                                reason: (data?.reason as string) ?? 'Killed via UI',
+                              });
                             }
                             setShowEditor(false);
                           }}
