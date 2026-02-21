@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 from nexus.db import get_adapter
 from nexus.db.init_db import init_database
 
+class AppendViolationError(Exception):
+    """Raised when an incremental update violates the append-only guarantee."""
+    pass
+
 class SyncDatabase:
     def __init__(self, db_path: str = None):
         # db_path is ignored in Postgres implementation as it uses DATABASE_URL
@@ -69,6 +73,60 @@ class SyncDatabase:
             """,
             (run_id, json.dumps(raw_content))
         )
+
+    def register_run_safe(self, run_id: str, new_content: Dict):
+        """
+        Registers a source run with Zero-Trust Append Validation.
+        If the run exists, verifies that the new content is a strict superset (prefix match).
+        """
+        existing = self.get_run(run_id)
+        
+        if not existing:
+            # New run -> Standard Insert
+            print(f"[SyncDB] Registering NEW run: {run_id}")
+            self.register_run(run_id, new_content)
+            return
+
+        # Append Validation
+        old_msgs = existing['raw_content'].get('messages', [])
+        new_msgs = new_content.get('messages', [])
+        
+        # Check 1: Length (Monotonicity)
+        if len(new_msgs) < len(old_msgs):
+            raise AppendViolationError(
+                f"Regression detected for {run_id}: New length {len(new_msgs)} < Old length {len(old_msgs)}"
+            )
+            
+        # Check 2: Prefix Match (Zero-Trust ID Check)
+        # We compare message_ids for the overlapping segment to ensure history hasn't been rewritten
+        old_ids = [m.get('message_id') for m in old_msgs]
+        new_ids_prefix = [m.get('message_id') for m in new_msgs[:len(old_msgs)]]
+        
+        if old_ids != new_ids_prefix:
+            # Determine where it diverged for debugging
+            divergence_idx = -1
+            for i, (oid, nid) in enumerate(zip(old_ids, new_ids_prefix)):
+                if oid != nid:
+                    divergence_idx = i
+                    break
+            
+            raise AppendViolationError(
+                f"History divergence detected for {run_id} at index {divergence_idx}. "
+                f"Old ID: {old_ids[divergence_idx] if divergence_idx != -1 else '?'}, "
+                f"New ID: {new_ids_prefix[divergence_idx] if divergence_idx != -1 else '?'}"
+            )
+        
+        # 3. Atomic Update
+        # Update raw_content BUT keep last_processed_index
+        # This effectively "extends the tape" for the compiler
+        if len(new_msgs) > len(old_msgs):
+            self.db.execute(
+                "UPDATE sync.source_runs SET raw_content = %s WHERE id = %s",
+                (json.dumps(new_content), run_id)
+            )
+            print(f"[SyncDB] Extended run {run_id} with {len(new_msgs) - len(old_msgs)} new messages.")
+        else:
+            print(f"[SyncDB] Run {run_id} is up-to-date (no new messages).")
 
     def get_run(self, run_id: str) -> Optional[Dict]:
         row = self.db.fetch_one(

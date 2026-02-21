@@ -1,0 +1,4 @@
+pydantic
+llama-index-llms-ollama
+boto3
+python-dotenv

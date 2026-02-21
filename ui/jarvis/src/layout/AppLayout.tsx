@@ -27,24 +27,22 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { mode, setMode } = useNexusStore();
 
   return (
-    <div
-      className="flex flex-col min-h-screen w-screen bg-[#030609] text-white/85"
-      style={{ background: '#030609', color: 'rgba(255,255,255,0.85)' }}
-    >
-      {/* ── Top header (JARVIS branding) ──────────────── */}
-      <TopStatusBar />
+    <div className="min-h-screen w-screen bg-[#030609] text-white/85">
+      <div className="flex flex-col min-h-screen">
+        {/* ── Top header (JARVIS branding) ──────────────── */}
+        <TopStatusBar />
 
-      {/* ── Horizontal nav tab bar ────────────────────── */}
-      <nav
-        className="flex items-center shrink-0 border-b"
-        style={{
-          background: 'rgba(4,8,13,0.95)',
-          borderColor: 'rgba(255,255,255,0.06)',
-          height: 40,
-          paddingLeft: 8,
-          paddingRight: 8,
-        }}
-      >
+        {/* ── Horizontal nav tab bar ────────────────────── */}
+        <nav
+  className="flex flex-shrink-0 items-center px-2 h-10"
+  style={{
+    background: 'rgba(4, 8, 13, 0.95)',
+    borderBottom: 'none',
+    margin: 0,
+    padding: 0,
+  }}
+>
+
         {/* Tab buttons */}
         {NAV_TABS.map((tab) => {
           const active = mode === tab.id;
@@ -66,6 +64,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 background: active
                   ? 'rgba(34,211,238,0.04)'
                   : 'transparent',
+                boxShadow: active ? '0 0 8px 2px rgba(34, 211, 238, 0.5)' : 'none',
               }}
             >
               {tab.label}
@@ -127,10 +126,11 @@ export function AppLayout({ children }: AppLayoutProps) {
         </div>
       </nav>
 
-      {/* ── Main content area ─────────────────────────── */}
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
+        {/* ── Main content area ─────────────────────────── */}
+        <main className="flex-1 overflow-hidden">
+          <div className="h-full w-full overflow-auto">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }

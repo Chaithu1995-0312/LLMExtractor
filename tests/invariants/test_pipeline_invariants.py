@@ -31,7 +31,7 @@ class TestPipelineInvariants(unittest.TestCase):
         trees = []
         for i in range(3):
             tree_path = os.path.join(self.test_dir, f"tree_{i}.json")
-            with open(tree_path, "w") as f:
+            with open(tree_path, "w", encoding="utf-8") as f:
                 json.dump({
                     "conversation_id": f"conv_{i}",
                     "title": f"Title {i}",
@@ -54,7 +54,7 @@ class TestPipelineInvariants(unittest.TestCase):
         self.assertEqual(files1, files2, "Wall file lists must be identical")
         
         for f in files1:
-            with open(os.path.join(output1, f), "r") as f1, open(os.path.join(output2, f), "r") as f2:
+            with open(os.path.join(output1, f), "r", encoding="utf-8") as f1, open(os.path.join(output2, f), "r", encoding="utf-8") as f2:
                 self.assertEqual(f1.read(), f2.read(), f"Content of {f} must be identical across runs")
 
     def test_brick_span_mismatch_fail(self):
@@ -62,14 +62,14 @@ class TestPipelineInvariants(unittest.TestCase):
         tree_path = os.path.join(self.test_dir, "test_tree.json")
         msg_id = "target_msg_123"
         content = "Line 1\n\nLine 2"
-        with open(tree_path, "w") as f:
+        with open(tree_path, "w", encoding="utf-8") as f:
             json.dump({
                 "conversation_id": "conv_1",
                 "messages": [{"message_id": msg_id, "role": "user", "content": content, "model_name": "gpt-4"}]
             }, f)
             
         brick_file = extract_bricks_from_file(tree_path, self.test_dir)
-        with open(brick_file, "r") as f:
+        with open(brick_file, "r", encoding="utf-8") as f:
             bricks = json.load(f)
             
         self.assertEqual(len(bricks), 2)

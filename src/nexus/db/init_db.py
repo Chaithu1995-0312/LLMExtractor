@@ -20,7 +20,7 @@ def init_database():
         "schema_postgres.sql"
     )
 
-    with open(schema_path, "r") as f:
+    with open(schema_path, "r", encoding="utf-8") as f:
         schema_sql = f.read()
 
     with conn.cursor() as cur:

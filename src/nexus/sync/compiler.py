@@ -38,16 +38,25 @@ SIGNAL_TOKENS = [
 
 class NexusCompiler:
     def _run_async(self, coro):
+        """Robustly run async code from a synchronous context."""
         try:
-            asyncio.get_running_loop()
-            # If we are here, a loop is running. 
-            # We must run the coroutine in a separate thread to block safely.
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                return executor.submit(asyncio.run, coro).result()
+            loop = asyncio.get_running_loop()
+            # If we are here, a loop is running.
+            if loop.is_running():
+                # We are in an async loop already. 
+                # This compiler is designed to be called synchronously.
+                # To avoid nested loop errors, we use a dedicated thread.
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    return executor.submit(asyncio.run, coro).result()
+            else:
+                return asyncio.run(coro)
         except RuntimeError:
             # No loop running, asyncio.run is safe.
             return asyncio.run(coro)
+        except Exception as e:
+            print(f"[Compiler] Async execution error: {e}")
+            raise e
 
     def __init__(self, db_connection: SyncDatabase, llm_client: Any = None):
         self.db = db_connection
@@ -94,7 +103,9 @@ class NexusCompiler:
         print(f"[Compiler] Compiling Run: {run_id} for Topic: {topic['display_name']} (from index {last_processed + 1})")
 
         # 2. Phase 1: Structural Scan & Prefilter (Lexer)
-        filtered_messages, max_index = self._pre_filter_nodes(run['raw_content'], last_processed)
+        # Use a dynamic char limit that can be degraded on failure
+        current_max_chars = MAX_CHARS_PER_BATCH
+        filtered_messages, max_index = self._pre_filter_nodes(run['raw_content'], last_processed, max_total_chars=current_max_chars)
         
         if not filtered_messages:
             print(f"[Compiler] No signal detected in new content for Run {run_id}")
@@ -120,9 +131,22 @@ class NexusCompiler:
         all_pointers = []
         for i, batch in enumerate(batches):
             print(f"[Compiler] Processing batch {i+1}/{len(batches)} ({len(batch)} nodes)...")
-            # Inject batch context if needed (can be added to _llm_extract_pointers)
-            batch_pointers = self._llm_extract_pointers(batch, topic)
-            all_pointers.extend(batch_pointers)
+            
+            try:
+                batch_pointers = self._llm_extract_pointers(batch, topic)
+                all_pointers.extend(batch_pointers)
+            except Exception as e:
+                # DEGRADED MODE: Try sub-batching if the whole batch failed
+                if len(batch) > 1:
+                    print(f"[Compiler] Batch failed. Attempting sub-batching (Degraded Mode)...")
+                    for sub_msg in batch:
+                        try:
+                            sub_pointers = self._llm_extract_pointers([sub_msg], topic)
+                            all_pointers.extend(sub_pointers)
+                        except Exception as sub_e:
+                            print(f"[Compiler] Single message extraction failed: {sub_e}")
+                else:
+                    print(f"[Compiler] Batch extraction failed: {e}")
         
         # Track scanned indices for path boundary enforcement
         # We use a set of all indices that WERE scanned (including filtered ones)
@@ -237,7 +261,7 @@ class NexusCompiler:
         t = text.lower()
         return any(tok in t for tok in SIGNAL_TOKENS)
 
-    def _pre_filter_nodes(self, raw_content: Any, last_processed: int = -1) -> Tuple[List[Dict], int]:
+    def _pre_filter_nodes(self, raw_content: Any, last_processed: int = -1, max_total_chars: int = 100000) -> Tuple[List[Dict], int]:
         """
         Filters the raw content to reduce context window usage.
         Implements both Incremental Boundary Guard and Content-based filtering.
@@ -249,10 +273,18 @@ class NexusCompiler:
             filtered_messages = []
             max_idx = last_processed
             skipped_non_authoritative = 0
+            total_chars_accumulated = 0
             
             for i, msg in enumerate(messages):
                 if i <= last_processed:
                     continue
+                
+                # Check if we've reached the char limit for this compile step
+                # This prevents huge single steps from hitting global timeouts
+                if total_chars_accumulated > max_total_chars:
+                    # We stop filtering here, but we DON'T update max_idx to i
+                    # because we want the NEXT compile_run to start from here.
+                    break
                 
                 max_idx = i
 
@@ -276,6 +308,7 @@ class NexusCompiler:
                 msg_with_meta = msg.copy()
                 msg_with_meta["_original_index"] = i
                 filtered_messages.append(msg_with_meta)
+                total_chars_accumulated += len(json.dumps(msg_with_meta))
             
             if skipped_non_authoritative > 0:
                 print(f"[Compiler] Skipped {skipped_non_authoritative} non-authoritative messages by ingestion policy.")
@@ -339,6 +372,7 @@ STRICT RULES:
 - Copy text verbatim.
 - One pointer per statement.
 - Ignore metaphors, speculation, and examples.
+- Do NOT return the source JSON. Only return Pointer Objects in the specified schema.
 
 TARGET TOPIC:
 {topic['id']}
@@ -351,6 +385,17 @@ EXCLUSIONS:
 
 SOURCE JSON:
 {json.dumps(content, ensure_ascii=False)}
+
+EXAMPLE OUTPUT:
+{{
+  "extracted_pointers": [
+    {{
+      "topic_id": "{topic['id']}",
+      "json_path": "$.messages[0].content",
+      "verbatim_quote": "Exact rule text from source"
+    }}
+  ]
+}}
 """
 
         try:
@@ -359,8 +404,8 @@ SOURCE JSON:
             return [p.dict() for p in pointers]
 
         except Exception as e:
-            print(f"[Compiler] Structured LLM extraction failed: {e}")
-            return []
+            # Re-raise to trigger degraded mode in caller
+            raise e
 
     def _clean_llm_response(self, response: str) -> str:
         """Helper to extract JSON from LLM markdown."""

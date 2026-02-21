@@ -248,7 +248,7 @@ DEGRADED → READY (HEALTH_RESTORED)
 | Dependency | Role | Location | Failure Mode |
 |---|---|---|---|
 | **PostgreSQL 16** | Primary database (sync, graph, governance schemas) | Docker `nexus-postgres:5432` | All write/read ops fail. `DatabaseURL` env required. Pool init throws `RuntimeError`. |
-| **Ollama** (remote) | L1 local LLM inference | `http://3.109.146.63:11434` | `CONNECTION_FAILED` JSON returned. `LLM_STRICT_MODE=true` re-raises. Timeout configurable via `LLM_TIMEOUT` (default 600s). |
+| **Ollama** (remote) | L1 local LLM inference | `http://127.0.0.1:11434` | `CONNECTION_FAILED` JSON returned. `LLM_STRICT_MODE=true` re-raises. Timeout configurable via `LLM_TIMEOUT` (default 600s). |
 | **FAISS (faiss-cpu)** | Vector similarity search | In-process via LocalVectorIndex | If `.faiss` file absent: index starts empty, all searches return `[]`. Non-fatal. |
 | **SentenceTransformers** (`all-MiniLM-L6-v2`) | Text embedding (384-dim) | In-process via VectorEmbedder | ImportError if not installed. Model download on first call. Single shared model instance. |
 | **DSPy** | Structured LLM inference for cognition | In-process via dspy_modules | Depends on configured LLM backend; if Ollama offline, extraction returns empty. |
@@ -272,7 +272,7 @@ DEGRADED → READY (HEALTH_RESTORED)
 | `LOCAL_LLM_ENABLED` | `true` | No | Enable/disable local Ollama |
 | `LOCAL_LLM_PROVIDER` | `ollama` | No | LLM provider for L1 |
 | `LOCAL_LLM_MODEL` | `phi3:latest` | No | Default Ollama model |
-| `OLLAMA_HOST` | `http://3.109.146.63:11434` | No | Remote Ollama endpoint |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | No | Remote Ollama endpoint |
 | `OPENAI_API_KEY` | None | No | Enables L2/L3 + query rewrite |
 | `LLM_TIMEOUT` | `600` | No | Ollama HTTP timeout (seconds) |
 | `LLM_STRICT_MODE` | `false` | No | Re-raise LLM errors instead of returning JSON error |

@@ -1,6 +1,6 @@
 import requests
 
-def check_ollama_connectivity(url="http://3.109.146.63:11434"):
+def check_ollama_connectivity(url="http://127.0.0.1:11434"):
     try:
         response = requests.get(f"{url}/api/tags")
         response.raise_for_status()  # Raise an exception for HTTP errors

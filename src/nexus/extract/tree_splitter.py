@@ -27,6 +27,28 @@ def dfs_paths(mapping: Dict, node_id: str, path: List[str], paths: List[List[str
     for child_id in children:
         dfs_paths(mapping, child_id, new_path, paths)
 
+def extract_canonical_path(mapping: Dict, current_node_id: Optional[str]) -> List[str]:
+    """
+    Extracts the single linear path from the root to the current_node (active leaf).
+    This represents the 'Canonical' history of the conversation as seen by the user.
+    """
+    if not current_node_id or current_node_id not in mapping:
+        # Fallback: Find the most recent leaf node by create_time if current_node is missing
+        # For now, if no current_node, we might return empty or try to find a default leaf.
+        # But ChatGPT exports usually have current_node.
+        return []
+
+    path = []
+    node_id = current_node_id
+    while node_id:
+        path.append(node_id)
+        node = mapping.get(node_id)
+        if not node:
+            break
+        node_id = node.get("parent")
+    
+    return list(reversed(path))
+
 def extract_message(node_id: str, node: Dict, conversation_id: str = "unknown", path_id: str = "unknown", depth: int = 0):
     msg = node.get("message")
     if not msg or not msg.get("content"):
@@ -97,27 +119,41 @@ def process_conversation(conv: Dict, output_dir: str):
     conv_id = conv["id"]
     title = conv.get("title") or "untitled"
     mapping = conv["mapping"]
+    current_node = conv.get("current_node")
 
-    roots = find_root_nodes(mapping)
-    all_paths = []
+    # PREFERRED: Canonical Path (Active Branch)
+    if current_node:
+        path = extract_canonical_path(mapping, current_node)
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [EXTRACT] Processing Canonical Path for {conv_id} (Length: {len(path)})")
+        paths_to_process = [path]
+        # Use stable filename based on conversation_id
+        use_stable_filename = True
+    else:
+        # FALLBACK: Legacy DFS (All Branches)
+        # This creates multiple files with hash IDs
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [EXTRACT] No current_node found. Falling back to DFS.")
+        roots = find_root_nodes(mapping)
+        paths_to_process = []
+        for root in roots:
+            dfs_paths(mapping, root, [], paths_to_process)
+        use_stable_filename = False
 
-    for root in roots:
-        dfs_paths(mapping, root, [], all_paths)
-
-    print(f"[{datetime.now(timezone.utc).isoformat()}] [EXTRACT] Found {len(all_paths)} conversation paths.")
-
-    # Output path-stable JSON
+    # Output Directory
     conv_dir = os.path.join(output_dir, "trees", conv_id)
     os.makedirs(conv_dir, exist_ok=True)
 
-    extracted_paths = []
-    for idx, path in enumerate(all_paths, start=1):
-        path_id = hashlib.sha256(">".join(path).encode()).hexdigest()[:16]
+    extracted_files = []
+    
+    for idx, path in enumerate(paths_to_process, start=1):
+        # Generate messages
         messages = []
+        # For stable ID, we use conversation_id. For legacy, we use hash.
+        path_identifier = conv_id if use_stable_filename else hashlib.sha256(">".join(path).encode()).hexdigest()[:16]
+        
         for depth, node_id in enumerate(path):
             msg = extract_message(node_id, mapping[node_id], 
                                   conversation_id=conv_id, 
-                                  path_id=path_id, 
+                                  path_id=path_identifier, 
                                   depth=depth)
             if msg:
                 messages.append(msg)
@@ -129,20 +165,26 @@ def process_conversation(conv: Dict, output_dir: str):
             "conversation_id": conv_id,
             "title": title,
             "tree_path_id": ">".join(path),
-            "messages": messages
+            "messages": messages,
+            "is_canonical": use_stable_filename
         }
         
-        # Path-stable filename based on path hash
-        path_hash = hashlib.sha256(">".join(path).encode()).hexdigest()[:16]
-        filename = f"path_{path_hash}.json"
+        if use_stable_filename:
+            # STABLE FILENAME: {conversation_id}.json
+            filename = f"{conv_id}.json"
+        else:
+            # LEGACY FILENAME: path_{hash}.json
+            path_hash = hashlib.sha256(">".join(path).encode()).hexdigest()[:16]
+            filename = f"path_{path_hash}.json"
+            
         file_path = os.path.join(conv_dir, filename)
         
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(output, f, ensure_ascii=False, indent=2)
         
-        extracted_paths.append(file_path)
+        extracted_files.append(file_path)
     
-    return extracted_paths
+    return extracted_files
 
 def load_conversations(path: str):
     with open(path, "r", encoding="utf-8") as f:

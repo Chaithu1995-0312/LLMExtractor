@@ -1,5 +1,10 @@
 import os
 import sys
+
+# Force UTF-8 for stdout (especially for Windows compatibility)
+if sys.stdout.encoding != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
+
 import json
 import hashlib
 from datetime import datetime, timezone
@@ -81,8 +86,12 @@ def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
                 # Filename format: path_HASH.json
                 run_id = os.path.basename(tree_file).replace(".json", "")
                 
-                # B. Register Source Run in Vault
-                db.register_run(run_id, tree_content)
+                # B. Register Source Run in Vault (Safe Append)
+                try:
+                    db.register_run_safe(run_id, tree_content)
+                except Exception as e:
+                    print(f"[{datetime.now(timezone.utc).isoformat()}] [SKIP] Skipping {run_id} due to validation error: {e}")
+                    continue
                 
                 # C. Compile against ALL Active Topics
                 for topic in topics:

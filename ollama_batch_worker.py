@@ -29,7 +29,7 @@ def load_checkpoint():
     return 0
 
 def save_checkpoint(i):
-    with open(CHECKPOINT, "w") as f:
+    with open(CHECKPOINT, "w", encoding="utf-8") as f:
         f.write(str(i))
 
 def calculate_accuracy_heuristic(source_text, result_data):

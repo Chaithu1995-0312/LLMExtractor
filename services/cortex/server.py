@@ -97,10 +97,10 @@ def log_response_info(response):
 def get_utc_now():
     return datetime.now(timezone.utc).isoformat()
 
-# --- Helper for direct DB access (Read-Only) ---
+# --- Helper for direct DB access (Production Postgres) ---
 def get_db_metrics():
     """
-    Direct SQLite access for fast metric aggregation.
+    Direct Postgres access for production metrics.
     """
     stats = {
         "conversations": 0,
@@ -111,39 +111,32 @@ def get_db_metrics():
     }
     
     try:
-        conn = sqlite3.connect(GRAPH_DB_PATH)
-        c = conn.cursor()
+        from nexus.db.postgres import get_pg_connection
+        conn = get_pg_connection()
+        cur = conn.cursor()
         
-        # Nodes count
-        c.execute("SELECT COUNT(*) FROM nodes")
-        stats["nodes"] = c.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM nodes")
+        stats["nodes"] = cur.fetchone()[0]
         
-        # Edges count
-        c.execute("SELECT COUNT(*) FROM edges")
-        stats["edges"] = c.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM edges")
+        stats["edges"] = cur.fetchone()[0]
         
-        # Bricks count (if using unified nodes table, count type='brick')
-        c.execute("SELECT COUNT(*) FROM nodes WHERE type='brick'")
-        stats["bricks"] = c.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM intents")
+        stats["conversations"] = cur.fetchone()[0]
         
-        # Conversations (topics)
-        c.execute("SELECT COUNT(*) FROM nodes WHERE type='topic'")
-        stats["conversations"] = c.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM runs")
+        stats["source_runs"] = cur.fetchone()[0]
         
-        # Source runs (approximation using source nodes or sync metadata)
-        # Assuming 'source' nodes represent ingestion events or files
-        c.execute("SELECT COUNT(*) FROM nodes WHERE type='source'")
-        stats["source_runs"] = c.fetchone()[0]
-        
+        cur.close()
         conn.close()
     except Exception as e:
-        print(f"Error fetching DB metrics: {e}")
+        print(f"Error fetching DB metrics from Postgres: {e}")
         
     return stats
 
 def get_lifecycle_distribution():
     """
-    Aggregate lifecycle states from node JSON data.
+    Aggregate lifecycle states from Postgres intents.
     """
     distribution = {
         "LOOSE": 0,
@@ -154,18 +147,13 @@ def get_lifecycle_distribution():
     }
     
     try:
-        conn = sqlite3.connect(GRAPH_DB_PATH)
-        c = conn.cursor()
+        from nexus.db.postgres import get_pg_connection
+        conn = get_pg_connection()
+        cur = conn.cursor()
         
-        # SQLite JSON extract for performance
-        query = """
-            SELECT json_extract(data, '$.lifecycle') as state, COUNT(*)
-            FROM nodes
-            WHERE type IN ('intent', 'brick')
-            GROUP BY state
-        """
-        c.execute(query)
-        rows = c.fetchall()
+        query = "SELECT lifecycle, COUNT(*) FROM intents GROUP BY lifecycle"
+        cur.execute(query)
+        rows = cur.fetchall()
         
         for r in rows:
             state = r[0]
@@ -175,15 +163,14 @@ def get_lifecycle_distribution():
                 if key in distribution:
                     distribution[key] = count
                 else:
-                    # Handle unknown states safely
                     distribution[key] = count
             else:
-                # Default to LOOSE if not specified
-                distribution["LOOSE"] += count
+                distribution["FORMING"] += count
                 
+        cur.close()
         conn.close()
     except Exception as e:
-        print(f"Error fetching lifecycle stats: {e}")
+        print(f"Error fetching lifecycle stats from Postgres: {e}")
         
     return distribution
 

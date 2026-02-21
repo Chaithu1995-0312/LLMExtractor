@@ -55,7 +55,7 @@ def test_p1_audit_logging():
     actual_audit_path = os.path.join("services", "cortex", "phase3_audit_trace.jsonl")
     
     if os.path.exists(actual_audit_path):
-        with open(actual_audit_path, "r") as f:
+        with open(actual_audit_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
             last_line = json.loads(lines[-1])
             print(f"Latest Event: {last_line['event']}")

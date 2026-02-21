@@ -114,7 +114,7 @@ class TestNewFeatures(unittest.TestCase):
         self.assertEqual(set(kwargs["brick_ids"]), set(["brick_test_1", "brick_test_2", "brick_test_3"]))
         
         # Ensure audit row is emitted (CortexAPI handles this internally, so we check the mock)
-        with open(self.audit_log, "r") as f:
+        with open(self.audit_log, "r", encoding="utf-8") as f:
             audit_lines = f.readlines()
             self.assertEqual(len(audit_lines), 0) # Nexus does not write audit, Cortex does.
 
@@ -139,7 +139,7 @@ class TestNewFeatures(unittest.TestCase):
         """3. Cortex ask_preview does not emit audit rows"""
         initial_audit_count = 0
         if os.path.exists(self.audit_log):
-            with open(self.audit_log, "r") as f:
+            with open(self.audit_log, "r", encoding="utf-8") as f:
                 initial_audit_count = len(f.readlines())
 
         # We need to test the actual CortexAPI instance without patching its generate
@@ -159,7 +159,7 @@ class TestNewFeatures(unittest.TestCase):
 
         final_audit_count = 0
         if os.path.exists(self.audit_log):
-            with open(self.audit_log, "r") as f:
+            with open(self.audit_log, "r", encoding="utf-8") as f:
                 final_audit_count = len(f.readlines())
         
         self.assertEqual(final_audit_count, initial_audit_count, "Jarvis ask_preview should not emit audit rows")

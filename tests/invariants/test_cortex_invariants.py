@@ -31,13 +31,13 @@ class TestCortexInvariants(unittest.TestCase):
         # Count audit rows before
         initial_count = 0
         if os.path.exists(self.audit_log):
-            with open(self.audit_log, "r") as f:
+            with open(self.audit_log, "r", encoding="utf-8") as f:
                 initial_count = len(f.readlines())
         
         self.api.generate("user1", "agent1", "query", ["brick1"])
         
         # Count after
-        with open(self.audit_log, "r") as f:
+        with open(self.audit_log, "r", encoding="utf-8") as f:
             after_count = len(f.readlines())
             
         self.assertEqual(after_count, initial_count + 1, "Audit row must be created for every generation call")

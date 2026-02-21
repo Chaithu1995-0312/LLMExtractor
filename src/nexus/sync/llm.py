@@ -1,6 +1,7 @@
 import os
 import json
 from typing import Optional, Literal, Dict, Any, Union, List
+import traceback
 from dataclasses import dataclass, field
 from pydantic import BaseModel
 from llama_index.llms.ollama import Ollama
@@ -108,7 +109,7 @@ class LLMClient:
             
         self.provider = provider
         self.router = LLMRouter()
-        self.ollama_host = os.getenv("OLLAMA_HOST", "http://3.109.146.63:11434")
+        self.ollama_host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
         self.strict_mode = os.getenv("LLM_STRICT_MODE", "false").lower() == "true"
 
     def generate(self, system_prompt: str, user_prompt: str, 
@@ -214,12 +215,13 @@ class LLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "stream": False,
+            "stream": True, # Enabled streaming to prevent remote timeouts
             "options": {
-              "temperature": 0.0,
-              "num_ctx": 2048,
-              "num_thread": 2
-            } # Reduced context for CPU performance
+                "temperature": 0.0,
+                "num_ctx": 1024,
+                "num_thread": 2,
+                "num_predict": 512
+            }
         }
         
         print(f"--- [OLLAMA REQUEST] ---\n{json.dumps(payload, indent=2)}\n-----------------------")
@@ -230,14 +232,30 @@ class LLMClient:
             # Adding explicit timeout to avoid blocking indefinitely
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 if response.status == 200:
-                    raw_body = response.read().decode("utf-8")
-                    if not raw_body or not raw_body.strip():
-                        print("[LLMClient] Ollama returned empty response body.")
+                    full_text = ""
+                    for line in response:
+                        if not line:
+                            continue
+                        chunk_str = line.decode("utf-8").strip()
+                        if not chunk_str:
+                            continue
+                        
+                        try:
+                            chunk = json.loads(chunk_str)
+                            if "message" in chunk and "content" in chunk["message"]:
+                                full_text += chunk["message"]["content"]
+                            
+                            if chunk.get("done", False):
+                                break
+                        except json.JSONDecodeError:
+                            continue
+
+                    if not full_text:
+                        print("[LLMClient] Ollama returned empty response.")
                         return json.dumps({"error": "EMPTY_RESPONSE", "status": "HARD_FAIL"})
                         
-                    result = json.loads(raw_body)
-                    print(f"--- [OLLAMA RESPONSE] ---\n{json.dumps(result, indent=2)}\n------------------------")
-                    return result.get("message", {}).get("content", "")
+                    print(f"--- [OLLAMA RESPONSE] ---\n{full_text[:200]}...\n------------------------")
+                    return full_text
                 else:
                     print(f"[LLMClient] Ollama Error: {response.status}")
                     return json.dumps({"error": "HTTP_ERROR", "code": response.status, "status": "HARD_FAIL"})
@@ -298,7 +316,7 @@ class LLMClient:
                         })
 
              except Exception as e:
-                 print(f"Mock generation failed: {e}")
+                 print(f"[MOCK] Error: {e}")
                  pass
 
              return """
@@ -350,13 +368,39 @@ class StructuredIngestLLM:
         self._llm = Ollama(
             model=model,
             temperature=0.0,
-            request_timeout=300.0,
-            base_url="http://3.109.146.63:11434",
+            request_timeout=600.0,
+            base_url="http://127.0.0.1:11434",
             additional_kwargs={
-                "num_ctx": 2048,
-                "num_thread": 2
+                "num_ctx": 1024,
+                "num_thread": 2,
+                "num_predict": 256
             }
         )
+
+    def _fuzzy_extract_json(self, text: str) -> str:
+        """Robustly find and extract JSON content from potentially conversational LLM output."""
+        # Try to find the start and end of a JSON object or array
+        start_obj = text.find('{')
+        start_arr = text.find('[')
+        
+        start_idx = -1
+        if start_obj != -1 and (start_arr == -1 or start_obj < start_arr):
+            start_idx = start_obj
+        elif start_arr != -1:
+            start_idx = start_arr
+            
+        if start_idx == -1:
+            return text # No JSON markers found, return as is
+            
+        # Find the last matching closing marker
+        end_obj = text.rfind('}')
+        end_arr = text.rfind(']')
+        
+        end_idx = max(end_obj, end_arr)
+        if end_idx == -1 or end_idx <= start_idx:
+            return text # Malformed markers
+            
+        return text[start_idx:end_idx+1]
 
     async def extract(self, prompt: str) -> ExtractionResponse:
         print(f"[OLLAMA-FAST] Model: {self._llm.model}")
@@ -372,26 +416,52 @@ class StructuredIngestLLM:
             + prompt
         )
 
+        raw = None
         try:
             # First attempt
             response = await self._llm.acomplete(enhanced_prompt)
             raw = response.text.strip()
-            # Handle potential markdown code blocks
-            if raw.startswith("```json"):
-                raw = raw[7:]
-            if raw.endswith("```"):
-                raw = raw[:-3]
-            raw = raw.strip()
+            
+            # Pre-parse: Fuzzy extraction to handle conversational fluff or markdown
+            cleaned_raw = self._fuzzy_extract_json(raw)
 
-            return ExtractionResponse.model_validate_json(raw)
+            # Safely parse, normalize, then validate
+            parsed = json.loads(cleaned_raw)
+            
+            # Handle "Echo" response: Model returned the source list instead of pointers
+            if isinstance(parsed, list):
+                # Check if it looks like the source JSON (has 'role', 'content' keys)
+                if any(isinstance(item, dict) and 'role' in item and 'content' in item for item in parsed):
+                    print("[LLM] Source echo detected. Returning empty pointers.")
+                    return ExtractionResponse(extracted_pointers=[])
+                
+                # If it looks like a list of pointers, wrap it
+                if all(isinstance(item, dict) and "topic_id" in item and "json_path" in item for item in parsed):
+                    parsed = {"extracted_pointers": parsed}
+                else:
+                    raise ValueError("LLM returned list with invalid PointerObject structure")
+
+            return ExtractionResponse.model_validate(parsed)
         except Exception as e:
-            print(f"[LLM] First parse failed: {e}. Retrying once...")
+            # Capture full traceback
+            tb_str = traceback.format_exc()
+            
+            # Log to a dedicated file for deeper inspection
+            with open("ollama_debug_log.txt", "a", encoding="utf-8") as debug_file:
+                debug_file.write(f"---\n")
+                debug_file.write(f"Timestamp: {os.getenv('CURRENT_TIME', 'UNKNOWN')}\n")
+                debug_file.write(f"[LLM] First parse failed. Prompt sent:\n{enhanced_prompt}\n")
+                debug_file.write(f"[LLM] Raw response received:\n{raw}\n")
+                debug_file.write(f"[LLM] Exception: {e}\n")
+                debug_file.write(f"[LLM] Full Traceback:\n{tb_str}\n")
+                debug_file.write(f"---\n\n")
 
-            # Recovery: try to extract a verbatim quote if it's a memory error
+            print(f"[LLM] First parse failed. Detailed logs written to ollama_debug_log.txt. Retrying once...")
+
+            # Recovery: try to extract a verbatim quote if it is a memory error
             if "memory" in str(e).lower() or "500" in str(e):
                  print("[LLM] Memory error detected. Using local fallback.")
-                 mock_json = self._mock_extract(prompt)
-                 return ExtractionResponse.model_validate_json(mock_json)
+                 return ExtractionResponse.model_validate_json(self._mock_extract(prompt)) # Mock is always valid JSON object
 
             # Retry with stronger instruction
             retry_prompt = (
@@ -402,15 +472,23 @@ class StructuredIngestLLM:
 
             try:
                 response = await self._llm.acomplete(retry_prompt)
-                raw = response.text.strip()
+                raw_retry = response.text.strip()
                 # Handle potential markdown code blocks
-                if raw.startswith("```json"):
-                    raw = raw[7:]
-                if raw.endswith("```"):
-                    raw = raw[:-3]
-                raw = raw.strip()
+                if raw_retry.startswith("```json"):
+                    raw_retry = raw_retry[7:]
+                if raw_retry.endswith("```"):
+                    raw_retry = raw_retry[:-3]
+                raw_retry = raw_retry.strip()
 
-                return ExtractionResponse.model_validate_json(raw)
+                # Safely parse, normalize, then validate (retry branch)
+                parsed = json.loads(raw_retry)
+                if isinstance(parsed, list):
+                    if all(isinstance(item, dict) and "topic_id" in item and "json_path" in item for item in parsed):
+                        parsed = {"extracted_pointers": parsed}
+                    else:
+                        raise ValueError("LLM returned list with invalid PointerObject structure on retry")
+
+                return ExtractionResponse.model_validate(parsed)
             except Exception as retry_e:
                 print(f"[LLM] Second attempt failed: {retry_e}. Raising.")
                 raise retry_e
@@ -449,4 +527,4 @@ class StructuredIngestLLM:
                         return json.dumps({"extracted_pointers": extracted})
              except Exception as e:
                  print(f"[MOCK] Error: {e}")
-        return '{"extracted_pointers": []}'
+        return "{\"extracted_pointers\": []}"
