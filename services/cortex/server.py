@@ -12,6 +12,9 @@ from nexus.utils_logging import setup_logging
 # Initialize logging as early as possible
 setup_logging("cortex")
 
+# G-01: Import auth middleware before any endpoint definitions.
+from services.cortex.auth import require_internal_auth, extract_verified_actor
+
 # Configure standard logging to use our MultiWriter intercepted stdout
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(message)s')
 # Explicitly handle Werkzeug (Flask's server) logger
@@ -263,38 +266,40 @@ def jarvis_graph_index():
         }), 200
 
 @app.route("/jarvis/anchor", methods=["POST"])
+@require_internal_auth
 def jarvis_anchor():
+    # G-01: actor comes from verified token, not request body.
+    actor = extract_verified_actor(request)
     data = request.json
     brick_id = data.get("brick_id")
-    action = data.get("action") # "promote" or "reject"
-    
+    action = data.get("action")  # "promote" or "reject"
+
     if not brick_id or action not in ["promote", "reject"]:
         return jsonify({"error": "Invalid anchor data"}), 400
 
     try:
         graph_manager = GraphManager()
-        
+
         updates = {}
         if action == "promote":
             updates = {"anchored": True, "rejected": False}
         elif action == "reject":
             updates = {"anchored": False, "rejected": True}
-        
-        # Persist to graph database. 
-        # Note: We assume the node exists or we are registering a placeholder "brick" node if it doesn't.
-        # Ideally, brick nodes are already ingested.
-        graph_manager.register_node("brick", brick_id, updates, merge=True)
 
-        return jsonify({"status": "success", "brick_id": brick_id, "action": action})
+        graph_manager.register_node("brick", brick_id, updates, merge=True)
+        return jsonify({"status": "success", "brick_id": brick_id, "action": action, "actor": actor})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/jarvis/node/promote", methods=["POST"])
+@require_internal_auth
 def jarvis_node_promote():
+    # G-01: actor sourced from verified token, not caller body.
+    actor = extract_verified_actor(request)
     data = request.json
     node_id = data.get("node_id")
     promote_bricks = data.get("promote_bricks", [])
-    actor = data.get("actor", "user") # Default actor
 
     if not node_id:
         return jsonify({"error": "node_id required"}), 400
@@ -302,8 +307,7 @@ def jarvis_node_promote():
     try:
         graph_manager = GraphManager()
         graph_manager.promote_node_to_frozen(node_id, promote_bricks, actor)
-        
-        # Return updated node state
+
         node_type, node_data = graph_manager.get_node(node_id)
         return jsonify({
             "status": "success",
@@ -318,12 +322,15 @@ def jarvis_node_promote():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/jarvis/node/kill", methods=["POST"])
+@require_internal_auth
 def jarvis_node_kill():
+    # G-01: actor sourced from verified token, not caller body.
+    actor = extract_verified_actor(request)
     data = request.json
     node_id = data.get("node_id")
     reason = data.get("reason", "No reason provided")
-    actor = data.get("actor", "user")
 
     if not node_id:
         return jsonify({"error": "node_id required"}), 400
@@ -331,7 +338,7 @@ def jarvis_node_kill():
     try:
         graph_manager = GraphManager()
         graph_manager.kill_node(node_id, reason, actor)
-        
+
         node_type, node_data = graph_manager.get_node(node_id)
         return jsonify({
             "status": "success",
@@ -346,13 +353,16 @@ def jarvis_node_kill():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/jarvis/node/supersede", methods=["POST"])
+@require_internal_auth
 def jarvis_node_supersede():
+    # G-01: actor sourced from verified token, not caller body.
+    actor = extract_verified_actor(request)
     data = request.json
     old_node_id = data.get("old_node_id")
     new_node_id = data.get("new_node_id")
     reason = data.get("reason", "Superseded")
-    actor = data.get("actor", "user")
 
     if not old_node_id or not new_node_id:
         return jsonify({"error": "old_node_id and new_node_id required"}), 400
@@ -360,7 +370,7 @@ def jarvis_node_supersede():
     try:
         graph_manager = GraphManager()
         graph_manager.supersede_node(old_node_id, new_node_id, reason, actor)
-        
+
         return jsonify({
             "status": "success",
             "old_node_id": old_node_id,

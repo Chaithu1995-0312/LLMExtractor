@@ -24,6 +24,13 @@ class DriftEngine:
     def process_node(self, node_id: str):
         """
         Main entry point. Idempotent.
+
+        D-01 FIX: Vector index write is TXN-gated.
+        The graph node must exist in graph.nodes before the vector index is
+        updated. If the vector write fails, we abort with a clear error rather
+        than silently proceeding — a node that is in the graph but invisible
+        to vector search will generate permanently missing drift candidates and
+        allow superseded nodes to resurface as live candidates.
         """
         # 1. Fetch Node
         node_data = self._fetch_node(node_id)
@@ -41,31 +48,50 @@ class DriftEngine:
             print(f"[DriftEngine] Node {node_id} has no statement. Skipping.")
             return
 
-        # 2. Embed & Store (Idempotent)
-        if not self.vector_store.exists(node_id):
-            vector = self.embedding_service.embed(statement)
-            self.vector_store.add(node_id, vector)
-            self._record_vector_meta(node_id)
-            print(f"[DriftEngine] Indexed node {node_id}")
-        else:
-            # Re-fetch vector for search (VectorStore doesn't expose get_vector yet, so re-embed)
-            # Optimization: In Phase 2, VectorStore should support get_vector if feasible, 
-            # or we rely on the fact that if it exists, we might still want to search.
-            # For now, we re-embed to search. Cost is low for local model.
-            vector = self.embedding_service.embed(statement)
+        # 2. Embed & Store — gated: vector write must succeed or abort
+        already_indexed = self.vector_store.exists(node_id)
+        vector = self.embedding_service.embed(statement)
 
-        # 3. Search Similar Nodes
-        # k=10 candidates
+        if not already_indexed:
+            # D-01: Atomic gate — vector write must succeed before we proceed.
+            # If add() raises, we propagate the exception up. The caller (task
+            # handler) is wrapped in a transaction; it will rollback the
+            # graph.vector_meta record atomically.
+            self.vector_store.add(node_id, vector)   # raises on failure
+            self._record_vector_meta(node_id)         # DB record mirrors index state
+            self.vector_store.save()                  # Persist to disk immediately (not deferred)
+
+            # FZ-02: Flip vector_status to 'indexed' AFTER all three writes above
+            # have succeeded. This is the visibility gate: _fetch_node() will only
+            # return this node in future drift scans once this flip is committed.
+            # Order of operations is strict:
+            #   add() ✓  →  save() ✓  →  vector_meta ✓  →  vector_status=indexed
+            # Any failure before this line leaves vector_status='pending',
+            # keeping the node invisible to drift scans until a retry completes.
+            self._execute(
+                "UPDATE graph.nodes "
+                "SET data = jsonb_set(data, '{vector_status}', '\"indexed\"') "
+                "WHERE id = %s",
+                (node_id,)
+            )
+            print(f"[DriftEngine] Indexed node {node_id} (vector_status=indexed)")
+
+        # 3. Search Similar Nodes — k=10 candidates
         candidates = self.vector_store.search(vector, k=10)
-        
+
         # 4. Classify & Generate Candidates
         for target_id, score in candidates:
             if target_id == node_id:
                 continue
-            
+
             # Guard: Skip if target is already superseded
             target_data = self._fetch_node(target_id)
             if target_data and target_data.get("lifecycle") == "superseded":
+                # D-01: Superseded nodes must also be removed from the vector
+                # index to prevent them from resurfacing as drift candidates.
+                # Mark for removal in vector_meta; actual index rebuild is a
+                # maintenance task (scripts/maintenance/rebuild_vector_index.py).
+                self._mark_vector_stale(target_id)
                 continue
 
             relation = self._classify_relationship(score, node_data, target_id)
@@ -73,7 +99,7 @@ class DriftEngine:
                 # Real Edge Deduplication Guard
                 if self._edge_exists(node_id, target_id, relation):
                     continue
-                
+
                 self._store_edge_candidate(node_id, target_id, relation, score)
 
     def _execute(self, sql, params=None):
@@ -105,7 +131,25 @@ class DriftEngine:
         return row is not None
 
     def _fetch_node(self, node_id: str) -> Optional[Dict]:
-        row = self._fetch_one("SELECT data FROM graph.nodes WHERE id = %s", (node_id,))
+        """
+        FZ-02: Fetch a node ONLY if it has been fully vector-indexed.
+
+        vector_status = 'indexed' means:
+          1. The node exists in graph.nodes  ✓
+          2. vector_store.add() succeeded    ✓
+          3. vector_store.save() completed   ✓
+          4. graph.vector_meta was recorded  ✓
+
+        A node with vector_status = 'pending' (or no vector_status field,
+        which defaults to 'pending' via the column default) is NOT yet safe
+        to include in drift candidate searches. Including it would create a
+        ghost drift relationship against an un-indexed node, violating the
+        Graph visibility == Vector visibility invariant.
+        """
+        row = self._fetch_one(
+            "SELECT data FROM graph.nodes WHERE id = %s AND data->>'vector_status' = 'indexed'",
+            (node_id,)
+        )
         if row:
             return row[0] if isinstance(row[0], dict) else json.loads(row[0])
         return None
@@ -125,6 +169,34 @@ class DriftEngine:
             """,
             (node_id, self.embedding_service.model_name, self.embedding_service.model_version())
         )
+
+    def _mark_vector_stale(self, node_id: str):
+        """
+        D-01 FIX: Mark a node's vector index entry as stale when the node is
+        superseded. This prevents superseded nodes from continuing to surface
+        in similarity searches and generating ghost drift candidates.
+
+        The actual removal from the in-memory FAISS index requires a full
+        index rebuild (FAISS IndexFlatIP does not support deletion). The stale
+        flag in graph.vector_meta signals that scripts/maintenance/
+        rebuild_vector_index.py should exclude this node on next rebuild.
+        """
+        try:
+            self._execute(
+                """
+                UPDATE graph.vector_meta
+                SET is_stale = TRUE,
+                    stale_reason = 'lifecycle:superseded',
+                    stale_at = NOW()
+                WHERE node_id = %s
+                """,
+                (node_id,)
+            )
+            print(f"[DriftEngine] Marked vector entry stale for superseded node {node_id}")
+        except Exception as e:
+            # Non-fatal: stale marking is a best-effort correctness hint.
+            # The maintenance rebuild will re-derive staleness from lifecycle.
+            print(f"[DriftEngine] WARN: Could not mark vector stale for {node_id}: {e}")
 
     def _classify_relationship(self, score: float, source_node: Dict, target_id: str) -> Optional[str]:
         """

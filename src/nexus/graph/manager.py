@@ -666,32 +666,30 @@ class GraphManager:
     def mark_forming(self, brick_id: str, resolved_by: str, actor: str):
         """
         Transition a brick to FORMING state with resolution metadata.
+
+        B-01 FIX: graph.nodes is the SINGLE authority for lifecycle state.
+        The sync.bricks fallback read path has been removed. If a brick does
+        not exist in graph.nodes it has not been migrated yet and the caller
+        MUST run sync_bricks_to_nodes() first. No alternate truth path is
+        permitted here — doing so would allow the next migration sweep to
+        silently reverse a FORMING promotion back to loose.
         """
         data = self._get_node_data(brick_id)
         if not data:
-            # Fallback to checking 'bricks' table if unified sync hasn't happened
-            row = self._fetch_one("SELECT content, state, topic_id FROM sync.bricks WHERE id = %s", (brick_id,))
-            if row:
-                # Materialize as node first
-                data = {
-                    "statement": row[0],
-                    "lifecycle": "forming",
-                    "metadata": {
-                        "sync_topic_id": row[2],
-                        "resolved_by": resolved_by,
-                        "actor": actor,
-                        "resolved_at": datetime.now(timezone.utc).isoformat()
-                    }
-                }
-                self.register_node("brick", brick_id, data)
-                # Also update sync table for consistency
-                self._execute("UPDATE sync.bricks SET state = 'FORMING' WHERE id = %s", (brick_id,))
-                return
-            raise ValueError(f"Brick {brick_id} not found")
+            # B-01: Do NOT fall back to sync.bricks. Raising here is correct.
+            # The brick has not been projected into the unified node store yet.
+            # Callers must ensure sync_bricks_to_nodes() has run before
+            # attempting lifecycle mutations.
+            raise ValueError(
+                f"Brick {brick_id} not found in graph.nodes. "
+                f"Run sync_bricks_to_nodes() before mutating lifecycle state. "
+                f"Falling back to sync.bricks is forbidden — it creates dual authority."
+            )
 
-        # Monotonic check
-        if data.get("lifecycle") != "loose":
-            return # Already moved forward
+        # Monotonic check — idempotent if already advanced
+        current = data.get("lifecycle", "loose")
+        if current != "loose":
+            return  # Already moved forward; idempotent success
 
         data["lifecycle"] = "forming"
         data.setdefault("metadata", {})
@@ -699,23 +697,44 @@ class GraphManager:
         data["metadata"]["actor"] = actor
         data["metadata"]["resolved_at"] = datetime.now(timezone.utc).isoformat()
 
-        if hasattr(self.db, 'connection'): # Adapter
+        if hasattr(self.db, 'connection'):  # Adapter
             with self.db.transaction() as cur:
-                self._mark_forming_logic(cur, brick_id, data)
-        else: # Cursor
-            self._mark_forming_logic(self.db, brick_id, data)
+                self._mark_forming_logic(cur, brick_id, data, actor)
+        else:  # Cursor already in transaction
+            self._mark_forming_logic(self.db, brick_id, data, actor)
 
-    def _mark_forming_logic(self, cur, brick_id, data):
+    def _mark_forming_logic(self, cur, brick_id, data, actor: str = "system"):
+        # Single write path: graph.nodes is authoritative.
+        # sync.bricks is updated as a projection mirror ONLY — not read for truth.
         cur.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), brick_id))
-        cur.execute("UPDATE sync.bricks SET state = 'FORMING' WHERE id = %s", (brick_id,))
+        # Mirror the state into sync.bricks for backward-compat read queries only.
+        # This write is best-effort: its failure does NOT invalidate the lifecycle
+        # mutation above, because graph.nodes is the sole authority.
+        try:
+            # FZ-01: Monotonicity guard on the mirror write.
+            # Only advance sync.bricks state if it is currently BEHIND 'FORMING'.
+            # States FINAL and SUPERSEDED are equal-or-ahead in the lifecycle —
+            # writing 'FORMING' over them would collapse supersession lineage and
+            # cause the next sync_bricks_to_nodes() sweep to project the wrong
+            # lifecycle into graph.nodes.
+            # States NOT IN ('SUPERSEDED', 'FINAL') = {IMPROVISE, FORMING} — safe to update.
+            cur.execute(
+                "UPDATE sync.bricks SET state = 'FORMING' WHERE id = %s "
+                "AND state NOT IN ('SUPERSEDED', 'FINAL')",
+                (brick_id,)
+            )
+        except Exception as mirror_err:
+            # Log but do not re-raise: the authoritative write (graph.nodes) succeeded.
+            print(f"[WARN] FZ-01: sync.bricks mirror update failed for {brick_id}: {mirror_err}. "
+                  f"graph.nodes lifecycle is authoritative and correct.")
 
         self._log_audit_event(
             event_type="BRICK_RESOLVED",
-            agent="system", # Needs actor propagation? 
+            agent=actor,
             component="resolver",
             decision_action=DecisionAction.ACCEPTED,
             reason="Deterministic structural match with user input",
-            metadata={"brick_id": brick_id, "resolved_by": "system"}
+            metadata={"brick_id": brick_id, "resolved_by": resolved_by}
         )
 
     def get_all_nodes_raw(self) -> List[Dict]:
