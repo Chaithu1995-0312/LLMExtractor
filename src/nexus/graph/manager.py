@@ -12,12 +12,14 @@ from nexus.db import get_adapter
 from nexus.db.init_db import init_database
 
 class GraphManager:
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = None, db=None):
         # db_path is ignored in Postgres implementation
-        self.db = get_adapter()
-        self._init_db()
-        # Enforce unified storage on startup - Idempotent
-        self.sync_bricks_to_nodes()
+        # db can be an injected cursor for transactional coupling
+        self.db = db or get_adapter()
+        if not db:
+            self._init_db()
+            # Enforce unified storage on startup - Idempotent
+            self.sync_bricks_to_nodes()
 
     def _init_db(self):
         """Initialize the database with the schema."""
@@ -26,35 +28,59 @@ class GraphManager:
         except Exception as e:
             print(f"[GraphManager] Error initializing database: {e}")
 
+    def _execute(self, sql, params=None):
+        if hasattr(self.db, 'execute'): # Cursor or Adapter
+             return self.db.execute(sql, params)
+        return self.db.execute(sql, params)
+
+    def _fetch_one(self, sql, params=None):
+        if hasattr(self.db, 'fetchone'): # Cursor
+            self.db.execute(sql, params)
+            return self.db.fetchone()
+        return self.db.fetch_one(sql, params)
+
+    def _fetch_all(self, sql, params=None):
+        if hasattr(self.db, 'fetchall'): # Cursor
+            self.db.execute(sql, params)
+            return self.db.fetchall()
+        return self.db.fetch_all(sql, params)
+
     def register_node(self, node_type: str, node_id: str, attrs: Dict[str, Any], merge: bool = False):
         """
         Register a generic node. Idempotent by default.
         If merge=True, updates existing node data.
         """
-        with self.db.transaction() as cur:
-            try:
-                # Check if exists
-                cur.execute("SELECT data FROM graph.nodes WHERE id = %s", (node_id,))
-                row = cur.fetchone()
-                
-                if row:
-                    if merge:
-                        existing_data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-                        existing_data.update(attrs)
-                        cur.execute(
-                            "UPDATE graph.nodes SET data = %s WHERE id = %s",
-                            (json.dumps(existing_data), node_id)
-                        )
-                    return # Already exists or updated
-                
-                # Insert
-                cur.execute(
-                    "INSERT INTO graph.nodes (id, type, data, created_at) VALUES (%s, %s, %s, NOW())",
-                    (node_id, node_type, json.dumps(attrs))
-                )
-            except Exception as e:
-                print(f"Error registering node {node_id}: {e}")
-                raise
+        # If we have a cursor, we skip the with db.transaction() which starts a new one
+        if hasattr(self.db, 'connection'): # Adapter
+            with self.db.transaction() as cur:
+                self._register_node_logic(cur, node_type, node_id, attrs, merge)
+        else: # Cursor
+            self._register_node_logic(self.db, node_type, node_id, attrs, merge)
+
+    def _register_node_logic(self, cur, node_type: str, node_id: str, attrs: Dict[str, Any], merge: bool = False):
+        try:
+            # Check if exists
+            cur.execute("SELECT data FROM graph.nodes WHERE id = %s", (node_id,))
+            row = cur.fetchone()
+            
+            if row:
+                if merge:
+                    existing_data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                    existing_data.update(attrs)
+                    cur.execute(
+                        "UPDATE graph.nodes SET data = %s WHERE id = %s",
+                        (json.dumps(existing_data), node_id)
+                    )
+                return # Already exists or updated
+            
+            # Insert
+            cur.execute(
+                "INSERT INTO graph.nodes (id, type, data, created_at) VALUES (%s, %s, %s, NOW())",
+                (node_id, node_type, json.dumps(attrs))
+            )
+        except Exception as e:
+            print(f"Error registering node {node_id}: {e}")
+            raise
 
     def get_intents_by_topic(self, topic_node_id: str) -> List[Intent]:
         """
@@ -66,7 +92,7 @@ class GraphManager:
             JOIN graph.edges e ON n.id = e.target_id
             WHERE e.source_id = %s AND e.edge_type = %s AND n.type = 'intent'
         """
-        rows = self.db.fetch_all(query, (topic_node_id, EdgeType.ASSEMBLED_IN.value))
+        rows = self._fetch_all(query, (topic_node_id, EdgeType.ASSEMBLED_IN.value))
         
         intents = []
         for r in rows:
@@ -98,7 +124,7 @@ class GraphManager:
             visited.add(current_id)
             
             # Fetch outgoing edges of the same type
-            rows = self.db.fetch_all("SELECT target_id FROM graph.edges WHERE source_id=%s AND edge_type=%s", (current_id, edge_type_str))
+            rows = self._fetch_all("SELECT target_id FROM graph.edges WHERE source_id=%s AND edge_type=%s", (current_id, edge_type_str))
             targets = [row[0] for row in rows]
             
             for t in targets:
@@ -129,23 +155,29 @@ class GraphManager:
             if cycle:
                 raise ValueError(f"Cycle detected for {edge_type_str}: {' -> '.join(cycle)}")
 
-        with self.db.transaction() as cur:
-            try:
-                # Check if exists
-                cur.execute(
-                    "SELECT edge_type FROM graph.edges WHERE source_id=%s AND target_id=%s AND edge_type=%s",
-                    (src_id, dst_id, edge_type_str)
-                )
-                if cur.fetchone():
-                    return
+        if hasattr(self.db, 'connection'): # Adapter
+            with self.db.transaction() as cur:
+                self._register_edge_logic(cur, src_id, dst_id, edge_type_str, attrs)
+        else: # Cursor
+            self._register_edge_logic(self.db, src_id, dst_id, edge_type_str, attrs)
 
-                cur.execute(
-                    "INSERT INTO graph.edges (source_id, target_id, edge_type, metadata, created_at) VALUES (%s, %s, %s, %s, NOW())",
-                    (src_id, dst_id, edge_type_str, json.dumps(attrs or {}))
-                )
-            except Exception as e:
-                print(f"Error registering edge {src_id}->{dst_id}: {e}")
-                raise
+    def _register_edge_logic(self, cur, src_id, dst_id, edge_type_str, attrs):
+        try:
+            # Check if exists
+            cur.execute(
+                "SELECT edge_type FROM graph.edges WHERE source_id=%s AND target_id=%s AND edge_type=%s",
+                (src_id, dst_id, edge_type_str)
+            )
+            if cur.fetchone():
+                return
+
+            cur.execute(
+                "INSERT INTO graph.edges (source_id, target_id, edge_type, metadata, created_at) VALUES (%s, %s, %s, %s, NOW())",
+                (src_id, dst_id, edge_type_str, json.dumps(attrs or {}))
+            )
+        except Exception as e:
+            print(f"Error registering edge {src_id}->{dst_id}: {e}")
+            raise
 
     # Typed helpers for new Schema
     def add_intent(self, intent: Intent):
@@ -175,7 +207,7 @@ class GraphManager:
         self.register_node("scope", scope.id, data)
 
     def _get_node_data(self, node_id: str) -> Optional[Dict]:
-        row = self.db.fetch_one("SELECT data FROM graph.nodes WHERE id=%s", (node_id,))
+        row = self._fetch_one("SELECT data FROM graph.nodes WHERE id=%s", (node_id,))
         if row:
             return row[0] if isinstance(row[0], dict) else json.loads(row[0])
         return None
@@ -185,7 +217,7 @@ class GraphManager:
         Retrieve node type and data.
         Returns (type, data_dict) or None.
         """
-        row = self.db.fetch_one("SELECT type, data FROM graph.nodes WHERE id=%s", (node_id,))
+        row = self._fetch_one("SELECT type, data FROM graph.nodes WHERE id=%s", (node_id,))
         if row:
             data = row[1] if isinstance(row[1], dict) else json.loads(row[1])
             return (row[0], data)
@@ -274,7 +306,7 @@ class GraphManager:
         
         # Append to DB
         try:
-            self.db.execute(
+            self._execute(
                 """
                 INSERT INTO governance.audit_trace (event_type, actor, payload, created_at)
                 VALUES (%s, %s, %s, NOW())
@@ -314,7 +346,7 @@ class GraphManager:
         data["killed_by"] = actor
         
         # Persist
-        self.db.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), node_id))
+        self._execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), node_id))
 
         # Audit
         self._log_audit_event(
@@ -355,7 +387,7 @@ class GraphManager:
         data["hard_anchors"] = list(set(data.get("hard_anchors", []) + promote_bricks))
 
         # Persist
-        self.db.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), node_id))
+        self._execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), node_id))
 
         self._log_audit_event(
             event_type=AuditEventType.NODE_FROZEN,
@@ -395,27 +427,33 @@ class GraphManager:
         if old_node_id == new_node_id:
             raise ValueError("Cannot supersede a node with itself")
 
-        with self.db.transaction() as cur:
-            # 1. Create Edge
-            edge_type_str = EdgeType.SUPERSEDED_BY.value
-            cur.execute(
-                "INSERT INTO graph.edges (source_id, target_id, edge_type, metadata, created_at) VALUES (%s, %s, %s, %s, NOW()) ON CONFLICT DO NOTHING",
-                (old_node_id, new_node_id, edge_type_str, json.dumps({
-                    "reason": reason,
-                    "actor": actor,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }))
-            )
+        if hasattr(self.db, 'connection'): # Adapter
+            with self.db.transaction() as cur:
+                self._supersede_node_logic(cur, old_node_id, new_node_id, old_data, new_data, reason, actor)
+        else: # Cursor
+            self._supersede_node_logic(self.db, old_node_id, new_node_id, old_data, new_data, reason, actor)
 
-            # 2. Update Node Metadata (Old)
-            old_data["superseded_by"] = new_node_id
-            
-            # 3. Update Node Metadata (New)
-            new_data["supersedes"] = list(set(new_data.get("supersedes", []) + [old_node_id]))
+    def _supersede_node_logic(self, cur, old_node_id, new_node_id, old_data, new_data, reason, actor):
+        # 1. Create Edge
+        edge_type_str = EdgeType.SUPERSEDED_BY.value
+        cur.execute(
+            "INSERT INTO graph.edges (source_id, target_id, edge_type, metadata, created_at) VALUES (%s, %s, %s, %s, NOW()) ON CONFLICT DO NOTHING",
+            (old_node_id, new_node_id, edge_type_str, json.dumps({
+                "reason": reason,
+                "actor": actor,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }))
+        )
 
-            # Persist Nodes
-            cur.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(old_data), old_node_id))
-            cur.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(new_data), new_node_id))
+        # 2. Update Node Metadata (Old)
+        old_data["superseded_by"] = new_node_id
+        
+        # 3. Update Node Metadata (New)
+        new_data["supersedes"] = list(set(new_data.get("supersedes", []) + [old_node_id]))
+
+        # Persist Nodes
+        cur.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(old_data), old_node_id))
+        cur.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(new_data), new_node_id))
 
         self._log_audit_event(
             event_type=AuditEventType.NODE_SUPERSEDED,
@@ -462,7 +500,7 @@ class GraphManager:
         
         # Update
         data["lifecycle"] = new_lifecycle.value
-        self.db.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), intent_id))
+        self._execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), intent_id))
 
     def add_typed_edge(self, edge: Edge, actor: str = "system"):
         # Write-Time Invariants
@@ -477,7 +515,7 @@ class GraphManager:
                  raise ValueError(f"Cannot add OVERRIDES edge from non-FROZEN intent {edge.source_id} ({src_lifecycle})")
 
             # 2. Target cannot have multiple OVERRIDES
-            existing = self.db.fetch_all("SELECT source_id FROM graph.edges WHERE target_id=%s AND edge_type=%s", (edge.target_id, EdgeType.OVERRIDES.value))
+            existing = self._fetch_all("SELECT source_id FROM graph.edges WHERE target_id=%s AND edge_type=%s", (edge.target_id, EdgeType.OVERRIDES.value))
             if existing:
                 # If existing is same source, it's idempotent retry, allow.
                 if existing[0][0] != edge.source_id:
@@ -499,7 +537,7 @@ class GraphManager:
         )
 
     def get_all_intents(self) -> List[Intent]:
-        rows = self.db.fetch_all("SELECT id, data, created_at FROM graph.nodes WHERE type='intent'")
+        rows = self._fetch_all("SELECT id, data, created_at FROM graph.nodes WHERE type='intent'")
         
         intents = []
         for r in rows:
@@ -516,7 +554,7 @@ class GraphManager:
         return intents
 
     def get_all_edges(self) -> List[Edge]:
-        rows = self.db.fetch_all("SELECT source_id, target_id, edge_type, metadata FROM graph.edges")
+        rows = self._fetch_all("SELECT source_id, target_id, edge_type, metadata FROM graph.edges")
         
         edges = []
         for r in rows:
@@ -531,9 +569,9 @@ class GraphManager:
 
     def get_edges_for_node(self, node_id: str) -> List[Edge]:
         # Outgoing
-        out_rows = self.db.fetch_all("SELECT source_id, target_id, edge_type, metadata FROM graph.edges WHERE source_id=%s", (node_id,))
+        out_rows = self._fetch_all("SELECT source_id, target_id, edge_type, metadata FROM graph.edges WHERE source_id=%s", (node_id,))
         # Incoming
-        in_rows = self.db.fetch_all("SELECT source_id, target_id, edge_type, metadata FROM graph.edges WHERE target_id=%s", (node_id,))
+        in_rows = self._fetch_all("SELECT source_id, target_id, edge_type, metadata FROM graph.edges WHERE target_id=%s", (node_id,))
         
         edges = []
         for r in out_rows + in_rows:
@@ -547,7 +585,7 @@ class GraphManager:
         return edges
 
     def get_all_scopes(self) -> Dict[str, ScopeNode]:
-        rows = self.db.fetch_all("SELECT id, data, created_at FROM graph.nodes WHERE type='scope'")
+        rows = self._fetch_all("SELECT id, data, created_at FROM graph.nodes WHERE type='scope'")
         
         scopes = {}
         for r in rows:
@@ -563,7 +601,7 @@ class GraphManager:
         return scopes
     
     def get_all_sources(self) -> Dict[str, Source]:
-        rows = self.db.fetch_all("SELECT id, data, created_at FROM graph.nodes WHERE type='source'")
+        rows = self._fetch_all("SELECT id, data, created_at FROM graph.nodes WHERE type='source'")
 
         sources = {}
         for r in rows:
@@ -584,16 +622,21 @@ class GraphManager:
         Delete a node and all connected edges.
         """
         try:
-            with self.db.transaction() as cur:
-                # Delete edges where this node is source or target
-                cur.execute("DELETE FROM graph.edges WHERE source_id = %s OR target_id = %s", (node_id, node_id))
-                
-                # Delete the node
-                cur.execute("DELETE FROM graph.nodes WHERE id = %s", (node_id,))
+            if hasattr(self.db, 'connection'): # Adapter
+                with self.db.transaction() as cur:
+                    self._delete_node_logic(cur, node_id)
+            else: # Cursor
+                self._delete_node_logic(self.db, node_id)
             return True
         except Exception as e:
             print(f"Error deleting node {node_id}: {e}")
             return False
+
+    def _delete_node_logic(self, cur, node_id):
+        # Delete edges where this node is source or target
+        cur.execute("DELETE FROM graph.edges WHERE source_id = %s OR target_id = %s", (node_id, node_id))
+        # Delete the node
+        cur.execute("DELETE FROM graph.nodes WHERE id = %s", (node_id,))
 
     def get_loose_bricks(self, topic_id: str) -> List[Dict]:
         """
@@ -607,7 +650,7 @@ class GraphManager:
             AND data->>'lifecycle' = 'loose'
             AND data->'metadata'->>'sync_topic_id' = %s
         """
-        rows = self.db.fetch_all(query, (topic_id,))
+        rows = self._fetch_all(query, (topic_id,))
         
         results = []
         for r in rows:
@@ -627,7 +670,7 @@ class GraphManager:
         data = self._get_node_data(brick_id)
         if not data:
             # Fallback to checking 'bricks' table if unified sync hasn't happened
-            row = self.db.fetch_one("SELECT content, state, topic_id FROM sync.bricks WHERE id = %s", (brick_id,))
+            row = self._fetch_one("SELECT content, state, topic_id FROM sync.bricks WHERE id = %s", (brick_id,))
             if row:
                 # Materialize as node first
                 data = {
@@ -642,7 +685,7 @@ class GraphManager:
                 }
                 self.register_node("brick", brick_id, data)
                 # Also update sync table for consistency
-                self.db.execute("UPDATE sync.bricks SET state = 'FORMING' WHERE id = %s", (brick_id,))
+                self._execute("UPDATE sync.bricks SET state = 'FORMING' WHERE id = %s", (brick_id,))
                 return
             raise ValueError(f"Brick {brick_id} not found")
 
@@ -656,19 +699,23 @@ class GraphManager:
         data["metadata"]["actor"] = actor
         data["metadata"]["resolved_at"] = datetime.now(timezone.utc).isoformat()
 
-        # Update in DB
-        with self.db.transaction() as cur:
-            cur.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), brick_id))
-            # Keep 'bricks' table in sync if it exists
-            cur.execute("UPDATE sync.bricks SET state = 'FORMING' WHERE id = %s", (brick_id,))
+        if hasattr(self.db, 'connection'): # Adapter
+            with self.db.transaction() as cur:
+                self._mark_forming_logic(cur, brick_id, data)
+        else: # Cursor
+            self._mark_forming_logic(self.db, brick_id, data)
+
+    def _mark_forming_logic(self, cur, brick_id, data):
+        cur.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), brick_id))
+        cur.execute("UPDATE sync.bricks SET state = 'FORMING' WHERE id = %s", (brick_id,))
 
         self._log_audit_event(
             event_type="BRICK_RESOLVED",
-            agent=actor,
+            agent="system", # Needs actor propagation? 
             component="resolver",
             decision_action=DecisionAction.ACCEPTED,
             reason="Deterministic structural match with user input",
-            metadata={"brick_id": brick_id, "resolved_by": resolved_by}
+            metadata={"brick_id": brick_id, "resolved_by": "system"}
         )
 
     def get_all_nodes_raw(self) -> List[Dict]:
@@ -676,7 +723,7 @@ class GraphManager:
         Retrieve all nodes as dictionaries suitable for API response.
         """
         # 1. Get explicit graph nodes
-        rows = self.db.fetch_all("SELECT id, type, data, created_at FROM graph.nodes")
+        rows = self._fetch_all("SELECT id, type, data, created_at FROM graph.nodes")
         
         nodes = []
         for r in rows:
@@ -696,77 +743,83 @@ class GraphManager:
         This enforces a single physical storage schema for all graph entities.
         """
         try:
-            with self.db.transaction() as cur:
-                # Optimization: Quick count check
-                cur.execute("SELECT COUNT(*) FROM sync.bricks WHERE id NOT IN (SELECT id FROM graph.nodes)")
-                pending = cur.fetchone()[0]
-                if pending == 0:
-                    return
-
-                # 1. Fetch bricks that aren't yet in the 'nodes' table
-                cur.execute(f"""
-                    SELECT b.id, b.content, b.state, b.created_at, b.topic_id, t.display_name
-                    FROM sync.bricks b
-                    LEFT JOIN sync.topics t ON b.topic_id = t.id
-                    WHERE b.id NOT IN (SELECT id FROM graph.nodes)
-                    LIMIT {limit}
-                """)
-                brick_rows = cur.fetchall()
-                
-                # 2. Insert them as nodes
-                state_map = {
-                    "IMPROVISE": "loose",
-                    "FORMING": "forming",
-                    "FINAL": "frozen",
-                    "SUPERSEDED": "killed"
-                }
-                
-                for br in brick_rows:
-                    brick_id = br[0]
-                    content = br[1]
-                    state = br[2]
-                    created_at = br[3]
-                    topic_id = br[4]
-                    topic_name = br[5]
-                    
-                    node_data = {
-                        "statement": content,
-                        "lifecycle": state_map.get(state, "loose"),
-                        "metadata": {
-                            "sync_topic_id": topic_id,
-                            "sync_topic_name": topic_name
-                        }
-                    }
-                    
-                    cur.execute(
-                        "INSERT INTO graph.nodes (id, type, data, created_at) VALUES (%s, 'brick', %s, %s)",
-                        (brick_id, json.dumps(node_data), created_at)
-                    )
-                    
-                    # 3. If topic node doesn't exist, create it
-                    if topic_id:
-                        cur.execute("SELECT id FROM graph.nodes WHERE id = %s", (f"topic_{topic_id}",))
-                        if not cur.fetchone():
-                            cur.execute(
-                                "INSERT INTO graph.nodes (id, type, data, created_at) VALUES (%s, 'topic', %s, %s)",
-                                (f"topic_{topic_id}", json.dumps({"name": topic_name or topic_id}), created_at)
-                            )
-                        
-                        # 4. Create edge between topic and brick
-                        cur.execute(
-                            "INSERT INTO graph.edges (source_id, target_id, edge_type, created_at) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
-                            (f"topic_{topic_id}", brick_id, EdgeType.ASSEMBLED_IN.value, created_at)
-                        )
-
-            print(f"[SYNC] Migrated {len(brick_rows)} bricks to unified node storage.")
+            if hasattr(self.db, 'connection'): # Adapter
+                with self.db.transaction() as cur:
+                    self._sync_bricks_to_nodes_logic(cur, limit)
+            else: # Cursor
+                self._sync_bricks_to_nodes_logic(self.db, limit)
         except Exception as e:
             print(f"[SYNC] Migration skipped: {e}")
+
+    def _sync_bricks_to_nodes_logic(self, cur, limit):
+        # Optimization: Quick count check
+        cur.execute("SELECT COUNT(*) FROM sync.bricks WHERE id NOT IN (SELECT id FROM graph.nodes)")
+        pending = cur.fetchone()[0]
+        if pending == 0:
+            return
+
+        # 1. Fetch bricks that aren't yet in the 'nodes' table
+        cur.execute(f"""
+            SELECT b.id, b.content, b.state, b.created_at, b.topic_id, t.display_name
+            FROM sync.bricks b
+            LEFT JOIN sync.topics t ON b.topic_id = t.id
+            WHERE b.id NOT IN (SELECT id FROM graph.nodes)
+            LIMIT {limit}
+        """)
+        brick_rows = cur.fetchall()
+        
+        # 2. Insert them as nodes
+        state_map = {
+            "IMPROVISE": "loose",
+            "FORMING": "forming",
+            "FINAL": "frozen",
+            "SUPERSEDED": "killed"
+        }
+        
+        for br in brick_rows:
+            brick_id = br[0]
+            content = br[1]
+            state = br[2]
+            created_at = br[3]
+            topic_id = br[4]
+            topic_name = br[5]
+            
+            node_data = {
+                "statement": content,
+                "lifecycle": state_map.get(state, "loose"),
+                "metadata": {
+                    "sync_topic_id": topic_id,
+                    "sync_topic_name": topic_name
+                }
+            }
+            
+            cur.execute(
+                "INSERT INTO graph.nodes (id, type, data, created_at) VALUES (%s, 'brick', %s, %s)",
+                (brick_id, json.dumps(node_data), created_at)
+            )
+            
+            # 3. If topic node doesn't exist, create it
+            if topic_id:
+                cur.execute("SELECT id FROM graph.nodes WHERE id = %s", (f"topic_{topic_id}",))
+                if not cur.fetchone():
+                    cur.execute(
+                        "INSERT INTO graph.nodes (id, type, data, created_at) VALUES (%s, 'topic', %s, %s)",
+                        (f"topic_{topic_id}", json.dumps({"name": topic_name or topic_id}), created_at)
+                    )
+                
+                # 4. Create edge between topic and brick
+                cur.execute(
+                    "INSERT INTO graph.edges (source_id, target_id, edge_type, created_at) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                    (f"topic_{topic_id}", brick_id, EdgeType.ASSEMBLED_IN.value, created_at)
+                )
+
+        print(f"[SYNC] Migrated {len(brick_rows)} bricks to unified node storage.")
 
     def get_all_edges_raw(self) -> List[Dict]:
         """
         Retrieve all edges as dictionaries suitable for API response.
         """
-        rows = self.db.fetch_all("SELECT source_id, target_id, edge_type, metadata FROM graph.edges")
+        rows = self._fetch_all("SELECT source_id, target_id, edge_type, metadata FROM graph.edges")
         
         edges = []
         for r in rows:
@@ -797,5 +850,5 @@ class GraphManager:
         
         query += " ORDER BY created_at DESC LIMIT 1000"
         
-        rows = self.db.fetch_all(query, tuple(params))
+        rows = self._fetch_all(query, tuple(params))
         return [row[0] if isinstance(row[0], dict) else json.loads(row[0]) for row in rows]

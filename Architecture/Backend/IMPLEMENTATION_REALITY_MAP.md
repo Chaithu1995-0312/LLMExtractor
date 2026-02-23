@@ -1,63 +1,48 @@
-# IMPLEMENTATION_REALITY_MAP.md
+# Implementation Reality Map
 
-## Layer status: Ingestion & Sync
+## 1. Core Graph & Storage
+| Component | Status | Notes |
+| :--- | :---: | :--- |
+| **Unified Node Storage** | ✅ | Implemented in `GraphManager`. JSONB payload `graph.nodes`. |
+| **Edge Management** | ✅ | Implemented `graph.edges`. Supports typed edges & metadata. |
+| **Invariants / Guardrails** | ✅ | Cycle detection (DFS), Lifecycle Monotonicity enforced in code. |
+| **Audit Trace** | ✅ | `governance.audit_trace` table populated by `GraphManager`. |
+| **Vector Index** | 🟡 | `nexus.vector` exists but integration with main graph queries is loose. |
 
-### `NexusCompiler` (src/nexus/sync/compiler.py)
-- `compile_run` ✅ Implemented (Orchestrates brick extraction from raw runs)
-- `_pre_filter_nodes` ✅ Implemented (Initial content scanning)
-- `_llm_extract_pointers` ✅ Implemented (Generates brick pointers via LLM)
-- `_materialize_brick` ✅ Implemented (Transforms pointers into persisted bricks)
+## 2. Cognition Engine (The Brain)
+| Component | Status | Notes |
+| :--- | :---: | :--- |
+| **L3 Sage** | ✅ | Full implementation: Strategic Audit, Hybrid Escalation. |
+| **Escalation Router** | ✅ | Routes between Flash/Pro models based on difficulty/cost. |
+| **Confidence Engine** | ✅ | Computes composite confidence scores (Model + Heuristics). |
+| **Budget Controller** | ✅ | Tracks token usage and pressure. |
+| **L2 Narrator** | 🟡 | Reference to `_emit_pulse`, but the consumption side (UI/Logs) is basic. |
 
-### `BrickStore` (src/nexus/bricks/brick_store.py)
-- `save_brick` ✅ Implemented (Physical persistence)
-- `get_brick` ✅ Implemented (Retrieval)
+## 3. Ingestion & Sync
+| Component | Status | Notes |
+| :--- | :---: | :--- |
+| **Sync Pipeline** | ✅ | Deterministic ingestion from conversation logs (`src/nexus/sync`). |
+| **Compiler** | ✅ | Compiles raw text into "Bricks". |
+| **Vault (Sync DB)** | ✅ | Dedicated SQLite/PG abstraction for raw ingestion state. |
+| **Tree Splitter** | ✅ | Breaks conversations into linear "Source Runs". |
 
-## Layer status: Graph Management
+## 4. Orchestration & Infrastructure
+| Component | Status | Notes |
+| :--- | :---: | :--- |
+| **Task Queue** | ✅ | **Custom Postgres Queue** (`graph.l3_tasks`). |
+| **Celery / Redis** | 🔴 | **Diverted**. Dependencies exist in `pyproject.toml` but unused in favor of PG Queue. |
+| **Worker** | ✅ | `PGWorker` implements atomic claim/execute/complete transactions. |
+| **API Server** | ✅ | Flask-based. Handles HTTP + SocketIO. |
+| **Deployment** | 🧪 | Run scripts exist (`services/cortex/server.py`), but no Docker/K8s manifests visible in context. |
 
-### `GraphManager` (src/nexus/graph/manager.py)
-- `register_node` ✅ Implemented (Core node creation with conflict resolution)
-- `register_edge` ✅ Implemented (Basic edge creation)
-- `add_typed_edge` ✅ Implemented (Schema-aware edge creation)
-- `promote_node_to_frozen` ✅ Implemented (Lifecycle state transition)
-- `supersede_node` ✅ Implemented (Versioning/Replacement logic)
-- `kill_node` ✅ Implemented (Logical deletion)
-- `_check_for_cycle` ✅ Implemented (Graph integrity check)
-- `sync_bricks_to_nodes` ✅ Implemented (Bridge between Ingestion and Graph)
+## 5. User Interface (Jarvis)
+| Component | Status | Notes |
+| :--- | :---: | :--- |
+| **Graph Visualization** | 🟡 | Endpoints (`/jarvis/graph-index`) exist, but return raw JSON. |
+| **Anchor/Promote** | ✅ | API endpoints implemented for graph manipulation. |
+| **Ask / Preview** | ✅ | RAG preview endpoint implemented (`/jarvis/ask-preview`). |
 
-## Layer status: Cognition
-
-### `RelationshipSynthesizer` (src/nexus/cognition/dspy_modules.py)
-- `forward` ✅ Implemented (Relationship inference via DSPy)
-- `analyze_sentiment` 🟡 Partial (Initial logic present, not integrated in main flow)
-
-### `CognitiveExtractor` (src/nexus/cognition/dspy_modules.py)
-- `forward` ✅ Implemented (Recursive entity/fact extraction)
-
-### `Synthesizer` (src/nexus/cognition/synthesizer.py)
-- `run_relationship_synthesis` ✅ Implemented (Batch synthesis runner)
-
-## Layer status: Service & API
-
-### `CortexAPI` (services/cortex/api.py)
-- `route` ✅ Implemented (Central query routing)
-- `generate` ✅ Implemented (Final context-aware response generation)
-- `ask_preview` ✅ Implemented (Fast retrieval preview)
-- `get_audit_events` ✅ Implemented (Observability endpoint)
-- `trigger_self_healing` 🔴 Missing (Planned for automated graph correction)
-
-### `JarvisGateway` (services/cortex/gateway.py)
-- `pulse` ✅ Implemented (Event broadcasting)
-- `explain` ✅ Implemented (LLM-backed reasoning)
-
-## Layer status: UI (Jarvis)
-
-### `Store` (ui/jarvis/src/store.ts)
-- `fetchGraph` ✅ Implemented
-- `promoteNode` ✅ Implemented
-- `killNode` ✅ Implemented
-
-### `Components`
-- `WallView` ✅ Implemented (Spatial layout)
-- `NodeEditor` ✅ Implemented (Node metadata modification)
-- `AuditPanel` ✅ Implemented (Live trace monitoring)
-- `CortexVisualizer` 🧪 Mocked (Simulated cognitive state visualization)
+## 6. Diverted / Scrap Code
+*   **Legacy Sync**: Old sync scripts in `scripts/` might be obsolete compared to `src/nexus/sync`.
+*   **Redis Dependencies**: `redis` package in `pyproject.toml` is effectively dead weight.
+*   **Celery**: `celery` package in `pyproject.toml` is unused.

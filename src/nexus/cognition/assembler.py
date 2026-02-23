@@ -35,7 +35,7 @@ def _load_tree_file(path: str) -> Dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def assemble_topic(topic_query: str) -> str:
+def assemble_topic(topic_query: str, cursor=None) -> str:
     """
     Assemble a canonical cognition artifact for the given topic.
     
@@ -144,7 +144,7 @@ def assemble_topic(topic_query: str) -> str:
         all_brick_ids.update(doc["brick_ids"])
 
     # 3.5 Cognitive Extraction via DSPy with Graph-Topology Awareness
-    graph = GraphManager()
+    graph = GraphManager(db=cursor)
     
     # Identify core intents related to these bricks
     related_intents: List[Dict] = []
@@ -234,7 +234,7 @@ def assemble_topic(topic_query: str) -> str:
 
     # 5. Graph Linkage & Monotonic Conflict Resolution
     try:
-        graph = GraphManager()
+        graph = GraphManager(db=cursor)
         reranker = CrossEncoderReranker()
         
         # Node: Artifact

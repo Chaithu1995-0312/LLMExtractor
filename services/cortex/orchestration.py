@@ -1,96 +1,39 @@
-from typing import Annotated, List, TypedDict, Union
-from langgraph.graph import StateGraph, END
-import time
+import json
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, Callable
+from nexus.db import get_adapter
 
-class AgentState(TypedDict):
-    content: str
-    is_valid: bool
-    feedback: str
-    extracted_facts: List[str]
-    retry_count: int
-
-def verifier_node(state: AgentState):
+class TaskQueue:
     """
-    Verifies the extracted facts for consistency.
-    In 2026, we use this node for agentic self-correction.
+    Postgres-backed Task Queue for L3 Orchestration.
+    Couples task lifecycle with graph mutations transactionally.
     """
-    content = state["content"]
-    facts = state["extracted_facts"]
     
-    # Simulate an error detection (e.g., malformed LaTeX or empty extraction)
-    if not facts:
-        return {
-            "is_valid": False, 
-            "feedback": "No facts extracted. Extraction might have failed or input was ambiguous.",
-            "retry_count": state.get("retry_count", 0) + 1
-        }
-    
-    # Heuristic for "soft" failures
-    for fact in facts:
-        if "ERROR" in fact.upper() or "$$" in fact and fact.count("$") % 2 != 0:
-            return {
-                "is_valid": False,
-                "feedback": f"Detected malformed syntax in fact: {fact}",
-                "retry_count": state.get("retry_count", 0) + 1
-            }
-    
-    return {"is_valid": True, "feedback": "Verification successful."}
+    @staticmethod
+    def enqueue(task_type: str, payload: Dict[str, Any], max_retries: int = 3):
+        db = get_adapter()
+        db.execute(
+            """
+            INSERT INTO graph.l3_tasks (task_type, payload, max_retries, status, scheduled_at)
+            VALUES (%s, %s, %s, 'pending', NOW())
+            """,
+            (task_type, json.dumps(payload), max_retries)
+        )
+        print(f"[TaskQueue] Enqueued {task_type}")
 
-def self_correction_node(state: AgentState):
+class TaskRegistry:
     """
-    Simulates an LLM self-correction step.
-    In reality, this would call CognitiveExtractor again with feedback.
+    Global registry of task handlers.
     """
-    print(f"DEBUG: Self-correction triggered. Feedback: {state['feedback']}")
-    # Simulate fix
-    if "syntax" in state["feedback"]:
-        fixed_facts = [f.replace("$$", "$") for f in state["extracted_facts"]]
-        return {"extracted_facts": fixed_facts, "is_valid": True}
-    return state
+    _handlers: Dict[str, Callable] = {}
 
-def retry_condition(state: AgentState):
-    """Determines whether to retry or fail."""
-    if state["is_valid"]:
-        return "end"
-    if state.get("retry_count", 0) > 3:
-        return "end"
-    return "retry"
+    @classmethod
+    def register(cls, task_type: str):
+        def decorator(func: Callable):
+            cls._handlers[task_type] = func
+            return func
+        return decorator
 
-def cleanup_crew_workflow():
-    workflow = StateGraph(AgentState)
-    
-    workflow.add_node("verify", verifier_node)
-    workflow.add_node("correct", self_correction_node)
-    
-    workflow.set_entry_point("verify")
-    
-    workflow.add_conditional_edges(
-        "verify",
-        retry_condition,
-        {
-            "end": END,
-            "retry": "correct"
-        }
-    )
-    
-    workflow.add_edge("correct", "verify")
-    
-    return workflow.compile()
-
-# Simple exponential backoff retry utility (replaces tenacity for direct implementation)
-def with_retries(func, max_retries=3):
-    def wrapper(*args, **kwargs):
-        last_exception = None
-        for i in range(max_retries):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                last_exception = e
-                wait = (2 ** i)
-                print(f"WARN: API Call failed: {e}. Retrying in {wait}s...")
-                time.sleep(wait)
-        raise last_exception
-    return wrapper
-
-# Usage in Cortex API
-cleanup_crew = cleanup_crew_workflow()
+    @classmethod
+    def get_handler(cls, task_type: str) -> Optional[Callable]:
+        return cls._handlers.get(task_type)

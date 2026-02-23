@@ -1,45 +1,21 @@
-# GAPS_AND_TODOS.md
+# Gaps & TODOs
 
-## 🔴 Missing Core Features
+## 1. Critical Technical Debt
+- [ ] **Production Server**: `services/cortex/server.py` runs Flask in debug mode. Need Gunicorn/uWSGI wrapper.
+- [ ] **Hardcoded Configuration**: Some paths and timeouts are hardcoded. Migrate to `config.py` or `.env`.
+- [ ] **Dead Dependencies**: `celery` and `redis` are in `pyproject.toml` but unused. Remove to reduce attack surface.
+- [ ] **Error Handling**: `GraphManager` catches generic `Exception` often. Need specific exception types (e.g., `CycleDetectedError`, `LifecycleError`).
 
-### 1. Automated Self-Healing (`services/cortex/api.py`)
-- **Method**: `trigger_self_healing`
-- **Gap**: Currently declared but not implemented.
-- **Responsibility**: Identify and resolve logical contradictions in the graph using LLM reasoning.
-- **Status**: 🔴
+## 2. Missing Features (Planned vs Reality)
+- [ ] **Vector Integration**: `nexus.vector` exists but is not tightly coupled with `GraphManager`. Graph queries cannot yet filter by semantic similarity efficiently.
+- [ ] **L2 Narrator Consumption**: Pulse events are emitted but only logged to stdout/socket. No persistent "Narrative" store exists to aggregate these into a storyline.
+- [ ] **UI Visualization**: The `/jarvis/graph-index` endpoint returns raw JSON. A D3.js or Cytoscape frontend is needed for human navigability.
 
-### 2. Multi-Hop Relationship Discovery (`src/nexus/cognition/synthesizer.py`)
-- **Method**: `run_deep_synthesis` (IMPLIED)
-- **Gap**: Current synthesis only looks at immediate neighbors.
-- **Responsibility**: Discover transitive relationships across the entire graph.
-- **Status**: 🧪 (Conceptual)
+## 3. Operations & Infrastructure
+- [ ] **Containerization**: No `Dockerfile` or `docker-compose.yml` (except possibly in root, but not referenced in docs).
+- [ ] **Database Migration**: Schema changes (`schema_*.sql`) are manual. Need Alembic or similar migration tool.
+- [ ] **Monitoring**: Metrics endpoints exist but no Prometheus scraper configuration.
 
-### 3. Agentic Conflict Resolution (`src/nexus/graph/validation.py`)
-- **Method**: `resolve_conflicts_agentic` (IMPLIED)
-- **Gap**: Validation detects issues but doesn't resolve them.
-- **Responsibility**: Spawn an LLM agent to adjudicate between conflicting intents based on source authority.
-- **Status**: 🔴
-
-## 🟡 Partial Implementations
-
-### 1. Sentiment-Aware Synthesis (`src/nexus/cognition/dspy_modules.py`)
-- **Method**: `analyze_sentiment` in `RelationshipSynthesizer`
-- **Gap**: Method exists but results aren't yet factored into edge weightings.
-- **Status**: 🟡
-
-### 2. Live Cognitive Visualization (`ui/jarvis/src/components/CortexVisualizer.tsx`)
-- **Gap**: Component is a placeholder/mock.
-- **Responsibility**: Show real-time "thoughts" and retrieval weights during query processing.
-- **Status**: 🧪
-
-### 3. Hierarchical Recall (`src/nexus/ask/recall.py`)
-- **Gap**: `get_scope_hierarchy` is implemented but vector search doesn't yet fully exploit the hierarchy (it uses a flat list of allowed scopes).
-- **Status**: 🟡
-
-## 🛠️ Technical Debt & Cleanup
-
-- **TODO**: Transition `src/nexus/graph/manager.py` from raw SQLite queries to a structured Query Builder to reduce SQL injection risks.
-- **TODO**: Implement real-time WebSocket pulsing for `sync_bricks_task` so the UI reflects ingestion progress.
-- **TODO**: Add thorough unit tests for `supersede_node` edge inheritance logic.
-- **TODO**: Replace `print` statements in `NexusCompiler` with structured logging.
-- **TODO**: Optimize `project_intent` spatial layout algorithm for graphs with >1000 nodes (current O(N^2) complexity).
+## 4. Governance
+- [ ] **Access Control**: No auth middleware on `CortexAPI`. Anyone with network access can promote/kill nodes.
+- [ ] **Cost Limits**: Budget controller exists but hard stops are not fully enforced across all async tasks.

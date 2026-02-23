@@ -1,72 +1,65 @@
-# MODULE_DEEP_DIVES
+# UI Module Deep Dives
 
-## 1. App Orchestration (`App.tsx`)
-The `App` component acts as the central logic hub, managing navigation modes and high-level data flow between React Query and the visualizers.
+## 1. Cortex Visualizer (`src/components/CortexVisualizer.tsx`)
+**Role**: High-performance graph rendering engine.
 
-### Logical Control Flow
-1. **Mount**: Fetches `chat_mapping.json` for ID resolution.
-2. **Query**: Triggers `useQuery(['graph-index'])` to fetch the global knowledge state.
-3. **Layout**: If in `explore` mode, `getLayoutedElements` uses Dagre to calculate hierarchical positions for nodes.
-4. **Interaction**: Selecting a node updates `Zustand` state, which triggers the `Right Panel` (Evidence Viewer) and secondary queries for `brick-meta`.
+### Integration Logic
+The component bridges the declarative world of React with the imperative DOM manipulation of Cytoscape.js.
 
-### Visual Logic: App State Transitions
-```mermaid
-stateDiagram-v2
-    [*] --> ASK: Default
-    ASK --> EXPLORE: setMode('explore')
-    EXPLORE --> VISUALIZE: setMode('visualize')
-    VISUALIZE --> AUDIT: setMode('audit')
-    AUDIT --> ASK: setMode('ask')
-    
-    state EXPLORE {
-        [*] --> WallView
-        WallView --> GraphView: setViewMode('graph')
-        GraphView --> WallView: setViewMode('wall')
-    }
-```
-
-## 2. Cortex Visualizer (`CortexVisualizer.tsx`)
-This module handles the N-dimensional relationship rendering.
-
-### Implementation Detail
-- **Graph Library**: Cytoscape.js.
-- **Data Transformation**: Converts the backend's flat node/edge list into the `elements` format expected by Cytoscape.
-- **Styling**: Uses CSS-like selectors to change node color and size based on the `lifecycle` status (`frozen` = blue, `killed` = red).
-
-### Sequence: Node Selection & Detail Retrieval
 ```mermaid
 sequenceDiagram
-    participant U as User
-    participant CV as CortexVisualizer
-    participant Z as Zustand Store
-    participant B as Backend (Cortex API)
+    participant Store as Graph Store
+    participant React as CortexVisualizer
+    participant Cy as Cytoscape Core
+    participant Dagre as Layout Engine
+
+    Store->>React: Data Update (Nodes/Edges)
+    React->>React: useMemo(Map data to Elements)
+    React->>Cy: setElements(Elements)
     
-    U->>CV: Clicks Node
-    CV->>Z: setSelectedBrickId(id)
-    Z->>Z: toggleRightPanel(true)
-    Note over Z: Right Panel Opens
-    B-->>Z: [Async] brick-meta (TanStack Query)
-    Z-->>U: Displays Evidence & Metadata
+    opt Elements Changed
+        React->>Dagre: Calculate Layout
+        Dagre-->>Cy: Apply Positions
+        Cy->>Cy: fit()
+    end
 ```
 
-## 3. Node Lifecycle Editor (`NodeEditor.tsx`)
-A critical "Write Boundary" component that allows human intervention in the knowledge graph.
+### Styling Rules
+*   **Default**: `loose` nodes are small circles.
+*   **Frozen**: `frozen` nodes are larger squares (blue).
+*   **Killed**: `killed` nodes are dim, red-bordered circles.
 
-### Method Intelligence: `onUpdate`
-| Property | Value |
-|----------|-------|
-| **Responsibility** | Orchestrates node state changes in the Graph DB. |
-| **Risk Profile** | HIGH: Direct DB Write through API. |
-| **Inputs** | `node_id`, `action` ('promote'|'kill'|'supersede'), `data` (reason, new_node_id). |
-| **Outputs** | Refreshed Graph Index (via React Query invalidation). |
-| **Idempotency** | ✅ Yes: Promoting an already frozen node is a no-op. |
-| **State Impact** | Mutates `anchored`, `rejected`, and relationship edges in Graph DB. |
-| **Validation** | Ensures `new_node_id` is provided for `supersede` actions. |
+## 2. Real-Time State Sync (`src/state`)
+**Role**: Maintaining synchronization with the authoritative backend.
 
-## 4. Observatory (`AuditPanel.tsx`)
-Provides transparency into the autonomous agent's internal reasoning.
+### The Delta-Sync Pattern
+The UI does not poll. It listens for strict event envelopes.
 
-### Data Flow
-- **Ingestion**: Polls `/api/audit/events` every 5 seconds.
-- **Visualization**: Renders a vertical timeline of `AuditEvent` objects.
-- **Deep Dive**: Expanding an event reveals the full `metadata` (JSON), showing token counts, model tiers, and specific decision reasons.
+```mermaid
+sequenceDiagram
+    participant Socket as Socket.IO
+    participant Handler as Event Listener
+    participant Store as Zustand Store
+    participant UI as Component Tree
+
+    Socket->>Handler: Emit Event (Sequence: N)
+    
+    alt Sequence == Last + 1
+        Handler->>Store: Apply Delta (NODE_PATCH)
+        Store->>UI: Re-render
+    else Gap Detected
+        Handler->>Socket: Request Resync (Last: N-1)
+        Socket-->>Handler: Full Snapshot
+        Handler->>Store: Replace State
+    end
+```
+
+## 3. Audit Stream Architecture
+**Role**: Visualizing high-frequency governance events.
+
+### Virtualization Strategy
+Because audit logs can be infinite, the `AuditStreamPanel` uses virtualization (likely `react-window` or `@tanstack/react-virtual` inferred from deps) to render only visible items.
+
+1.  **Ingest**: Socket pushes event to `stream-store` array (capped at e.g., 1000 items).
+2.  **Render**: Component reads only the visible slice (e.g., items 900-910).
+3.  **Auto-Scroll**: "Stick to bottom" logic unless user scrolls up.

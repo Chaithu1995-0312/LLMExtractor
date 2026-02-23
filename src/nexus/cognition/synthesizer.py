@@ -4,7 +4,7 @@ from nexus.graph.manager import GraphManager
 from nexus.graph.schema import Edge, EdgeType, Intent
 from nexus.cognition.dspy_modules import RelationshipSynthesizer
 
-def run_relationship_synthesis(topic_id: str = None, batch_size: int = 20):
+def run_relationship_synthesis(topic_id: str = None, batch_size: int = 20, cursor=None):
     """
     Scan for intents and automatically discover relationships between them.
     
@@ -16,7 +16,7 @@ def run_relationship_synthesis(topic_id: str = None, batch_size: int = 20):
     """
     print(f"[SYNTHESIZER] Starting relationship synthesis (topic={topic_id})...")
     
-    graph = GraphManager()
+    graph = GraphManager(db=cursor)
     
     # 1. Fetch intents
     if topic_id:

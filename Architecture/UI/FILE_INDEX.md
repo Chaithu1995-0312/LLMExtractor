@@ -1,50 +1,58 @@
-# FILE_INDEX
+# UI File Index & Component Intelligence
 
-## UI Source Tree
+## 1. Components (`src/components`)
 
-### `ui/jarvis/src/`
+### `src/components/CortexVisualizer.tsx`
+**Core Visualization**: Renders the graph.
+*   **Risk**: HIGH (Performance bottleneck)
+*   **Props**: `data: { nodes, edges }`
+*   **Logic**: Maps backend nodes to Cytoscape elements. Handles layout (`dagre`) and styling based on lifecycle.
 
-#### `App.tsx`
-Main application orchestrator. Handles routing, global layout, and top-level data orchestration via TanStack Query.
-- **`handleSend`**: Manages chat input and triggers recall mutations. (Risk: MED | Impact: Local State)
-- **`getLayoutedElements`**: Calculates Dagre layout for React Flow nodes. (Risk: LOW | Impact: UI Layout)
-- **`onNodesChange` / `onEdgesChange`**: Standard React Flow state handlers. (Risk: LOW | Impact: UI State)
+### `src/components/AuditStreamPanel.tsx`
+**Live Feed**: Displays the governance log.
+*   **Risk**: MED (High frequency updates)
+*   **Logic**: Subscribes to `stream-store`. Renders virtualized list of `AuditEvents`.
 
-#### `store.ts`
-Zustand global store for UI mode and selection tracking.
-- **`setMode`**: Switches between Ask, Explore, Visualize, and Audit. (Risk: LOW | Impact: UI Mode)
-- **`setSelectedBrickId`**: Updates global selection and opens right panel. (Risk: LOW | Impact: Selection State)
+### `src/components/ControlPanel.tsx`
+**Interactivity**: Global controls.
+*   **Risk**: LOW
+*   **Logic**: Dispatches actions to `system-store` (e.g., Trigger Sync, Change Mode).
 
-### `ui/jarvis/src/components/`
+### `src/components/NexusNode.tsx`
+**Detail View**: Individual node inspector.
+*   **Risk**: LOW
+*   **Logic**: Displays node metadata (Confidence, Lifecycle) and allows editing/promotion.
 
-#### `AuditPanel.tsx`
-Real-time forensic audit log viewer.
-- **`fetchEvents`**: Polls `/api/audit/events`. (Risk: LOW | Impact: Read-Only)
+## 2. State Management (`src/state`)
 
-#### `ControlPanel.tsx`
-Administrative "Terminal" for triggering backend cognitive tasks.
-- **`triggerSync`**: Invokes background sync task. (Risk: MED | Impact: External API)
+### `src/store.ts` (Root)
+**Ephemeral UI State**.
+*   **Scope**: Selection, Navigation, Panels.
+*   **Persistence**: None (Reset on reload).
 
-#### `CortexVisualizer.tsx`
-Cytoscape-based n-dimensional graph visualization.
-- **`useEffect (data transformation)`**: Maps backend graph nodes to Cytoscape elements. (Risk: LOW | Impact: UI Rendering)
+### `src/state/graph-store.ts`
+**Structural Data**.
+*   **Scope**: Nodes, Edges, Graph Topology.
+*   **Logic**: Merges incoming deltas (`NODE_PATCH`) into local graph state.
 
-#### `NexusNode.tsx`
-Custom React Flow node component for "Knowledge Wall".
-- **`NexusNode` (Functional Component)**: Renders node status, lifecycle, and confidence. (Risk: LOW | Impact: UI Rendering)
+### `src/state/stream-store.ts`
+**Temporal Data**.
+*   **Scope**: Audit Logs, System Health.
+*   **Logic**: Appends new events to a rolling buffer.
 
-#### `NodeEditor.tsx`
-Lifecycle management interface for promoting or killing nodes.
-- **`onUpdate`**: Dispatches promotion/kill/supersede actions to the store/API. (Risk: HIGH | Impact: DB Write)
+## 3. Protocol (`src/protocol`)
 
-#### `WallView.tsx`
-Grid-based explorer for the knowledge base.
-- **`WallView` (Functional Component)**: Filters and renders `NexusNode` instances. (Risk: LOW | Impact: UI Rendering)
+### `src/protocol/event-types.ts`
+**Contract Definition**.
+*   **Risk**: **CRITICAL** (Must match backend)
+*   **Content**: TypeScript interfaces for `EventEnvelope`, `NodeData`, `GraphEventType`.
 
-#### `Panel.tsx`
-Evidence viewer sidebar showing full text, sources, and history.
-- **`Panel` (Functional Component)**: Displays metadata for selected bricks. (Risk: LOW | Impact: UI Rendering)
+### `src/protocol/validators.ts` (Inferred)
+**Runtime Safety**.
+*   **Logic**: Zod/Runtime checks to ensure incoming payloads match expected shapes.
 
-#### `ControlStrip.tsx`
-Context-aware action bar for rapid anchoring/rejection (Implied/Partial implementation).
-- **Implied Methods**: `handleAnchor`, `handleReject`. (Risk: HIGH | Impact: DB Write)
+## 4. Layout (`src/layout`)
+
+### `src/layout/AppLayout.tsx`
+**Shell**.
+*   **Logic**: Grid structure (Sidebar, Main, RightPanel). Handles responsiveness (if any).

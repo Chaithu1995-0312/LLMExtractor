@@ -35,6 +35,7 @@ from nexus.sync.llm import LLMClient
 from nexus.graph.manager import GraphManager
 from nexus.graph.schema import AuditEventType, DecisionAction
 from nexus.evolution.drift_engine import DriftEngine
+from services.cortex.orchestration import TaskQueue
 
 class CortexAPI:
     def __init__(self, audit_log_path: str = None):

@@ -1,41 +1,63 @@
-# CANONICAL_OVERVIEW.md
+# Nexus Canonical Architecture Overview
 
-## System Purpose
-Nexus is a multi-layered cognitive architecture designed to transform raw conversational data and semi-structured logs into a high-fidelity, queryable knowledge graph. It bridges the gap between raw ingestion and executive decision-making through automated brick extraction, relationship synthesis, and hierarchical scope management.
+## 1. System Identity & Purpose
+**Nexus** is a **Cognitive Knowledge Graph** designed to autonomously ingest, structure, and refine unstructured information (conversations, documents) into a coherent, queryable knowledge base. It operates on a **Human-in-the-Loop** model where "Bricks" of information are extracted, validated ("Frozen"), and evolved over time.
 
-## Architectural Layers
+The system is architected as a **stateful, event-driven monolith** with clearly defined cognitive layers (L1: Ingestion, L2: Graph, L3: Strategic Audit).
 
-### 1. Ingestion Layer (`src/nexus/sync`, `src/nexus/bricks`)
-Responsible for the "Brickification" of raw data. It captures atomic units of information (Bricks), fingerprints them for deduplication, and stores them in a stateful buffer before promotion to the graph.
+## 2. High-Level Architecture
+The system follows a **Service-Oriented** pattern with a shared persistent state (Postgres).
 
-### 2. Graph Layer (`src/nexus/graph`)
-The system's "Source of Truth." It maintains a SQLite-backed property graph containing:
-- **Intents**: Discrete semantic goals or findings.
-- **Scopes**: Hierarchical boundaries (Global, Project, Topic).
-- **Sources**: Originating agents or users.
-- **Edges**: Typed relationships with lifecycle states (Draft, Frozen, Superseded).
+```mermaid
+graph TD
+    User[User / UI] -->|API / SocketIO| API[Cortex API]
+    API -->|Enqueue| Queue[Postgres Task Queue]
+    Queue -->|Claim| Worker[L3 Worker]
+    Worker -->|Execute| Graph[Graph Manager]
+    Graph -->|Persist| DB[(Postgres DB)]
+    Graph -->|Audit| Audit[Audit Trace]
+    
+    Sync[Sync Pipeline] -->|Ingest| DB
+    Sage[L3 Sage] -->|Audit| Graph
+```
 
-### 3. Cognition Layer (`src/nexus/cognition`)
-The "Executive Function." Uses DSPy-based modules and LLM synthesis to:
-- Assemble disparate bricks into coherent topics.
-- Infer latent relationships between Intents.
-- Detect conflicts and enforce cross-topic invariants.
+### Core Components
+1.  **Cortex API (`services/cortex`)**: The entry point for external interactions. Handles HTTP requests and Real-time events (SocketIO).
+2.  **Graph Core (`src/nexus/graph`)**: The central nervous system. Manages the `GraphNode` and `Edge` entities, enforcing strict invariants (cycles, lifecycle monotonicity).
+3.  **Cognition Engine (`src/nexus/cognition`)**: The "brain" implementing:
+    *   **L3 Sage**: Strategic reflection and system audit.
+    *   **Escalation Router**: Cost-aware model selection (Flash vs. Pro).
+    *   **Confidence Engine**: Trust scoring for AI outputs.
+4.  **Sync Pipeline (`src/nexus/sync`)**: Deterministic ingestion engine that converts raw conversation logs into structured "Source Runs" and "Bricks".
+5.  **Task Orchestration (`services/cortex/worker.py`)**: A hardened, Postgres-backed distributed task queue ensuring atomic execution of long-running cognitive tasks.
 
-### 4. Service Layer (`services/cortex`)
-The "Interface." Provides REST and WebSocket gateways (Cortex API) for the UI (Jarvis) and external agents. It handles orchestration, audit logging, and real-time event pulsing.
+## 3. Data Flow & State Model
+The system uses a **Unified Node Storage** model. Everything is a Node.
 
-### 5. UI Layer (`ui/jarvis`)
-The "Observer." A React-based visualization suite for graph exploration, node editing, and system monitoring.
+*   **Entities**: Intent, Source, Scope, Brick, Topic.
+*   **Storage**: All entities reside in `graph.nodes` (JSONB payload).
+*   **Relationships**: All connections reside in `graph.edges`.
 
-## Core Data Flow
-1. **Sync**: Raw logs → `NexusCompiler` → `BrickStore`.
-2. **Promote**: `Brick` → `GraphManager` → `Intent` (Node).
-3. **Synthesize**: `Intents` → `RelationshipSynthesizer` → `Edges`.
-4. **Recall**: `User Query` → `RecallEngine` (Vector + Graph) → `Context`.
+### Lifecycle State Machine
+Entities (specifically Intents/Bricks) move through a strict lifecycle:
+`LOOSE` → `FORMING` → `FROZEN` → `SUPERSEDED` | `KILLED`
 
-## Implementation Status Summary
-- **Graph Management**: ✅ Stable (SQLite)
-- **Ingestion/Sync**: ✅ Stable (Compiler-based)
-- **Cognition**: 🟡 Partial (DSPy modules implemented, full self-healing pending)
-- **Observability**: ✅ Stable (Audit logging, WebSocket pulsing)
-- **UI**: ✅ Stable (Node/Wall visualization)
+*   **LOOSE**: Raw, unverified extraction.
+*   **FORMING**: Structurally valid, awaiting human/system consensus.
+*   **FROZEN**: Immutable truth, used for generation.
+*   **SUPERSEDED**: Replaced by a newer version (maintains history).
+*   **KILLED**: Explicitly rejected.
+
+## 4. External Surface Map & Dependencies
+| Dependency | Usage | Failure Mode |
+| :--- | :--- | :--- |
+| **Postgres** | Primary Truth, Queue, Vector Data | **Critical**: System Halt. API returns 500. |
+| **Redis** | *Implied/Legacy* (Celery) | **Degraded**: Async tasks fail/stall. |
+| **OpenAI / LLM** | Cognition (L3 Sage, Extraction) | **Degraded**: Fallback to lower tiers or failure. |
+| **FAISS** | Vector Search Index | **Degraded**: Semantic search fails; keyword fallback. |
+| **SocketIO** | Real-time Audit/Status | **Minor**: UI updates lag; Core functions persist. |
+
+## 5. Security & Governance
+*   **Audit Trace**: Every mutation is logged to `governance.audit_trace` with actor, cost, and reason.
+*   **Budget Controller**: Limits token usage per session/period.
+*   **Invariants**: Hard-coded checks in `GraphManager` prevent illegal state transitions (e.g., freezing without scope).

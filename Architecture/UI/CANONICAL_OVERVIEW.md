@@ -1,39 +1,44 @@
-# CANONICAL_OVERVIEW
+# Nexus UI Canonical Overview
 
-## System Definition
-The **Jarvis Workbench** is the primary visual interface for the Nexus Knowledge Engine. It is an agent-centric UI designed to facilitate human-in-the-loop oversight of autonomous knowledge extraction, graph synthesis, and cognitive assembly processes.
+## 1. System Identity & Aesthetic
+The **Nexus UI (Jarvis)** is a "Glass-Pane" interface designed for high-density information visualization. It adopts a **Cyberpunk / Sci-Fi HUD** aesthetic ("System_Visualizer_V3") to reflect the system's nature as an autonomous cognitive machine.
 
-## Technology Stack
-- **Framework**: React 18.2 (TypeScript)
-- **Build Tool**: Vite 4.4
-- **State Management**: 
-    - **Global**: Zustand (Client-side UI state)
-    - **Server**: TanStack Query (Data fetching, caching, and mutation synchronization)
-- **Visualization**:
-    - **React Flow**: Hierarchical "Knowledge Wall" and logical node connections.
-    - **Cytoscape.js**: N-dimensional "Cortex" graph visualization with Dagre layout engine.
-    - **Mermaid.js**: Inline logic diagrams for message content.
-- **Styling**: Tailwind CSS + Framer Motion (Adaptive UI transitions)
-- **Icons**: Lucide React
+*   **Framework**: React 18 + Vite (TypeScript)
+*   **State Management**: Zustand (Multi-store architecture)
+*   **Styling**: Tailwind CSS + Custom CSS Modules (Scanlines, CRT effects)
+*   **Protocol**: WebSockets (Socket.IO) with strict strict Event Envelopes.
 
-## External Surface Map
-The UI interacts primarily with the `Cortex API` (Flask-based) as its gateway to the backend services.
+## 2. High-Level Architecture
+The UI operates as a dumb terminal for the smart backend. It maintains ephemeral state but relies on the backend for all domain truth.
 
-| Dependency | Purpose | Failure Mode | Impact |
-|------------|---------|--------------|--------|
-| **Cortex API** | Primary Data Gateway | Timeout / 500 Error | UI displays "Loading Data Stream" indefinitely or shows empty state. |
-| **Vector Index** | Semantic Search (Recall) | Index out of sync | `Ask & Recall` returns stale or irrelevant bricks. |
-| **Graph DB** | Relationship Storage | Connection Refused | Visualizers fail to render edges; promotions fail. |
-| **KaTeX** | Math Rendering | JS Error | LaTeX strings remain in raw format in chat/panels. |
+```mermaid
+graph TD
+    User[User] -->|Interacts| View[React Components]
+    View -->|Reads| Store[Zustand Stores]
+    View -->|Dispatches| Socket[Socket.IO Client]
+    
+    Socket -->|Stream Events| StreamStore
+    Socket -->|Graph Deltas| GraphStore
+    
+    subgraph State Plane
+        GraphStore[Graph Store]
+        StreamStore[Stream Store]
+        SystemStore[System Store]
+    end
+```
 
-## Primary Data Schemas
-### Brick / Node Lifecycle
-- **LOOSE**: Initial state of extracted knowledge unit.
-- **FROZEN**: Promoted by user or agent; considered "Truth" in the graph.
-- **KILLED**: Explicitly rejected or invalidated data.
-- **SUPERSEDED**: Replaced by a more current or accurate node.
+## 3. Core Planes
+The UI is divided into three functional planes:
 
-### State Transition Logic
-1. `LOOSE` -> `FROZEN` via `jarvis/node/promote`
-2. `LOOSE`/`FROZEN` -> `KILLED` via `jarvis/node/kill`
-3. `FROZEN` -> `SUPERSEDED` via `jarvis/node/supersede` (requires reference to New Node ID)
+1.  **Navigation Plane (`store.ts`)**: Handles local UI state (Selection, Panel visibility, Modes). Ephemeral.
+2.  **Structural Plane (`graph-store.ts`)**: Replicates the backend Graph (Nodes, Edges) for visualization.
+3.  **Temporal Plane (`stream-store.ts`)**: Handles the high-frequency Audit Log stream and real-time status updates.
+
+## 4. Visual Intelligence
+The UI uses **Cytoscape.js** for graph rendering, enforcing a `Dagre` (Directed Acyclic Graph) layout to visualize the flow of information from `LOOSE` to `FROZEN`.
+
+*   **Nodes**: Rendered with lifecycle-specific styling (Frozen=Blue, Killed=Red).
+*   **Edges**: Colored by relationship type (`DERIVED_FROM`, `SUPERSEDES`).
+
+## 5. Protocol Contract
+Communication with the backend is strictly typed via `EventEnvelope` (Sequence #, Timestamp, Payload). This allows the UI to detect dropped packets and request delta-resyncs.

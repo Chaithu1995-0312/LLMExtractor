@@ -1,24 +1,20 @@
-# GAPS_AND_TODOS
+# UI Gaps & TODOs
 
-## Backend Capabilities Missing from UI
-The following functionalities are implemented in the `services/cortex` backend or the `nexus` core but lack dedicated user interfaces or are only partially exposed.
+## 1. Critical User Experience Gaps
+- [ ] **Accessibility (A11y)**: The UI fails WCAG 2.1 contrast ratios (Grey on Black). Needs a "High Contrast" mode for operators.
+- [ ] **Mobile Support**: The layout breaks on screens < 1024px. The `Sidebar` and `ControlPanel` are fixed-width and consume too much space.
+- [ ] **Empty States**: No "Zero State" designs for empty graphs, empty audit logs, or disconnected states.
 
-| Backend Feature | Implementation | UI Status | Priority | Gap Description |
-|-----------------|----------------|-----------|----------|-----------------|
-| **Topic Synthesis** | `cognition/synthesize` | 🟡 Partial | MED | Triggerable via Terminal, but lacks a "Status View" for long-running Celery tasks. |
-| **Run Deep-Dive** | `/api/runs/<run_id>` | 🔴 Missing | HIGH | No UI component to view detailed execution traces of a specific agent run. |
-| **System Prompts** | `/api/prompts` | 🟡 Partial | LOW | Prompt text can be fetched, but the UI lacks an "Editor" for fine-tuning system prompts. |
-| **Manual Anchor** | `/jarvis/anchor` | 🟡 Partial | HIGH | UI supports promotion of existing nodes, but lacks a way to explicitly "Anchor" a raw brick before it becomes a graph node. |
-| **Vector Management**| `maintenance/rebuild` | 🔴 Missing | LOW | Rebuilding the vector index requires CLI access; no UI button for index maintenance. |
-| **Conversation Map**| `public/chat_mapping.json` | 🧪 Mocked | MED | Currently uses a static JSON file; needs dynamic API to map conversation IDs to human-friendly names. |
+## 2. Technical Debt
+- [ ] **Graph Performance**: Cytoscape re-renders the entire graph on every delta update. Needs differential updating (only touching changed nodes).
+- [ ] **Testing**: Zero unit or integration tests visible. Need `vitest` + `react-testing-library`.
+- [ ] **Type Safety**: Some components use `any` for incoming props (seen in `CortexVisualizer.tsx`). Need stricter Zod validation at the boundary.
 
-## Technical Debt & Refactoring
-- [ ] **Unified Visualization Logic**: Merge the data transformation logic between `App.tsx` (React Flow) and `CortexVisualizer.tsx` (Cytoscape) into a shared adapter.
-- [ ] **WebSocket Integration**: Replace 5s polling in `AuditPanel.tsx` with WebSockets for true real-time observability.
-- [ ] **Error Boundaries**: Implement React Error Boundaries around the graph visualizers to prevent crashes on malformed backend data.
-- [ ] **Mobile Optimization**: The `ControlPanel` and `AuditPanel` are currently desktop-first; they overlap awkwardly on smaller screens.
+## 3. Missing Features
+- [ ] **Search**: No global search bar to jump to specific nodes/intents.
+- [ ] **Time Travel**: The backend supports it (via Audit Log), but the UI has no slider to replay the graph state.
+- [ ] **Connection Status**: No visible indicator if the Socket.IO connection drops.
 
-## Missing Implementation Hooks (🧪/🔴)
-- **`handleAnchor` (ControlStrip.tsx)**: Missing logic to dispatch `POST /jarvis/anchor`.
-- **`runDetailsView` (New Component)**: Required to visualize data from `/api/runs/<run_id>`.
-- **`nodeMergeLogic` (Graph Manager)**: Backend supports merging nodes, but UI lacks a multi-select "Merge" action.
+## 4. Governance
+- [ ] **Auth Screens**: No Login/Logout flow. Assumes internal network access.
+- [ ] **Role-Based Access**: All users see all controls. Need "Read-Only" vs "Admin" views.

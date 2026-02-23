@@ -16,8 +16,8 @@ class DriftEngine:
     Core engine for detecting semantic drift and proposing evolutionary edges.
     Operates in isolation (Phase 1).
     """
-    def __init__(self):
-        self.db = get_adapter()
+    def __init__(self, db=None):
+        self.db = db or get_adapter()
         self.embedding_service = EmbeddingService()
         self.vector_store = VectorStore()
 
@@ -76,18 +76,36 @@ class DriftEngine:
                 
                 self._store_edge_candidate(node_id, target_id, relation, score)
 
+    def _execute(self, sql, params=None):
+        """Helper to handle both adapter and cursor-like db objects."""
+        if hasattr(self.db, 'execute'):
+            return self.db.execute(sql, params)
+        return self.db.execute(sql, params)
+
+    def _fetch_one(self, sql, params=None):
+        if hasattr(self.db, 'fetchone'):
+            self.db.execute(sql, params)
+            return self.db.fetchone()
+        return self.db.fetch_one(sql, params)
+
+    def _fetch_all(self, sql, params=None):
+        if hasattr(self.db, 'fetchall'):
+            self.db.execute(sql, params)
+            return self.db.fetchall()
+        return self.db.fetch_all(sql, params)
+
     def _edge_exists(self, source_id: str, target_id: str, edge_type: str) -> bool:
         """
         Checks if a real graph edge already exists.
         """
-        row = self.db.fetch_one(
+        row = self._fetch_one(
             "SELECT 1 FROM graph.edges WHERE source_id = %s AND target_id = %s AND edge_type = %s",
             (source_id, target_id, edge_type)
         )
         return row is not None
 
     def _fetch_node(self, node_id: str) -> Optional[Dict]:
-        row = self.db.fetch_one("SELECT data FROM graph.nodes WHERE id = %s", (node_id,))
+        row = self._fetch_one("SELECT data FROM graph.nodes WHERE id = %s", (node_id,))
         if row:
             return row[0] if isinstance(row[0], dict) else json.loads(row[0])
         return None
@@ -96,7 +114,7 @@ class DriftEngine:
         """
         Records metadata about the embedding to ensure version consistency.
         """
-        self.db.execute(
+        self._execute(
             """
             INSERT INTO graph.vector_meta (node_id, embedding_model, embedding_version, indexed_at)
             VALUES (%s, %s, %s, NOW())
@@ -131,7 +149,7 @@ class DriftEngine:
         Persist suggestion.
         """
         try:
-            self.db.execute(
+            self._execute(
                 """
                 INSERT INTO graph.edge_candidates 
                 (source_intent_id, target_intent_id, suggested_edge_type, similarity_score, drift_score, confidence_score, status)
@@ -152,7 +170,7 @@ class DriftEngine:
         """
         try:
             # 1. Fetch Candidate (Non-transactional read first for safety)
-            row = self.db.fetch_one(
+            row = self._fetch_one(
                 "SELECT source_intent_id, target_intent_id, suggested_edge_type, status FROM graph.edge_candidates WHERE id = %s",
                 (candidate_id,)
             )
@@ -170,64 +188,13 @@ class DriftEngine:
             if source_id == target_id:
                 raise EvolutionIntegrityError("Self supersession is illegal")
 
-            with self.db.transaction() as cur:
-                if edge_type == "SUPERSEDES":
-                    # Guard 2: Single-Successor (Target not already superseded)
-                    cur.execute(
-                        "SELECT source_id FROM graph.edges WHERE target_id = %s AND edge_type = 'SUPERSEDES' LIMIT 1",
-                        (target_id,)
-                    )
-                    existing_successor = cur.fetchone()
-                    if existing_successor:
-                        raise EvolutionIntegrityError(f"Target {target_id} is already superseded by {existing_successor[0]}")
-
-                    # Guard 3: DAG Guard (Hardened Cycle Detection)
-                    if self._has_path(cur, target_id, source_id, "SUPERSEDES"):
-                        raise EvolutionIntegrityError(f"Evolutionary cycle detected: path already exists from {target_id} to {source_id}")
-
-                # Guard 4: Lifecycle Guard (Immutable SUPERSEDED nodes)
-                # Ensure neither node is already SUPERSEDED
-                # Using ANY(%s) for safe array-based parameter expansion
-                cur.execute(
-                    "SELECT id FROM graph.nodes WHERE id = ANY(%s) AND data->>'lifecycle' = 'superseded'",
-                    ([source_id, target_id],)
-                )
-                bad_nodes = cur.fetchall()
-                if bad_nodes:
-                    node_ids = [r[0] for r in bad_nodes]
-                    raise EvolutionIntegrityError(f"Mutation rejected: Nodes {node_ids} are already SUPERSEDED")
-
-                # 3. Insert Edge
-                cur.execute(
-                    """
-                    INSERT INTO graph.edges (source_id, target_id, edge_type, metadata, created_at)
-                    VALUES (%s, %s, %s, %s, NOW())
-                    ON CONFLICT DO NOTHING
-                    """,
-                    (source_id, target_id, edge_type, json.dumps({
-                        "source": "evolution_engine",
-                        "approved_by": actor,
-                        "candidate_id": candidate_id
-                    }))
-                )
-
-                # 3. Update Candidate
-                cur.execute(
-                    "UPDATE graph.edge_candidates SET status = 'APPROVED', reviewed_by = %s, reviewed_at = NOW() WHERE id = %s",
-                    (actor, candidate_id)
-                )
-
-                # 4. Handle SUPERSEDES Lifecycle
-                if edge_type == "SUPERSEDES":
-                    # Mark target (older node) as SUPERSEDED
-                    # Fetch current data first to update safely
-                    cur.execute("SELECT data FROM graph.nodes WHERE id = %s", (target_id,))
-                    node_row = cur.fetchone()
-                    if node_row:
-                        data = node_row[0] if isinstance(node_row[0], dict) else json.loads(node_row[0])
-                        data["lifecycle"] = "superseded"
-                        data["superseded_by"] = source_id
-                        cur.execute("UPDATE graph.nodes SET data = %s WHERE id = %s", (json.dumps(data), target_id))
+            # Note: We assume external transaction management if self.db is a cursor
+            if hasattr(self.db, 'transaction'):
+                with self.db.transaction() as cur:
+                    self._commit_edge_logic(cur, source_id, target_id, edge_type, candidate_id, actor)
+            else:
+                # If we're already in a cursor, just execute
+                self._commit_edge_logic(self.db, source_id, target_id, edge_type, candidate_id, actor)
 
             print(f"[DriftEngine] Committed edge {candidate_id} ({source_id}->{target_id})")
             return True
@@ -235,6 +202,61 @@ class DriftEngine:
         except Exception as e:
             print(f"[DriftEngine] Failed to commit edge {candidate_id}: {e}")
             return False
+
+    def _commit_edge_logic(self, cur, source_id, target_id, edge_type, candidate_id, actor):
+        if edge_type == "SUPERSEDES":
+            # Guard 2: Single-Successor (Target not already superseded)
+            cur.execute(
+                "SELECT source_id FROM graph.edges WHERE target_id = %s AND edge_type = 'SUPERSEDES' LIMIT 1",
+                (target_id,)
+            )
+            existing_successor = cur.fetchone()
+            if existing_successor:
+                raise EvolutionIntegrityError(f"Target {target_id} is already superseded by {existing_successor[0]}")
+
+            # Guard 3: DAG Guard (Hardened Cycle Detection)
+            if self._has_path(cur, target_id, source_id, "SUPERSEDES"):
+                raise EvolutionIntegrityError(f"Evolutionary cycle detected: path already exists from {target_id} to {source_id}")
+
+        # Guard 4: Lifecycle Guard (Immutable SUPERSEDED nodes)
+        cur.execute(
+            "SELECT id FROM graph.nodes WHERE id = ANY(%s) AND data->>'lifecycle' = 'superseded'",
+            ([source_id, target_id],)
+        )
+        bad_nodes = cur.fetchall()
+        if bad_nodes:
+            node_ids = [r[0] for r in bad_nodes]
+            raise EvolutionIntegrityError(f"Mutation rejected: Nodes {node_ids} are already SUPERSEDED")
+
+        # 3. Insert Edge
+        cur.execute(
+            """
+            INSERT INTO graph.edges (source_id, target_id, edge_type, metadata, created_at)
+            VALUES (%s, %s, %s, %s, NOW())
+            ON CONFLICT DO NOTHING
+            """,
+            (source_id, target_id, edge_type, json.dumps({
+                "source": "evolution_engine",
+                "approved_by": actor,
+                "candidate_id": candidate_id
+            }))
+        )
+
+        # 3. Update Candidate
+        cur.execute(
+            "UPDATE graph.edge_candidates SET status = 'APPROVED', reviewed_by = %s, reviewed_at = NOW() WHERE id = %s",
+            (actor, candidate_id)
+        )
+
+        # 4. Handle SUPERSEDES Lifecycle
+        if edge_type == "SUPERSEDES":
+            cur.execute("SELECT data FROM graph.nodes WHERE id = %s", (target_id,))
+            node_row = cur.fetchone()
+            if node_row:
+                data = node_row[0] if isinstance(node_row[0], dict) else json.loads(node_row[0])
+                data["lifecycle"] = "superseded"
+                data["superseded_by"] = source_id
+                cur.execute("UPDATE graph.nodes SET data = %s WHERE id = %s", (json.dumps(data), target_id))
 
     def _has_path(self, cur, start_id: str, end_id: str, edge_type: str) -> bool:
         """
@@ -260,7 +282,7 @@ class DriftEngine:
         Rejects a candidate edge.
         """
         try:
-            self.db.execute(
+            self._execute(
                 "UPDATE graph.edge_candidates SET status = 'REJECTED', reviewed_by = %s, reviewed_at = NOW() WHERE id = %s",
                 (actor, candidate_id)
             )

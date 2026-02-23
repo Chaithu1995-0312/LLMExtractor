@@ -33,6 +33,7 @@ except ImportError:
 # Adjust the path to import CortexAPI from the same directory
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from api import CortexAPI
+from services.cortex.orchestration import TaskQueue
 
 # Use the properly installed nexus package
 try:
@@ -50,14 +51,6 @@ except ImportError:
     from nexus.graph.manager import GraphManager
     from nexus.graph.prompt_manager import PromptManager
     from nexus.config import REPO_ROOT, GRAPH_DB_PATH
-
-# Import Celery Tasks
-try:
-    from services.cortex.tasks import sync_bricks_task, assemble_topic_task, synthesize_relationships_task
-    HAS_CELERY = True
-except ImportError:
-    print("Celery tasks not found. Running in synchronous mode.")
-    HAS_CELERY = False
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -196,19 +189,26 @@ def system_health():
     except:
         db_status = "unhealthy"
         
-    # Check Redis/Celery (Simplified)
-    celery_status = "active" if HAS_CELERY else "disabled"
+    # Check PG Queue status
+    try:
+        from nexus.db import get_adapter
+        db = get_adapter()
+        row = db.fetch_one("SELECT COUNT(*) FROM graph.l3_tasks WHERE status = 'pending'")
+        pending_tasks = row[0] if row else 0
+        queue_status = "healthy"
+    except:
+        pending_tasks = 0
+        queue_status = "unhealthy"
     
     # Check LLM (Simplified availability check)
     llm_status = "available" 
-    # In a real scenario, we might ping Ollama or the configured LLM provider
     
     health = {
         "db": db_status,
-        "redis": "healthy", # Assuming healthy if server runs, strictly would check connection
-        "celery_workers": 1 if HAS_CELERY else 0, # Placeholder
+        "pg_queue": queue_status,
+        "pending_tasks": pending_tasks,
         "llm": llm_status,
-        "last_sync": datetime.now(timezone.utc).isoformat() # Placeholder for actual sync timestamp
+        "last_sync": datetime.now(timezone.utc).isoformat()
     }
     return jsonify(health)
 
@@ -497,14 +497,8 @@ def cognition_assemble():
     if not topic:
         return jsonify({"error": "topic is required"}), 400
 
-    if HAS_CELERY:
-        task = assemble_topic_task.delay(topic)
-        return jsonify({"status": "accepted", "task_id": task.id}), 202
-    else:
-        result = cortex_api.assemble(topic)
-        if result.get("status") == "failed":
-            return jsonify(result), 500
-        return jsonify(result)
+    TaskQueue.enqueue("assemble_topic", {"topic": topic})
+    return jsonify({"status": "queued"}), 202
 
 @app.route("/cognition/synthesize", methods=["POST"])
 def cognition_synthesize():
@@ -512,28 +506,14 @@ def cognition_synthesize():
     data = request.json or {}
     topic_id = data.get("topic_id")
 
-    if HAS_CELERY:
-        task = synthesize_relationships_task.delay(topic_id=topic_id)
-        return jsonify({"status": "accepted", "task_id": task.id}), 202
-    else:
-        result = cortex_api.synthesize(topic_id=topic_id)
-        if result.get("status") == "failed":
-            return jsonify(result), 500
-        return jsonify(result)
+    TaskQueue.enqueue("synthesize_relationships", {"topic_id": topic_id})
+    return jsonify({"status": "queued"}), 202
 
 @app.route("/tasks/sync", methods=["POST"])
 def trigger_sync():
     """Manually trigger background sync of bricks to graph nodes"""
-    if HAS_CELERY:
-        task = sync_bricks_task.delay()
-        return jsonify({"status": "accepted", "task_id": task.id}), 202
-    else:
-        # Synchronous fallback
-        try:
-            GraphManager().sync_bricks_to_nodes()
-            return jsonify({"status": "success", "mode": "synchronous"})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+    TaskQueue.enqueue("sync_bricks", {})
+    return jsonify({"status": "queued"}), 202
 
 @app.route("/jarvis/assemble-topic", methods=["POST"])
 def jarvis_assemble_topic():

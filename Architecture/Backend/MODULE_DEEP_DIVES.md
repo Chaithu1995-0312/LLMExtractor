@@ -1,74 +1,105 @@
-# MODULE_DEEP_DIVES.md
+# Module Deep Dives
 
-## 1. Graph Manager Core (`src/nexus/graph/manager.py`)
+## 1. Graph Manager (`src/nexus/graph/manager.py`)
+**Role**: The "Nervous System" enforcing state integrity and unified storage.
 
-The `GraphManager` is the authoritative controller for the Nexus state. It handles all state transitions and enforces graph-level invariants.
+### Core Architecture
+The Graph Manager abstracts the underlying Postgres storage (`graph.nodes`, `graph.edges`) into a coherent Object Graph. It is responsible for all state mutations and ensures that no illegal states (e.g., cycles in versioning) are persisted.
 
-### Method Intelligence Table: `GraphManager`
+### Key Logic: Cycle Detection
+Before adding `OVERRIDES` or `SUPERSEDED_BY` edges, the manager performs a DFS traversal to prevent infinite loops.
 
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants Enforced |
-| :--- | :--- | :--- | :--- | :--- |
-| `register_node` | Atomic node creation/merge | node_type, node_id, attrs | Persistent record in SQLite | Prevents duplicate ID collisions |
-| `add_typed_edge` | Schema-aware relationship creation | edge object | Typed edge record | Validates node existence; checks for cycles |
-| `promote_node_to_frozen` | Finalize node state | node_id, promote_bricks, actor | State -> `frozen`; audit log entry | Transitions node to immutable status |
-| `supersede_node` | Versioning replacement | old_id, new_id, reason | Links old to new; marks old as `superseded` | Maintains lineage; prevents circular supersession |
-| `kill_node` | Logical removal | node_id, reason, actor | State -> `killed`; audit log entry | Preserves history (no physical delete) |
-| `sync_bricks_to_nodes` | Ingestion bridge | limit | Promotes bricks to Intent nodes | Ensures bricks aren't double-processed |
+```mermaid
+sequenceDiagram
+    participant API as API/Worker
+    participant GM as GraphManager
+    participant DB as Postgres
 
-### Method Usage Graph: `GraphManager`
-- **Called By**: `CortexAPI` (via `server.py`), `NexusCompiler` (indirectly via brick promotion), `ui/jarvis` (via REST API).
-- **Layer**: Graph Layer.
-- **Authority**: Write-authoritative. All state changes MUST pass through this class.
+    API->>GM: register_edge(A, B, "SUPERSEDED_BY")
+    GM->>GM: _check_for_cycle(A, B)
+    alt Cycle Detected
+        GM-->>API: Error: Cycle Detected (A->B->...->A)
+    else Safe
+        GM->>DB: INSERT edge (A, B)
+        GM->>DB: UPDATE nodes (metadata)
+        GM-->>API: Success
+    end
+```
 
----
+### Key Logic: Lifecycle Promotion
+Promoting a node from `FORMING` to `FROZEN` is a critical boundary crossing.
 
-## 2. Nexus Compiler (`src/nexus/sync/compiler.py`)
+1.  **Validate Current State**: Node must be `FORMING`.
+2.  **Validate Scope (Invariant)**: Node must have an `APPLIES_TO` edge pointing to a Scope.
+3.  **Persist**: Update `lifecycle` to `FROZEN`.
+4.  **Audit**: Log to `governance.audit_trace`.
+5.  **Pulse**: Emit event to L1 Narrator.
 
-The `NexusCompiler` manages the transformation of raw data into atomic Bricks. It is the primary orchestrator of the Ingestion layer.
+## 2. L3 Sage (`src/nexus/cognition/l3_sage.py`)
+**Role**: The "Brain" performing strategic audits and high-level reasoning.
 
-### Method Intelligence Table: `NexusCompiler`
+### Hybrid Escalation Logic
+The Sage uses a "Flash-first, Pro-fallback" strategy to optimize cost vs. intelligence.
 
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Failure Modes |
-| :--- | :--- | :--- | :--- | :--- |
-| `compile_run` | Process a conversation run | run_id, topic_id | Count of bricks materialized | LLM timeout; malformed JSON input |
-| `_llm_extract_pointers` | Semantic segmentation | content, topic | List of brick pointers | Hallucinated JSON paths; empty responses |
-| `_materialize_brick` | Brick persistence | run_data, pointer | JSON Brick object in `BrickStore` | Integrity error on duplicate fingerprint |
+```mermaid
+sequenceDiagram
+    participant Scheduler
+    participant Sage as L3 Sage
+    participant Router as Escalation Router
+    participant LLM_Flash as LLM (Flash)
+    participant LLM_Pro as LLM (Pro)
 
-### Method Usage Graph: `NexusCompiler`
-- **Called By**: `sync_bricks_task` (Cortex Worker), `runner.py` (CLI).
-- **Layer**: Ingestion Layer.
-- **Authority**: Transactional (Run level). Read-write on `SyncDatabase` and `BrickStore`.
+    Scheduler->>Sage: audit_topic_health(TopicID)
+    Sage->>Sage: Gather Metrics
+    Sage->>Router: route_l3(Prompt)
+    Router->>LLM_Flash: Inference
+    LLM_Flash-->>Sage: Analysis + Confidence
+    
+    Sage->>Sage: Compute Confidence (Model + Heuristics)
+    
+    alt Confidence < Threshold
+        Sage->>Router: escalate_l3(Prompt)
+        Router->>LLM_Pro: Inference
+        LLM_Pro-->>Sage: Deep Analysis
+    end
+    
+    Sage->>Sage: Log Insight & Audit
+```
 
----
+## 3. Postgres Worker (`services/cortex/worker.py`)
+**Role**: The "Muscle" ensuring reliable, atomic execution of asynchronous tasks.
 
-## 3. Cognitive Extractor (`src/nexus/cognition/dspy_modules.py`)
+### Transactional Task Execution
+The worker couples the *Task State* (Queue) and *Graph Mutation* (Business Logic) into a single ACID transaction. This ensures that if the business logic fails, the task is not marked as complete, and if the task update fails, the graph is not mutated.
 
-Uses DSPy to recursively extract structured knowledge from text context.
+```mermaid
+sequenceDiagram
+    participant Worker
+    participant DB as Postgres Queue
+    participant Handler as Task Handler
 
-### Method Intelligence Table: `CognitiveExtractor`
-
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Lifecycle Impact |
-| :--- | :--- | :--- | :--- | :--- |
-| `forward` | Recursive extraction | context, depth | Facts, Entities, Relationships | High token cost; defines graph topology |
-
-### Method Usage Graph: `CognitiveExtractor`
-- **Called By**: `RelationshipSynthesizer`, `CortexAPI` (indirectly).
-- **Layer**: Cognition Layer.
-- **Authority**: Pure (Analytical). No direct side effects on main Graph.
-
----
-
-## 4. Relationship Synthesizer (`src/nexus/cognition/dspy_modules.py`)
-
-Infers typed edges between existing Intents by analyzing their semantic overlap.
-
-### Method Intelligence Table: `RelationshipSynthesizer`
-
-| Method Name | Responsibility | Inputs | Outputs / Side Effects | Invariants Enforced |
-| :--- | :--- | :--- | :--- | :--- |
-| `forward` | Edge inference | intents, existing_edges | List of inferred typed edges | Prevents redundant edge creation |
-
-### Method Usage Graph: `RelationshipSynthesizer`
-- **Called By**: `run_relationship_synthesis` (Synthesizer).
-- **Layer**: Cognition Layer.
-- **Authority**: Stateful Read / Pure Write (Generates proposals for the Graph Layer).
+    loop Polling
+        Worker->>DB: BEGIN TRANSACTION
+        Worker->>DB: SELECT ... FOR UPDATE SKIP LOCKED
+        
+        opt No Task
+            Worker->>DB: ROLLBACK
+        end
+        
+        Worker->>DB: UPDATE status='running'
+        
+        par Execute
+            Worker->>Handler: run(payload)
+            Handler->>DB: INSERT/UPDATE Graph Nodes (Same TX)
+        and
+            Worker->>DB: UPDATE status='completed'
+        end
+        
+        alt Success
+            Worker->>DB: COMMIT
+        else Error
+            Worker->>DB: ROLLBACK
+            Worker->>DB: (New TX) UPDATE status='failed', retry++
+        end
+    end
+```

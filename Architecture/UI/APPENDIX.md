@@ -1,41 +1,31 @@
-# APPENDIX
+# UI Appendix: Component Intelligence
 
-## Master Class → Method Intelligence Table
+## Component → Logic Map
 
-| Class / Component | Method | Responsibility | Risk | Inputs | Outputs | Idempotency | State Impact |
-|-------------------|--------|----------------|------|--------|---------|-------------|--------------|
-| `App.tsx` | `handleSend` | Orchestrates query flow | MED | Query String | Chat History Update | ✅ | Messages State |
-| `App.tsx` | `getLayoutedElements` | Node positioning logic | LOW | Node/Edge List | Layouted Elements | ✅ | None (Pure) |
-| `NodeEditor` | `onUpdate` | Lifecycle Write Gatekeeper | HIGH | ID, Action, Data | API Response | ✅ | DB State |
-| `AuditPanel` | `fetchEvents` | Data ingestion from trail | LOW | Limit/Offset | Event List | ✅ | Local Events State |
-| `CortexVisualizer` | `useEffect` (Data) | Cytoscape transformation | LOW | Graph Data | Elements Array | ✅ | Component Elements |
-| `ControlPanel` | `triggerSync` | Manual Graph/Vector Sync | MED | None | Task ID | ✅ | Background Task |
-| `useNexusStore` | `setSelectedBrickId` | Global Selection Setter | LOW | ID | Store Update | ✅ | selection/panelOpen |
+| Component | Responsibility | Risk | Inputs (Props) | State Interactions |
+| :--- | :--- | :---: | :--- | :--- |
+| **CortexVisualizer** | Graph Rendering | HIGH | `nodes: Node[]`, `edges: Edge[]` | Reads nothing; pure render. |
+| **AuditStreamPanel** | Stream Visualization | MED | None | Subscribes to `useStreamStore`. |
+| **ControlPanel** | Global Commands | LOW | None | Writes to `useSystemStore`. |
+| **NexusNode** | Node Detail/Edit | MED | `nodeId: string` | Reads `useGraphStore`. Writes `NODE_PATCH`. |
+| **AppLayout** | Structure/Shell | LOW | `children: ReactNode` | Reads `useNexusStore` (Panel Toggles). |
 
-## Method Usage Graph & Ripple Effect
+## State Store Map
 
-| Method | Called By | Layer | Type | Impact Zone |
-|--------|-----------|-------|------|-------------|
-| `handleSend` | `App` (Keyboard/Click) | UI | Stateful | Chat Interface |
-| `onUpdate` | `NodeEditor` (User Action) | Service | Transactional | Graph Database (SQLite/JSON) |
-| `fetchEvents` | `AuditPanel` (Interval) | Ingestion | Read-only | Observatory Dashboard |
-| `promote_node` | `Cortex API` | Cognition | Write-Auth | Global Truth Model |
-| `recall_bricks` | `Cortex API` | Graph | Pure | Semantic Recall Accuracy |
+| Store | Responsibility | Persistence | Events Handled |
+| :--- | :--- | :---: | :--- |
+| **GraphStore** | Nodes, Edges | Memory | `NODE_CREATE`, `NODE_PATCH`, `EDGE_CREATE` |
+| **StreamStore** | Audit Logs | Memory | `AUDIT_EVENT` |
+| **SystemStore** | Health, Config | Memory | `SYSTEM_HEALTH` |
+| **NexusStore** | UI Selection | Memory | (Local UI Actions only) |
 
-## Governance & Boundary Labeling
-
-| Component / Method | Boundary Type | Governance Role |
-|--------------------|---------------|-----------------|
-| `NodeEditor` | Write Boundary | Enforces that only valid actions ('promote', 'kill', 'supersede') are sent to the backend. |
-| `AuditPanel` | Security Boundary | Provides read-only visibility into internal agent decisions (forensic trail). |
-| `useNexusStore` | Lifecycle Gatekeeper | Manages the primary UI context, ensuring visual synchronization across modes. |
-| `getLayoutedElements`| Safety Rail | Prevents manual node dragging from corrupting the logical hierarchical representation. |
-
-## Implied Methods (🧪/🔴)
-
-| Method Name | Status | Description |
-|-------------|--------|-------------|
-| `handleAnchor` | 🧪 | Implied action in `ControlStrip` to register a raw brick as an anchor. |
-| `handleReject` | 🧪 | Implied action in `ControlStrip` to mark a brick as non-knowledge. |
-| `showRunTrace` | 🔴 | Planned method to navigate from an audit event to a full execution visualization. |
-| `mergeNodes` | 🔴 | Planned method to consolidate multiple graph nodes into a single entity. |
+## Event Envelope Structure
+```typescript
+interface EventEnvelope<T> {
+  event_id: string;   // UUID
+  sequence: number;   // Monotonic Int
+  timestamp: number;  // Unix MS
+  type: string;       // Event Type Enum
+  payload: T;         // Typed Data
+}
+```
