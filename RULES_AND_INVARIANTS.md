@@ -1,45 +1,47 @@
-# Rules and Invariants
+# RULES_AND_INVARIANTS
 
-## 1. Intent Lifecycle
-All `Intent` nodes must adhere to the following state transition logic (`IntentLifecycle` enum):
+## 1. Safety Rails (Do Not Touch)
 
-| From State | To State | Trigger | Condition |
-| :--- | :--- | :--- | :--- |
-| **LOOSE** | **FORMING** | Initial Extraction | Created by `NexusCompiler` or `CognitiveExtractor`. |
-| **FORMING** | **FROZEN** | `promote_node` | Human approval via API (`jarvis_anchor`). |
-| **FORMING** | **KILLED** | `kill_node` | Human rejection or Hallucination check. |
-| **FROZEN** | **SUPERSEDED** | `supersede_node` | New node replaces old one (Versioning). |
-| **SUPERSEDED** | **KILLED** | - | *Illegal Transition* (Superseded nodes are immutable history). |
+### ⛔ Ingestion Integrity
+*   **Source Runs are Append-Only:** `src/nexus/sync/db.py` -> `register_run_safe`.
+    *   **Rule:** Never modify the `raw_content` of a registered run unless extending it (prefix match required).
+    *   **Reason:** Breaks cryptographic provenance and invalidates downstream Bricks.
 
-## 2. Graph Integrity Rules
+### ⛔ Graph Lifecycle
+*   **FROZEN Nodes are Immutable:** `src/nexus/graph/manager.py`.
+    *   **Rule:** Never `UPDATE` the `statement` of a node with `lifecycle='frozen'`.
+    *   **Reason:** FROZEN nodes are anchors for other knowledge. Use `supersede_node` instead.
+*   **Valid Transitions Only:**
+    *   `LOOSE` -> `FORMING` | `KILLED`
+    *   `FORMING` -> `FROZEN` | `KILLED`
+    *   `FROZEN` -> `SUPERSEDED` | `KILLED`
+    *   `SUPERSEDED` -> `KILLED`
 
-### Edge Constraints
-1.  **Type Safety**: All edges must have a valid `EdgeType` from `src/nexus/graph/schema.py`.
-2.  **Directionality**:
-    -   `DERIVED_FROM`: Must point from `Intent` -> `Source`.
-    -   `APPLIES_TO`: Must point from `Intent` -> `ScopeNode`.
-3.  **No Loops**: The graph should generally be a DAG for `DERIVED_FROM` edges, though circular dependencies (e.g., `CONFLICTS_WITH`) are allowed between Intents.
+### ⛔ Audit Trail
+*   **No Silent Actions:** `src/nexus/graph/manager.py` -> `_log_audit_event`.
+    *   **Rule:** Every write operation to the Graph (create, update, delete) MUST emit an Audit Event.
+    *   **Reason:** Regulatory compliance and debugging.
 
-### Node Invariants
-1.  **Immutability**: Once a node is `FROZEN`, its `statement` and `content` fields MUST NOT be modified. Updates require creating a new node and linking via `SUPERSEDED_BY`.
-2.  **Source Tracking**: Every `Intent` node must be traceable back to a `Source` node via a chain of `DERIVED_FROM` edges.
+## 2. Mandatory Verification Hooks
 
-## 3. Governance Invariants
+### 🛡️ Pre-Commit Hooks
+1.  **Cycle Detection:** Before adding `OVERRIDES` or `SUPERSEDED_BY` edges, run `_check_for_cycle` (`GraphManager`).
+2.  **Schema Validation:** Ensure `Intent` nodes have `statement` and `lifecycle` fields.
 
-### Prompt Safety
-1.  **Approved List**: `PromptManager` must only serve prompts with slugs present in the `approved_slugs` list (currently hardcoded in `prompt_manager.py`).
-2.  **Violation Behavior**: If a request is made for a non-existent or unapproved prompt, a `GovernanceViolation` exception must be raised (unless a fallback is explicitly allowed and logged).
+### 🛡️ Post-Commit Hooks
+1.  **Unified Sync:** After adding Bricks to `sync.bricks`, MUST run `sync_bricks_to_nodes` to populate the Graph.
+2.  **Audit Pulse:** Emit a WebSocket pulse for real-time UI updates.
 
-### Audit Trail
-1.  **Event Logging**: All state changes (Create, Update, Delete) and Prompt Fallbacks MUST emit an event to `phase3_audit_trace.jsonl` via `_log_audit_event`.
-2.  **Actor Attribution**: All API mutations must include an `actor` field (User ID or System Agent Name).
+## 3. Data Invariants
 
-## 4. Agent Safety Rails
+### 🔒 Content Addressing
+*   **Brick IDs:** Must be derived from the hash of their content + source span.
+*   **Artifact IDs:** Must be SHA256 of the JSON payload.
 
-### 🚫 Do Not Touch Zones
--   **`src/nexus/graph/schema.py`**: Changing Enum values here breaks the database and UI compatibility. Consult architecture team before modifying.
--   **`src/nexus/sync/db.py`**: The raw SQL/KV schema is rigid. Do not alter table structures without a migration script.
+### 🔒 Provenance Chain
+*   Every `Intent` MUST have a `DERIVED_FROM` edge pointing to at least one `Brick` (or another `Intent`).
+*   Every `Brick` MUST have a valid `source_address` (Run ID + Index).
 
-### ✅ Mandatory Verification Hooks
--   **Pre-Commit**: Run `scripts/test_full_loop.py` before pushing changes to Core Logic.
--   **Schema Changes**: Must be accompanied by an update to `src/nexus/graph/schema_sync.sql`.
+## 4. Economic Cognition (Cost Control)
+*   **Token Tracking:** Any function invoking an LLM (`dspy_modules`) must return usage stats (`tokens_in`, `tokens_out`, `cost_usd`).
+*   **Budget Guardrails:** (Future) Block requests if daily budget exceeded.

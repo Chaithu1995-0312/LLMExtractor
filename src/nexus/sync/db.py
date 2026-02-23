@@ -76,8 +76,8 @@ class SyncDatabase:
 
     def register_run_safe(self, run_id: str, new_content: Dict):
         """
-        Registers a source run with Zero-Trust Append Validation.
-        If the run exists, verifies that the new content is a strict superset (prefix match).
+        Registers a source run with Zero-Trust Append Validation (Level 0 Hardening).
+        Enforces strict byte-level prefix match to prevent history rewriting.
         """
         existing = self.get_run(run_id)
         
@@ -97,25 +97,43 @@ class SyncDatabase:
                 f"Regression detected for {run_id}: New length {len(new_msgs)} < Old length {len(old_msgs)}"
             )
             
-        # Check 2: Prefix Match (Zero-Trust ID Check)
-        # We compare message_ids for the overlapping segment to ensure history hasn't been rewritten
-        old_ids = [m.get('message_id') for m in old_msgs]
-        new_ids_prefix = [m.get('message_id') for m in new_msgs[:len(old_msgs)]]
-        
-        if old_ids != new_ids_prefix:
-            # Determine where it diverged for debugging
-            divergence_idx = -1
-            for i, (oid, nid) in enumerate(zip(old_ids, new_ids_prefix)):
-                if oid != nid:
-                    divergence_idx = i
-                    break
+        # Check 2: Strict Deep Prefix Match
+        # We compare every field of the overlapping segment to ensure NO history rewrite.
+        # This is stricter than just ID matching.
+        for i, old_msg in enumerate(old_msgs):
+            new_msg = new_msgs[i]
             
-            raise AppendViolationError(
-                f"History divergence detected for {run_id} at index {divergence_idx}. "
-                f"Old ID: {old_ids[divergence_idx] if divergence_idx != -1 else '?'}, "
-                f"New ID: {new_ids_prefix[divergence_idx] if divergence_idx != -1 else '?'}"
-            )
-        
+            # 2a. ID Match
+            if old_msg.get('id') != new_msg.get('id'):
+                raise AppendViolationError(
+                    f"HISTORY_DIVERGENCE_DETECTED for {run_id} at index {i}. "
+                    f"ID Mismatch: Old={old_msg.get('id')} vs New={new_msg.get('id')}"
+                )
+            
+            # 2b. Role Match
+            if old_msg.get('role') != new_msg.get('role'):
+                raise AppendViolationError(
+                    f"HISTORY_DIVERGENCE_DETECTED for {run_id} at index {i}. "
+                    f"Role Mismatch: Old={old_msg.get('role')} vs New={new_msg.get('role')}"
+                )
+
+            # 2c. Content Match (Byte-level)
+            # We strictly require the content string to be identical.
+            old_content = old_msg.get('content', '')
+            new_content_val = new_msg.get('content', '')
+            
+            # Handle list content (e.g. multimodal) by serializing first
+            if isinstance(old_content, (dict, list)):
+                old_content = json.dumps(old_content, sort_keys=True)
+            if isinstance(new_content_val, (dict, list)):
+                new_content_val = json.dumps(new_content_val, sort_keys=True)
+
+            if old_content != new_content_val:
+                raise AppendViolationError(
+                    f"HISTORY_DIVERGENCE_DETECTED for {run_id} at index {i}. "
+                    f"Content Mismatch! History has been rewritten."
+                )
+
         # 3. Atomic Update
         # Update raw_content BUT keep last_processed_index
         # This effectively "extends the tape" for the compiler
@@ -152,8 +170,13 @@ class SyncDatabase:
 
     # --- BRICKS ---
 
-    def save_brick(self, brick: Dict):
+    def save_brick_atomic(self, brick: Dict):
+        """
+        Saves a brick AND applies subsumption logic atomically in a single transaction.
+        Level 0 Hardening: Ensures graph consistency even on crash.
+        """
         with self.db.transaction() as cur:
+            # 1. Insert/Update the new brick
             cur.execute(
                 """
                 INSERT INTO sync.bricks (
@@ -185,7 +208,7 @@ class SyncDatabase:
                 )
             )
             
-            # Atomic update to unified nodes to ensure they are visible to external tools
+            # 2. Sync to Unified Graph (Nodes table)
             state_map = {
                 "IMPROVISE": "loose",
                 "FORMING": "forming",
@@ -197,7 +220,10 @@ class SyncDatabase:
                 "lifecycle": state_map.get(brick["state"], "loose"),
                 "metadata": {
                     "sync_topic_id": brick["topic_id"],
-                    "sync_topic_name": "Nexus Server Sync Architecture" # Fallback/Mock name
+                    "sync_topic_name": "Nexus Server Sync Architecture", 
+                    "role": brick.get("role"),
+                    "authority_level": brick.get("authority_level"),
+                    "message_id": brick.get("message_id")
                 }
             }
             cur.execute(
@@ -210,6 +236,71 @@ class SyncDatabase:
                 """,
                 (brick["id"], json.dumps(node_data))
             )
+            
+            # 3. ATOMIC SUBSUMPTION CHECK
+            # We query existing bricks in the same transaction snapshot.
+            # Only strictly shorter bricks can be superseded (optimization).
+            # We exclude SUPERSEDED/KILLED to avoid double-tap.
+            new_content = brick["content"]
+            topic_id = brick["topic_id"]
+            
+            # Fetch candidates: same topic, active state, not self
+            cur.execute("""
+                SELECT id, content FROM sync.bricks 
+                WHERE topic_id = %s 
+                  AND state NOT IN ('SUPERSEDED', 'KILLED')
+                  AND id != %s
+            """, (topic_id, brick["id"]))
+            
+            candidates = cur.fetchall()
+            
+            for (old_id, old_content) in candidates:
+                # Subsumption Rule: Strict Containment + Strict Length Increase
+                if old_content in new_content and len(new_content) > len(old_content):
+                    print(f"[SyncDB] Atomic Subsumption: {brick['id']} supersedes {old_id}")
+                    
+                    # 3a. Update Old Brick State
+                    cur.execute(
+                        """
+                        UPDATE sync.bricks 
+                        SET state = 'SUPERSEDED', superseded_by_id = %s 
+                        WHERE id = %s
+                        """,
+                        (brick["id"], old_id)
+                    )
+                    
+                    # 3b. Update Old Graph Node
+                    # We have to fetch current data to modify it
+                    cur.execute("SELECT data FROM graph.nodes WHERE id = %s", (old_id,))
+                    row = cur.fetchone()
+                    if row:
+                        old_data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                        old_data["lifecycle"] = "killed"
+                        old_data["superseded_by"] = brick["id"]
+                        
+                        cur.execute(
+                            "UPDATE graph.nodes SET data = %s, updated_at = NOW() WHERE id = %s",
+                            (json.dumps(old_data), old_id)
+                        )
+                    
+                    # 3c. Create Edge
+                    cur.execute(
+                        """
+                        INSERT INTO graph.edges (source_id, target_id, edge_type, metadata, created_at)
+                        VALUES (%s, %s, 'superseded_by', '{"reason": "atomic_subsumption"}', NOW())
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (old_id, brick["id"])
+                    )
+
+            # 4. Enqueue Drift Analysis (Async) - outside of transaction correctness scope but fine here
+            try:
+                from services.cortex.tasks import process_drift_task
+                process_drift_task.delay(brick["id"])
+            except ImportError:
+                pass
+            except Exception as e:
+                print(f"[SyncDB] Warning: Failed to enqueue drift task: {e}")
 
     def get_fingerprints_for_topic(self, topic_id: str) -> List[str]:
         rows = self.db.fetch_all("SELECT fingerprint FROM sync.bricks WHERE topic_id = %s", (topic_id,))
@@ -255,3 +346,44 @@ class SyncDatabase:
         except Exception as e:
             print(f"[SyncDB] Error truncating data: {e}")
             raise
+
+    def supersede_brick(self, old_brick_id: str, new_brick_id: str):
+        """
+        Marks an old brick as SUPERSEDED by a new brick.
+        Also updates the corresponding graph node lifecycle.
+        """
+        with self.db.transaction() as cur:
+            # 1. Update sync.bricks
+            cur.execute(
+                """
+                UPDATE sync.bricks 
+                SET state = 'SUPERSEDED', superseded_by_id = %s 
+                WHERE id = %s
+                """,
+                (new_brick_id, old_brick_id)
+            )
+            
+            # 2. Update graph.nodes (Unified Graph)
+            # Fetch existing data to preserve other fields
+            cur.execute("SELECT data FROM graph.nodes WHERE id = %s", (old_brick_id,))
+            row = cur.fetchone()
+            if row:
+                data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                data["lifecycle"] = "killed" # Mapped from SUPERSEDED
+                data["superseded_by"] = new_brick_id
+                
+                cur.execute(
+                    "UPDATE graph.nodes SET data = %s, updated_at = NOW() WHERE id = %s",
+                    (json.dumps(data), old_brick_id)
+                )
+                
+            # 3. Create Edge in Graph
+            # EdgeType.SUPERSEDED_BY
+            cur.execute(
+                """
+                INSERT INTO graph.edges (source_id, target_id, edge_type, metadata, created_at)
+                VALUES (%s, %s, 'superseded_by', '{"reason": "subsumption"}', NOW())
+                ON CONFLICT DO NOTHING
+                """,
+                (old_brick_id, new_brick_id)
+            )

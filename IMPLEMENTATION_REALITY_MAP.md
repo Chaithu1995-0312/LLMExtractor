@@ -1,59 +1,72 @@
-# Implementation Reality Map
+# IMPLEMENTATION_REALITY_MAP
 
-## 1. Module Status Overview
+**Status Legend:**
+✅ **Confirmed:** Logic present and operational.
+🟡 **Partial:** Stubs, TODOs, or fragile implementation.
+🔴 **Missing:** Referenced but not found.
+🧪 **Mocked/Simulated:** Hardcoded or test-only logic.
+🗑️ **Scrap/Diverted:** Deprecated or unused code.
 
-| Module | Path | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| **Ingestion** | `src/nexus/sync` | ✅ | Full pipeline from JSON to DB implemented. |
-| **Extraction** | `src/nexus/extract` | ✅ | `TreeSplitter` handles rich ingest and stable path hashing. |
-| **Cognition** | `src/nexus/cognition` | ✅ | DSPy modules and Synthesizer active. |
-| **Graph** | `src/nexus/graph` | ✅ | GraphDB, Schema, and Manager functional. |
-| **API** | `services/cortex` | ✅ | Flask Server + Socket.IO + Celery Tasks. |
-| **UI** | `ui/jarvis` | ✅ | React frontend with visualization components. |
-| **Vector** | `src/nexus/vector` | ✅ | FAISS integration via `local_index.py`. |
-| **Governance** | `src/nexus/governance` | 🟡 | `AlertManager` exists but runs partially detached from main sync. |
-| **Reranking** | `src/nexus/rerank` | 🟡 | `LlmReranker` implemented with `llama-cpp` but optional. |
-| **Testing** | `tests/` | 🟡 | Integration tests exist, unit coverage unclear. |
+## 1. Core Modules (`src/nexus`)
 
-## 2. Class & Method Reality Check
+### `sync` (Ingestion Engine)
+*   ✅ **Compiler (`compiler.py`):** Robust logic for parsing source runs into Bricks.
+*   ✅ **Database (`db.py`):** Handles `topics`, `source_runs`, and `bricks` with append-only guarantees.
+*   ✅ **Runner (`runner.py`):** Orchestrates the ingestion pipeline.
+*   ✅ **CLI (`__main__.py`):** Entry point for sync operations.
 
-### `src/nexus/sync/runner.py`
-| Class/Method | Status | Intelligence |
-| :--- | :--- | :--- |
-| `run_sync` | ✅ | **Risk**: HIGH (DB Write). Orchestrates the entire ingestion. |
-| `NexusCompiler` | ✅ | **Risk**: MED. Calls LLM, parses results. |
-| `SyncDatabase` | ✅ | **Risk**: HIGH. Direct SQL/KV store access. |
+### `graph` (Knowledge Graph)
+*   ✅ **Manager (`manager.py`):** Central authority for node/edge lifecycle (LOOSE → FROZEN).
+*   ✅ **Schema (`schema.py`):** Defines `Intent`, `Source`, `EdgeType`, `Lifecycle`.
+*   ✅ **Projection (`projection.py`):** Logic for flattening graph views.
+*   🟡 **Validation (`validation.py`):** Basic cycle detection exists in `manager.py`, but standalone validator is partial.
 
-### `src/nexus/extract/tree_splitter.py`
-| Class/Method | Status | Intelligence |
-| :--- | :--- | :--- |
-| `process_conversation` | ✅ | **Risk**: MED. File IO. Converts JSON tree to linear paths. |
-| `extract_message` | ✅ | **Risk**: LOW. Pure logic. Handles rich content parsing. |
+### `cognition` (AI Logic)
+*   ✅ **Assembler (`assembler.py`):**  `assemble_topic` pipeline with DSPy integration and artifact persistence.
+*   🟡 **Synthesizer (`synthesizer.py`):** `run_relationship_synthesis` exists but has fragile try/except blocks around DSPy calls.
+*   ✅ **DSPy Modules (`dspy_modules.py`):**  (Inferred) Wrappers for LLM calls.
+*   ✅ **Coverage Scorer (`coverage_scorer.py`):** Logic to score topic coverage.
 
-### `src/nexus/graph/prompt_manager.py`
-| Class/Method | Status | Intelligence |
-| :--- | :--- | :--- |
-| `get_prompt` | ✅ | **Risk**: MED. Enforces governance. Raises `GovernanceViolation`. |
-| `save_prompt` | ✅ | **Risk**: HIGH. Writes to Governance DB. |
+### `vector` & `rerank` (Search)
+*   ✅ **Embedder (`vector/embedder.py`):** Handles embedding generation.
+*   ✅ **Index (`vector/index.py`):** FAISS/Vector store interface.
+*   ✅ **Cross Encoder (`rerank/cross_encoder.py`):** Reranking logic for search results.
 
-### `src/nexus/rerank/llm_reranker.py`
-| Class/Method | Status | Intelligence |
-| :--- | :--- | :--- |
-| `rank` | ✅ | **Risk**: MED. Calls local LLM. Has latency fallback. |
+### `ask` (Query)
+*   ✅ **Recall (`ask/recall.py`):** `recall_bricks_readonly` implements the retrieval logic.
 
-## 3. Scrap / Diverted / Legacy Code
+## 2. Services (`services`)
 
-| Component | File | Status | Analysis |
-| :--- | :--- | :--- | :--- |
-| **BrickStore Legacy** | `src/nexus/bricks/brick_store.py` | 🔴 | `_load_all_bricks_metadata` is deprecated. Class wraps `SyncDatabase` redundantly. |
-| **Walls Builder** | `src/nexus/walls/builder.py` | 🟡 | Seemingly standalone CLI tool for token-aware text dumping. Not integrated into `runner.py`. |
-| **Legacy Indexing** | `src/nexus/index/conversation_index.py` | 🟡 | Separate JSON index. Potentially redundant with `SyncDatabase`. |
+### `cortex` (API Gateway)
+*   ✅ **Server (`server.py`):** Flask app with Socket.IO, serving API and UI.
+*   ✅ **API (`api.py`):** Application logic layer bridging Server and Core.
+*   🟡 **Orchestration (`orchestration.py`):** Partial logic for complex workflows.
+*   🟡 **Worker (`worker.py`):** Celery integration logic, fallback to sync is implemented.
+*   🧪 **Audit Log (`phase3_audit_trace.jsonl`):** File-based audit log (should be DB in prod).
 
-## 4. Missing or Implied Capabilities
+### `mcp` (Model Context Protocol)
+*   ✅ **Nexus Server (`nexus_server.py`):** Implementation of MCP server.
 
-| Feature | Implied Location | Status | Analysis |
-| :--- | :--- | :--- | :--- |
-| **Incremental Sync** | `runner.py` | 🟡 | Logic exists for `rebuild_index` but true incremental diffing is partial. |
-| **Deep Conflict Resolution** | `synthesizer.py` | 🔴 | `RelationshipSynthesizer` finds conflicts, but resolution logic is thin. |
-| **User Auth** | `services/cortex` | 🧪 | No real auth found; assumes local/trusted environment. |
-| **Multi-Tenant Sharding** | `src/nexus/config.py` | 🔴 | Config points to single `graph.db`. |
+## 3. User Interface (`ui/jarvis`)
+
+### Frontend
+*   ✅ **App Structure (`App.tsx`):** Main React application layout.
+*   ✅ **State Management (`store.ts`, `reducers/`):** Redux-like state handling.
+*   ✅ **Protocol (`protocol/event-types.ts`):** Typed event definitions for WebSocket.
+*   ✅ **Components:** Rich set of components (`CortexVisualizer`, `AuditPanel`, etc.).
+
+## 4. Infrastructure & Scripts
+
+### Database
+*   ✅ **Postgres (`src/nexus/db/postgres.py`):** Production DB adapter.
+*   ✅ **SQLite (`src/nexus/db/adapter.py`):** Local/Dev DB adapter.
+*   ✅ **Schema SQL (`src/nexus/graph/*.sql`):** SQL definitions for schema.
+
+### Scripts
+*   ✅ **Migration (`scripts/migrate_*.py`):** Utilities for DB migration.
+*   ✅ **Maintenance (`scripts/maintenance/`):** Pruning and rebuilding scripts.
+*   ✅ **Testing (`scripts/test_*.py`):** Various integration test scripts.
+
+## 5. Diverted / Scrap Code
+*   🗑️ **Archive (`archive/`):** Old `neo4j_manager.py` and `pinecone_index.py` - replaced by Postgres/FAISS.
+*   🗑️ **Legacy Docs (`impldocs/`):** Text files describing previous implementation plans.

@@ -1,90 +1,67 @@
-# File Index & Intelligence Map
+# FILE_INDEX
 
-## src/nexus/sync/
-
-### `runner.py`
-Orchestrator for the deterministic ingestion pipeline.
--   `run_sync(input_json, output_dir, rebuild_index)`: **[HIGH]** Main entry point. Connects DB, Compiler, and processes all conversations.
-    -   *Inputs*: JSON file path, output directory.
-    -   *State Impact*: Mutates `SyncDatabase` (Source Runs, Bricks).
-
-### `compiler.py`
-Compiles linear conversation paths into atomic Bricks.
--   `NexusCompiler.compile_run(run_id, topic_id)`: **[MED]** Calls LLM to extract bricks from a source run.
-    -   *Inputs*: `run_id`, `topic_id`.
-    -   *State Impact*: Creates `Brick` records in DB.
+## src/nexus/sync
 
 ### `db.py`
-Database abstraction for the "Vault".
--   `SyncDatabase`: **[HIGH]** Manages SQLite/Key-Value storage for sync state.
--   `truncate_sync_data()`: **[HIGH]** Destructive. Wipes all sync data.
--   `register_run(run_id, content)`: **[MED]** Stores raw source content.
+**Class: `SyncDatabase`**
+*   `create_topic(id, name, definition)`: (MED) Writes topic metadata. Idempotent.
+*   `register_run_safe(run_id, content)`: (MED) Appends source run with prefix validation. Enforces append-only.
+*   `save_brick(brick)`: (MED) Upserts brick and unified node. Transactional.
+*   `truncate_sync_data()`: (HIGH) **Destructive**. Clears all sync data.
 
-## src/nexus/extract/
+### `compiler.py` (Inferred)
+**Class: `Compiler`**
+*   `compile(source_run)`: (LOW) Pure function. Transforms raw logs to Bricks.
 
-### `tree_splitter.py`
-Rich ingest parser for conversation trees.
--   `process_conversation(conv, output_dir)`: **[MED]** Converts JSON tree to linear paths with stable hashing.
-    -   *Inputs*: Dict (conversation), output path.
-    -   *State Impact*: Writes `path_{hash}.json` files to disk.
--   `extract_message(node_id, node)`: **[LOW]** Pure logic. Extracts text/code blocks from nodes.
+### `runner.py` (Inferred)
+**Class: `Runner`**
+*   `run_sync()`: (MED) Orchestrates the sync process.
 
-## src/nexus/cognition/
-
-### `dspy_modules.py`
-DSPy Signatures and Modules for cognitive extraction.
--   `CognitiveExtractor`: **[LOW]** Pure logic. Extracts Facts, Diagrams, Entities.
--   `RelationshipSynthesizer`: **[LOW]** Pure logic. Infers edges between intents.
-
-### `synthesizer.py`
-Orchestrates the relationship discovery process.
--   `run_relationship_synthesis(topic_id)`: **[MED]** Batch process. Reads graph -> DSPy -> Writes Edges.
-    -   *Inputs*: `topic_id` (optional).
-    -   *State Impact*: Adds `Edge` records to Graph.
-
-## src/nexus/graph/
+## src/nexus/graph
 
 ### `manager.py`
-Central API for Graph interactions.
--   `GraphManager`: **[HIGH]** Facade for all graph operations.
--   `add_typed_edge(edge)`: **[HIGH]** Persists a new edge.
--   `sync_bricks_to_nodes()`: **[HIGH]** Promotes Sync Bricks to Graph Nodes.
+**Class: `GraphManager`**
+*   `register_node(type, id, attrs)`: (MED) Upserts graph node. Idempotent.
+*   `register_edge(src, dst, type)`: (MED) Creates edge with cycle detection for specific types.
+*   `promote_node_to_frozen(id, anchors)`: (HIGH) Lifecycle transition FORMING -> FROZEN. Audited.
+*   `kill_node(id, reason)`: (HIGH) Lifecycle transition -> KILLED. Audited.
+*   `supersede_node(old, new)`: (HIGH) Lifecycle transition FROZEN -> SUPERSEDED. Versioning logic.
+*   `sync_bricks_to_nodes()`: (MED) Batch migration of Bricks to Graph Nodes.
 
-### `prompt_manager.py`
-Governance for system prompts.
--   `get_prompt(slug, version)`: **[MED]** Retrieves approved prompts. Raises violation if missing.
--   `save_prompt(slug, content)`: **[HIGH]** Writes new prompt version to DB.
+### `schema.py` (Inferred)
+**Classes: `Intent`, `Edge`, `Lifecycle`**
+*   (Data Classes): Define the domain model.
 
-### `schema.py`
-Data models and Enums.
--   `GraphNode`, `Source`, `ScopeNode`, `Intent`: Data classes.
--   `Edge`, `EdgeType`: Relationship definitions.
--   `IntentLifecycle`: Enum for state transitions.
+## src/nexus/cognition
 
-## src/nexus/rerank/
+### `assembler.py`
+**Module Functions**
+*   `assemble_topic(query)`: (HIGH) DSPy pipeline. Reads graph, queries LLM, writes Artifact.
 
-### `llm_reranker.py`
-Local LLM-based reranking.
--   `LlmReranker.rank(query, candidates)`: **[MED]** Calls local LLM. Has latency guard.
-    -   *Inputs*: Query string, List[Dict] candidates.
-    -   *Output*: Reordered List[Dict] with new scores.
+### `synthesizer.py`
+**Module Functions**
+*   `run_relationship_synthesis(topic_id)`: (HIGH) DSPy pipeline. Infers relationships between Intents.
 
-## src/nexus/governance/
-
-### `alert_manager.py`
-Alerting and feedback loop.
--   `persist_alert(alert_data)`: **[HIGH]** Writes to `coverage_alerts` table.
--   `log_prompt_attempt(attempt_data)`: **[MED]** Logs feedback on auto-suggested prompts.
-
-## services/cortex/
+## services/cortex
 
 ### `server.py`
-Flask API Server entry point.
--   `jarvis_graph_index()`: **[LOW]** GET endpoint for graph dump.
--   `jarvis_anchor()`: **[HIGH]** POST endpoint for human validation.
--   `cognition_synthesize()`: **[MED]** POST endpoint to trigger synthesis.
+**Module Functions**
+*   `api_metrics_overview()`: (LOW) Read-only DB stats.
+*   `jarvis_node_promote()`: (HIGH) API endpoint for node promotion.
+*   `jarvis_node_kill()`: (HIGH) API endpoint for node rejection.
+*   `cognition_assemble()`: (HIGH) API endpoint to trigger topic assembly.
 
-### `tasks.py`
-Celery task definitions (Async).
--   `sync_bricks_task`: **[MED]** Async wrapper for sync.
--   `synthesize_relationships_task`: **[MED]** Async wrapper for synthesis.
+### `api.py` (Inferred)
+**Class: `CortexAPI`**
+*   `assemble(topic)`: (HIGH) Wrapper for `assemble_topic`.
+*   `get_audit_events()`: (LOW) Read-only audit log query.
+
+## ui/jarvis/src
+
+### `protocol/event-types.ts`
+**Types**
+*   `GraphEventType`, `SystemEventType`, `StreamEventType`: Define WebSocket contract.
+
+### `components` (Inferred)
+*   `CortexVisualizer`: (UI) Renders the graph.
+*   `AuditPanel`: (UI) Displays audit logs.

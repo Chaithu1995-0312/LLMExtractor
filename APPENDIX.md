@@ -1,21 +1,35 @@
-# Appendix: Class & Method Reference Table
+# APPENDIX
 
-| Class | Method | Layer | Responsibility | Risk | Used By |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `SyncDatabase` | `register_run` | Ingestion | Store raw source content | MED | `runner.py` |
-| `SyncDatabase` | `truncate_sync_data` | Ingestion | Wipe all sync state | HIGH | `runner.py` |
-| `NexusCompiler` | `compile_run` | Ingestion | LLM extraction of bricks | MED | `runner.py` |
-| `TreeSplitter` | `process_conversation` | Ingestion | Transform JSON tree to linear paths | MED | `runner.py` |
-| `runner.py` | `run_sync` | Ingestion | Pipeline Orchestration | HIGH | CLI |
-| `CognitiveExtractor` | `forward` | Cognition | Extract Facts/Entities | LOW | `NexusCompiler` |
-| `RelationshipSynthesizer` | `forward` | Cognition | Infer Edges | LOW | `synthesizer.py` |
-| `GraphManager` | `add_typed_edge` | Graph | Write Edge to DB | HIGH | `synthesizer.py` |
-| `GraphManager` | `register_node` | Graph | Create/Update Node | HIGH | `server.py`, `runner.py` |
-| `GraphManager` | `get_all_nodes_raw` | Graph | Read-only Node Dump | LOW | `server.py` |
-| `GraphManager` | `sync_bricks_to_nodes` | Graph | Promote Bricks to Nodes | HIGH | `runner.py`, `server.py` |
-| `PromptManager` | `get_prompt` | Governance | Retrieve approved prompts | MED | `compiler.py`, `synthesizer.py` |
-| `PromptManager` | `save_prompt` | Governance | Version new prompt | HIGH | Governance CLI (implied) |
-| `AlertManager` | `persist_alert` | Governance | Log coverage gaps | HIGH | `coverage_sentinel.py` |
-| `CortexAPI` | `synthesize` | Service | Trigger Synthesis | MED | `server.py` |
-| `Flask App` | `jarvis_anchor` | UI/API | User Validation Hook | HIGH | Jarvis UI |
-| `LlmReranker` | `rank` | Service | Re-score recall candidates | MED | `recall.py` |
+## Method Intelligence Matrix
+
+| Class | Method | Responsibility | Risk | Used By |
+| :--- | :--- | :--- | :--- | :--- |
+| **SyncDatabase** | `register_run_safe` | Enforces Zero-Trust Append-Only logic for source ingestion. | MED | `Runner.run_sync` |
+| **SyncDatabase** | `save_brick` | Persists extracted Brick and syncs to Unified Graph. | MED | `Runner.run_sync` |
+| **GraphManager** | `promote_node_to_frozen` | Locks a node state, making it an anchor. | HIGH | `CortexAPI.jarvis_node_promote` |
+| **GraphManager** | `kill_node` | Rejects a node, removing it from active consideration. | HIGH | `CortexAPI.jarvis_node_kill` |
+| **GraphManager** | `supersede_node` | Versions a FROZEN node with a newer replacement. | HIGH | `CortexAPI.jarvis_node_supersede` |
+| **GraphManager** | `_log_audit_event` | Writes immutable record of state changes. | LOW | `GraphManager` (internal) |
+| **Assembler** | `assemble_topic` | End-to-end DSPy pipeline for topic artifact creation. | HIGH | `CortexAPI.cognition_assemble` |
+| **Synthesizer** | `run_relationship_synthesis` | Automated discovery of edges between intents. | HIGH | `CortexAPI.cognition_synthesize` |
+| **CortexAPI** | `metrics_overview` | Read-only aggregation of DB stats. | LOW | `ui/jarvis` (Dashboard) |
+
+## Edge Type Reference
+
+| Type | Description | Invariant |
+| :--- | :--- | :--- |
+| `DERIVED_FROM` | Provenance link: Intent -> Brick. | Every Intent MUST have >= 1 source. |
+| `ASSEMBLED_IN` | Grouping link: Brick/Intent -> Topic/Artifact. | Used for retrieval scoping. |
+| `OVERRIDES` | Conflict resolution: New -> Old. | Source must be valid, Target usually Frozen. |
+| `SUPERSEDED_BY` | Versioning: Old -> New. | Both nodes must be FROZEN. |
+| `APPLIES_TO` | Scope link: Intent -> ScopeNode. | Required for freezing some intents. |
+
+## Lifecycle Reference
+
+| State | Mutable? | Description |
+| :--- | :--- | :--- |
+| `LOOSE` | Yes | Volatile, untrusted. Default state. |
+| `FORMING` | Yes | Validated by Agent, waiting for human/final approval. |
+| `FROZEN` | **NO** | Trusted Anchor. Can only be superseded. |
+| `SUPERSEDED` | **NO** | Historical record. Replaced by newer truth. |
+| `KILLED` | **NO** | Rejected/Dead. Retained for anti-pattern matching. |

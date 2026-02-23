@@ -111,24 +111,27 @@ def get_db_metrics():
     }
     
     try:
-        from nexus.db.postgres import get_pg_connection
-        conn = get_pg_connection()
-        cur = conn.cursor()
+        from nexus.db import get_adapter
+        db = get_adapter()
         
-        cur.execute("SELECT COUNT(*) FROM nodes")
-        stats["nodes"] = cur.fetchone()[0]
+        row = db.fetch_one("SELECT COUNT(*) FROM graph.nodes")
+        stats["nodes"] = row[0] if row else 0
         
-        cur.execute("SELECT COUNT(*) FROM edges")
-        stats["edges"] = cur.fetchone()[0]
+        row = db.fetch_one("SELECT COUNT(*) FROM graph.edges")
+        stats["edges"] = row[0] if row else 0
         
-        cur.execute("SELECT COUNT(*) FROM intents")
-        stats["conversations"] = cur.fetchone()[0]
+        # 'intents' is a view or subset of nodes, let's query nodes where type='intent'
+        row = db.fetch_one("SELECT COUNT(*) FROM graph.nodes WHERE type = 'intent'")
+        stats["conversations"] = row[0] if row else 0 
         
-        cur.execute("SELECT COUNT(*) FROM runs")
-        stats["source_runs"] = cur.fetchone()[0]
+        # Original queried 'runs', likely 'sync.source_runs'
+        row = db.fetch_one("SELECT COUNT(*) FROM sync.source_runs")
+        stats["source_runs"] = row[0] if row else 0
+
+        # Also get bricks count
+        row = db.fetch_one("SELECT COUNT(*) FROM sync.bricks")
+        stats["bricks"] = row[0] if row else 0
         
-        cur.close()
-        conn.close()
     except Exception as e:
         print(f"Error fetching DB metrics from Postgres: {e}")
         
@@ -147,13 +150,12 @@ def get_lifecycle_distribution():
     }
     
     try:
-        from nexus.db.postgres import get_pg_connection
-        conn = get_pg_connection()
-        cur = conn.cursor()
+        from nexus.db import get_adapter
+        db = get_adapter()
         
-        query = "SELECT lifecycle, COUNT(*) FROM intents GROUP BY lifecycle"
-        cur.execute(query)
-        rows = cur.fetchall()
+        # Querying graph.nodes for intents
+        query = "SELECT data->>'lifecycle', COUNT(*) FROM graph.nodes WHERE type='intent' GROUP BY data->>'lifecycle'"
+        rows = db.fetch_all(query)
         
         for r in rows:
             state = r[0]
@@ -165,10 +167,9 @@ def get_lifecycle_distribution():
                 else:
                     distribution[key] = count
             else:
+                # Default fallback
                 distribution["FORMING"] += count
                 
-        cur.close()
-        conn.close()
     except Exception as e:
         print(f"Error fetching lifecycle stats from Postgres: {e}")
         

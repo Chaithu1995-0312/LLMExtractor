@@ -34,6 +34,7 @@ from nexus.cognition.prompt_generator import PromptGenerator
 from nexus.sync.llm import LLMClient
 from nexus.graph.manager import GraphManager
 from nexus.graph.schema import AuditEventType, DecisionAction
+from nexus.evolution.drift_engine import DriftEngine
 
 class CortexAPI:
     def __init__(self, audit_log_path: str = None):
@@ -466,3 +467,122 @@ class CortexAPI:
 
     def get_coverage_score(self, topic_id: str) -> Dict:
         return self.coverage_scorer.compute_score(topic_id)
+
+    # --- Evolution / Drift API Methods ---
+
+    def get_evolution_candidates(self, status: str = 'PENDING', limit: int = 50) -> Dict:
+        """
+        Fetch pending graph evolution suggestions.
+        """
+        try:
+            # We can use GraphManager's DB adapter or DriftEngine. 
+            # DriftEngine doesn't have a list method yet, so let's add one or query via GraphManager logic here.
+            # Using GraphManager's DB access is cleaner for read-only listing.
+            query = """
+                SELECT id, source_intent_id, target_intent_id, suggested_edge_type, 
+                       similarity_score, confidence_score, created_at
+                FROM graph.edge_candidates 
+                WHERE status = %s
+                ORDER BY confidence_score DESC, similarity_score DESC, created_at ASC
+                LIMIT %s
+            """
+            rows = self.graph_manager.db.fetch_all(query, (status, limit))
+            
+            candidates = []
+            for r in rows:
+                candidates.append({
+                    "id": r[0],
+                    "source_id": r[1],
+                    "target_id": r[2],
+                    "type": r[3],
+                    "similarity": r[4],
+                    "confidence": r[5],
+                    "created_at": r[6]
+                })
+            return {"candidates": candidates}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def approve_candidate(self, candidate_id: str, actor: str) -> Dict:
+        """
+        Approve a candidate edge, committing it to the graph.
+        """
+        try:
+            engine = DriftEngine()
+            success = engine.commit_edge(candidate_id, actor)
+            if success:
+                self.graph_manager._log_audit_event(
+                    event_type="EVOLUTION_APPROVED",
+                    agent=actor,
+                    component="evolution",
+                    decision_action=DecisionAction.ACCEPTED,
+                    reason="User approved drift suggestion",
+                    metadata={"candidate_id": candidate_id}
+                )
+                return {"status": "success"}
+            return {"error": "Commit failed", "status": "failed"}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def reject_candidate(self, candidate_id: str, actor: str) -> Dict:
+        """
+        Reject a candidate edge.
+        """
+        try:
+            engine = DriftEngine()
+            success = engine.reject_candidate(candidate_id, actor)
+            if success:
+                self.graph_manager._log_audit_event(
+                    event_type="EVOLUTION_REJECTED",
+                    agent=actor,
+                    component="evolution",
+                    decision_action=DecisionAction.REJECTED,
+                    reason="User rejected drift suggestion",
+                    metadata={"candidate_id": candidate_id}
+                )
+                return {"status": "success"}
+            return {"error": "Rejection failed", "status": "failed"}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    # --- Metrics API Methods ---
+
+    def get_system_metrics(self) -> Dict:
+        """
+        Fetch latest global evolution snapshot.
+        """
+        try:
+            query = "SELECT * FROM graph.system_stats ORDER BY computed_at DESC LIMIT 1"
+            row = self.graph_manager.db.fetch_one(query)
+            if not row:
+                return {"error": "No metrics available", "status": "empty"}
+            
+            # Since table has UUID as first column
+            cols = [
+                "id", "total_nodes", "total_edges", "total_candidates", 
+                "approved_candidates", "rejected_candidates", "approval_ratio",
+                "supersession_edges", "conflict_edges", "average_pending_age_hours", "computed_at"
+            ]
+            return {col: val for col, val in zip(cols, row)}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def get_cluster_metrics(self, limit: int = 100) -> Dict:
+        """
+        Fetch cluster stability metrics.
+        """
+        try:
+            query = "SELECT cluster_id, volatility, stability_index, last_computed_at FROM graph.cluster_stats ORDER BY stability_index ASC LIMIT %s"
+            rows = self.graph_manager.db.fetch_all(query, (limit,))
+            
+            clusters = []
+            for r in rows:
+                clusters.append({
+                    "cluster_id": r[0],
+                    "volatility": r[1],
+                    "stability": r[2],
+                    "updated_at": r[3]
+                })
+            return {"clusters": clusters}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}

@@ -1,19 +1,36 @@
-# Gaps and TODOs
+# GAPS_AND_TODOS
 
-## 1. Critical Technical Debt
--   [ ] **Sync Performance**: `runner.py` processes conversations sequentially. Needs parallelization (`ProcessPoolExecutor`) for large datasets.
--   [ ] **Graph Scalability**: Currently using a single SQLite file (`graph.db`). Concurrent writes (Sync + Synthesis + API) will hit lock contention.
--   [ ] **Error Handling**: `synthesizer.py` uses broad `except Exception` blocks. Needs specific error handling and recovery strategies.
--   [ ] **Test Coverage**: Unit test coverage is sparse. `tests/` folder contains mostly integration tests.
+## 🔴 Critical Architectural Gaps
 
-## 2. Missing Features
--   [ ] **Authentication**: `server.py` has no authentication middleware. The API is effectively open to the network.
--   [ ] **Incremental Sync**: The `runner.py` has logic for `rebuild_index` but lacks true differential sync (processing only new messages in existing conversations).
--   [ ] **Multi-Tenancy**: The system assumes a single user/tenant. `src/nexus/config.py` hardcodes paths.
--   [ ] **Cognitive Feedback Loop**: There is no automated retraining. "Rejected" nodes do not currently improve future DSPy extraction prompts.
+### 1. Security & Authentication
+*   **Missing:** No auth middleware in `services/cortex/server.py`.
+*   **Risk:** Unprotected API endpoints allow anyone to modify the graph.
+*   **Remediation:** Implement JWT/OAuth2 middleware.
 
-## 3. Recommended Immediate Actions
-1.  **Migrate DB**: Switch `SyncDatabase` and `GraphManager` to PostgreSQL to allow concurrent API and Sync operations.
-2.  **Secure API**: Add API Key middleware to `services/cortex/server.py`.
-3.  **Parallelize**: Refactor `NexusCompiler` to support parallel execution.
-4.  **Schema Migration**: Implement a formal migration tool (e.g., Alembic) instead of manual SQL scripts.
+### 2. Transactional Integrity
+*   **Weakness:** `GraphManager` writes to Postgres but `SyncDatabase` might write to SQLite/Postgres independently. Unified transaction manager missing.
+*   **Risk:** Data inconsistency if one write fails.
+*   **Remediation:** Implement a global `UnitOfWork` pattern or 2PC if multiple DBs.
+
+### 3. Cognition Robustness
+*   **Weakness:** `nexus.cognition.synthesizer` uses broad try/except blocks around DSPy calls.
+*   **Risk:** Silent failures in relationship discovery.
+*   **Remediation:** Implement circuit breakers and typed error handling for LLM calls.
+
+## 🟡 High-Priority TODOs
+
+### 1. Governance
+- [ ] **Implement Proactive Alerts:** Currently `_log_audit_event` just logs. Needs to trigger alerts (PagerDuty/Slack).
+- [ ] **Budget Enforcer:** Block LLM calls if daily spend > $X.
+
+### 2. Frontend (UI)
+- [ ] **Auth UI:** Login screen and token management.
+- [ ] **Graph Editing:** Visual editor for fixing incorrect edges (drag-and-drop).
+
+### 3. Testing
+- [ ] **Integration Tests:** End-to-end test from `ingest` -> `graph` -> `api`.
+- [ ] **Load Testing:** Verify graph performance with 100k+ nodes.
+
+## 🧪 Future Experiments (Low Priority)
+- [ ] **Multi-Model Support:** Allow swapping Ollama for OpenAI/Anthropic per task.
+- [ ] **Vector Hybrid Search:** Combine keyword search (BM25) with vector search (FAISS).

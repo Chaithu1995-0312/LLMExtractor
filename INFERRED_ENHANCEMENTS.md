@@ -1,41 +1,36 @@
-# Inferred Enhancements
+# INFERRED_ENHANCEMENTS
 
-## 1. High-Impact Architecture Changes
+## 1. Autonomous Maintenance (Self-Healing Graph)
+**Concept:** Introduce a `GraphGardener` agent that runs on a schedule.
+*   **Logic:**
+    *   Scan for `LOOSE` nodes > 7 days old.
+    *   Attempt to `cluster` them into new Topics.
+    *   If no cluster found, propose `KILLED` status to human.
+*   **Impact:** Reduces graph entropy and manual cleanup.
 
-### A. Migration to PostgreSQL
-*   **Current**: SQLite (`graph.db`) with file-level locking.
-*   **Proposed**: PostgreSQL with `pgvector` extension.
-*   **Benefit**:
-    -   Handles concurrent writes from Sync and API.
-    -   Native vector search (replacing FAISS/`local_index.py` for simpler stack).
-    -   Row-level locking for better performance.
+## 2. Adaptive Ingestion Strategy
+**Concept:** Smart chunking in `nexus.sync.compiler`.
+*   **Logic:** instead of fixed-size blocks, use an LLM (fast model) to identify semantic boundaries in source text.
+*   **Impact:** Higher quality Bricks = Better downstream Cognition.
 
-### B. Parallel Ingestion Pipeline
-*   **Current**: Sequential processing in `runner.py`.
-*   **Proposed**: Use `concurrent.futures.ProcessPoolExecutor` for the `process_conversation` and `compile_run` steps.
-*   **Benefit**: 5-10x speedup for initial ingestion of large history dumps.
+## 3. Semantic Caching Layer
+**Concept:** Middleware for `nexus.cognition.dspy_modules`.
+*   **Logic:**
+    *   Hash incoming prompt + context.
+    *   Check Redis/Vector store for similar past queries (threshold > 0.95).
+    *   Return cached response if hit.
+*   **Impact:** Reduces LLM costs by 30-50% and latency by orders of magnitude.
 
-## 2. Cognitive Enhancements
+## 4. Federated Knowledge Protocol
+**Concept:** Allow multiple `GraphManager` instances to sync.
+*   **Logic:** Implement a CRDT-like merge strategy for the Graph.
+    *   "Highest Lifecycle Wins" (FROZEN > FORMING > LOOSE).
+*   **Impact:** Enables team-scale usage where each developer has a local graph that syncs to a central Truth.
 
-### A. Semantic Caching
-*   **Concept**: Cache LLM responses for `NexusCompiler` based on the semantic similarity of the source block.
-*   **Benefit**: Drastically reduces cost and time for re-runs of the sync pipeline.
-
-### B. Active Learning Loop
-*   **Concept**: When a user "Rejects" a node via `jarvis_anchor`, automatically generate a negative example for the DSPy `CognitiveExtractor`.
-*   **Benefit**: System gets smarter over time without code changes.
-
-## 3. Operational Improvements
-
-### A. Structured Logging & Tracing
-*   **Current**: `utils_logging.py` prints to stdout/file.
-*   **Proposed**: OpenTelemetry integration for distributed tracing across Flask and Celery.
-
-### B. Containerization
-*   **Current**: Local python scripts.
-*   **Proposed**: Docker Compose setup with services:
-    -   `nexus-api` (Flask)
-    -   `nexus-worker` (Celery)
-    -   `nexus-db` (Postgres)
-    -   `nexus-redis` (Redis)
-    -   `nexus-ui` (React/Nginx)
+## 5. Multi-Modal Bricks
+**Concept:** Extend `Brick` schema to support images/audio.
+*   **Logic:**
+    *   Ingest: OCR/Transcribe -> Text Brick.
+    *   Store: Original binary in S3/Blob, text in Postgres.
+    *   Link: `REPRESENTS` edge.
+*   **Impact:** True "Cognitive" architecture beyond text.

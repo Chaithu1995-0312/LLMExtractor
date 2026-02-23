@@ -117,7 +117,7 @@ def run_sync(input_json: str, output_dir: str, rebuild_index: bool = False):
 
         print(f"[{datetime.now(timezone.utc).isoformat()}] [COMPLETE] Processed {processed_count} conversations.")
         print(f"[{datetime.now(timezone.utc).isoformat()}] [COMPLETE] Total Bricks Extracted: {total_bricks}")
-        print(f"[{datetime.now(timezone.utc).isoformat()}] [AUDIT] Database is located at: {db.db_path}")
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [AUDIT] Sync completed successfully.")
 
     except Exception as e:
         print(f"[{datetime.now(timezone.utc).isoformat()}] ERROR: Sync aborted: {e}")
