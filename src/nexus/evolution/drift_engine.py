@@ -33,7 +33,10 @@ class DriftEngine:
         allow superseded nodes to resurface as live candidates.
         """
         # 1. Fetch Node
-        node_data = self._fetch_node(node_id)
+        # FZ-02 FIX: We must fetch with require_indexed=False because this 
+        # method is the indexer itself. If we require 'indexed' status here,
+        # unindexed nodes can never be processed.
+        node_data = self._fetch_node(node_id, require_indexed=False)
         if not node_data:
             print(f"[DriftEngine] Node {node_id} not found. Skipping.")
             return
@@ -130,9 +133,9 @@ class DriftEngine:
         )
         return row is not None
 
-    def _fetch_node(self, node_id: str) -> Optional[Dict]:
+    def _fetch_node(self, node_id: str, require_indexed: bool = True) -> Optional[Dict]:
         """
-        FZ-02: Fetch a node ONLY if it has been fully vector-indexed.
+        FZ-02: Fetch a node. By default, ONLY returns fully vector-indexed nodes.
 
         vector_status = 'indexed' means:
           1. The node exists in graph.nodes  ✓
@@ -145,11 +148,15 @@ class DriftEngine:
         to include in drift candidate searches. Including it would create a
         ghost drift relationship against an un-indexed node, violating the
         Graph visibility == Vector visibility invariant.
+
+        Setting require_indexed=False is only permitted for the indexer itself
+        (process_node) to break the circular dependency.
         """
-        row = self._fetch_one(
-            "SELECT data FROM graph.nodes WHERE id = %s AND data->>'vector_status' = 'indexed'",
-            (node_id,)
-        )
+        sql = "SELECT data FROM graph.nodes WHERE id = %s"
+        if require_indexed:
+            sql += " AND data->>'vector_status' = 'indexed'"
+
+        row = self._fetch_one(sql, (node_id,))
         if row:
             return row[0] if isinstance(row[0], dict) else json.loads(row[0])
         return None

@@ -28,22 +28,27 @@ class GraphManager:
         except Exception as e:
             print(f"[GraphManager] Error initializing database: {e}")
 
+    def _is_adapter(self):
+        # PostgresAdapter has 'pool', sqlite cursor does not. 
+        # Also added 'connection' attribute to PostgresAdapter.
+        return hasattr(self.db, 'pool') or hasattr(self.db, 'connection')
+
     def _execute(self, sql, params=None):
-        if hasattr(self.db, 'execute'): # Cursor or Adapter
-             return self.db.execute(sql, params)
         return self.db.execute(sql, params)
 
     def _fetch_one(self, sql, params=None):
-        if hasattr(self.db, 'fetchone'): # Cursor
-            self.db.execute(sql, params)
-            return self.db.fetchone()
-        return self.db.fetch_one(sql, params)
+        if self._is_adapter():
+            return self.db.fetch_one(sql, params)
+        # Cursor path
+        self.db.execute(sql, params)
+        return self.db.fetchone()
 
     def _fetch_all(self, sql, params=None):
-        if hasattr(self.db, 'fetchall'): # Cursor
-            self.db.execute(sql, params)
-            return self.db.fetchall()
-        return self.db.fetch_all(sql, params)
+        if self._is_adapter():
+            return self.db.fetch_all(sql, params)
+        # Cursor path
+        self.db.execute(sql, params)
+        return self.db.fetchall()
 
     def register_node(self, node_type: str, node_id: str, attrs: Dict[str, Any], merge: bool = False):
         """
@@ -51,7 +56,7 @@ class GraphManager:
         If merge=True, updates existing node data.
         """
         # If we have a cursor, we skip the with db.transaction() which starts a new one
-        if hasattr(self.db, 'connection'): # Adapter
+        if self._is_adapter():
             with self.db.transaction() as cur:
                 self._register_node_logic(cur, node_type, node_id, attrs, merge)
         else: # Cursor
@@ -155,7 +160,7 @@ class GraphManager:
             if cycle:
                 raise ValueError(f"Cycle detected for {edge_type_str}: {' -> '.join(cycle)}")
 
-        if hasattr(self.db, 'connection'): # Adapter
+        if self._is_adapter():
             with self.db.transaction() as cur:
                 self._register_edge_logic(cur, src_id, dst_id, edge_type_str, attrs)
         else: # Cursor
@@ -427,7 +432,7 @@ class GraphManager:
         if old_node_id == new_node_id:
             raise ValueError("Cannot supersede a node with itself")
 
-        if hasattr(self.db, 'connection'): # Adapter
+        if self._is_adapter():
             with self.db.transaction() as cur:
                 self._supersede_node_logic(cur, old_node_id, new_node_id, old_data, new_data, reason, actor)
         else: # Cursor
@@ -622,7 +627,7 @@ class GraphManager:
         Delete a node and all connected edges.
         """
         try:
-            if hasattr(self.db, 'connection'): # Adapter
+            if self._is_adapter():
                 with self.db.transaction() as cur:
                     self._delete_node_logic(cur, node_id)
             else: # Cursor
@@ -697,7 +702,7 @@ class GraphManager:
         data["metadata"]["actor"] = actor
         data["metadata"]["resolved_at"] = datetime.now(timezone.utc).isoformat()
 
-        if hasattr(self.db, 'connection'):  # Adapter
+        if self._is_adapter():
             with self.db.transaction() as cur:
                 self._mark_forming_logic(cur, brick_id, data, actor)
         else:  # Cursor already in transaction
@@ -762,7 +767,7 @@ class GraphManager:
         This enforces a single physical storage schema for all graph entities.
         """
         try:
-            if hasattr(self.db, 'connection'): # Adapter
+            if self._is_adapter():
                 with self.db.transaction() as cur:
                     self._sync_bricks_to_nodes_logic(cur, limit)
             else: # Cursor

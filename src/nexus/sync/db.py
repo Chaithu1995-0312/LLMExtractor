@@ -295,8 +295,8 @@ class SyncDatabase:
 
             # 4. Enqueue Drift Analysis (Async) - outside of transaction correctness scope but fine here
             try:
-                from services.cortex.tasks import process_drift_task
-                process_drift_task.delay(brick["id"])
+                from services.cortex.orchestration import TaskQueue
+                TaskQueue.enqueue("process_drift", {"node_id": brick["id"]})
             except ImportError:
                 pass
             except Exception as e:

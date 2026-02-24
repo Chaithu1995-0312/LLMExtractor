@@ -28,6 +28,8 @@ def get_adapter():
 
 
 class PostgresAdapter(DBAdapter):
+    # Marker for GraphManager to distinguish from cursor
+    connection = True
 
     def __init__(self, pool: SimpleConnectionPool):
         self.pool = pool
@@ -56,6 +58,12 @@ class PostgresAdapter(DBAdapter):
             return result
         finally:
             self._put_conn(conn)
+
+    # Alias for compatibility when caller expects a cursor
+    def fetchone(self):
+        # This is risky if called without a preceding execute on the same cursor
+        # But in GraphManager it's usually used in _fetch_one which we'll fix too
+        raise NotImplementedError("Use fetch_one(query, params) on adapter")
 
     def fetch_all(self, query: str, params: tuple = None):
         conn = self._get_conn()
