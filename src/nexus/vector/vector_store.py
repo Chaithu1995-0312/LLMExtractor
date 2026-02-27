@@ -87,6 +87,31 @@ class VectorStore:
         if self.next_id % 10 == 0:
             self.save()
 
+    def get_vector(self, node_id: str) -> Optional[np.ndarray]:
+        """
+        Retrieve the stored vector for a node_id directly from the FAISS index.
+
+        Phase 2: Used by DriftEngine.process_node so that drift processing
+        reads the pre-built vector rather than re-embedding the statement.
+        This preserves the invariant that EmbeddingService is only called
+        from index_node — never from the drift path.
+
+        Returns None if the node is not indexed (rather than raising), so
+        callers can guard cleanly.
+
+        Note: faiss.IndexFlatIP inherits from IndexFlat which supports
+        reconstruct(). This returns an exact copy of the stored vector.
+        """
+        if node_id not in self.id_map:
+            return None
+        internal_id = self.id_map[node_id]
+        try:
+            vector = self.index.reconstruct(internal_id)
+            return vector.astype(np.float32)
+        except Exception as e:
+            print(f"[VectorStore] WARN: reconstruct({node_id}) failed: {e}")
+            return None
+
     def search(self, vector: np.ndarray, k: int = 10) -> List[Tuple[str, float]]:
         """
         Search for top-k similar vectors.

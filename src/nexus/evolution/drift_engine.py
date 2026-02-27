@@ -23,25 +23,49 @@ class DriftEngine:
 
     def process_node(self, node_id: str):
         """
-        Main entry point. Idempotent.
+        Main entry point for drift processing. Idempotent.
 
-        D-01 FIX: Vector index write is TXN-gated.
-        The graph node must exist in graph.nodes before the vector index is
-        updated. If the vector write fails, we abort with a clear error rather
-        than silently proceeding — a node that is in the graph but invisible
-        to vector search will generate permanently missing drift candidates and
-        allow superseded nodes to resurface as live candidates.
+        Phase 2 contract:
+        - This method NO LONGER performs indexing.
+        - Indexing is the exclusive responsibility of the `index_node` task
+          (services/cortex/tasks.py → process_index_task).
+        - This method REQUIRES vector_status='indexed' before proceeding.
+          If the node is still pending, it logs and returns. The node will
+          be re-processed once index_node completes and schedules process_drift.
+
+        Legacy migration bridge:
+        - Pre-Phase-2 nodes may have been indexed inline by a previous version
+          of this method. They will have vector_status='indexed' in their data
+          and will pass the guard below without any issue.
+        - Phase-1 nodes with no vector_status field in data are treated as
+          'pending' (see _fetch_node require_indexed=True logic) and will be
+          skipped until a backfill or re-index is triggered.
+
+        D-01 invariant preserved:
+        - We never touch the vector store here. Drift logic only reads it
+          (via vector_store.search). All writes are owned by index_node.
         """
-        # 1. Fetch Node
-        # FZ-02 FIX: We must fetch with require_indexed=False because this 
-        # method is the indexer itself. If we require 'indexed' status here,
-        # unindexed nodes can never be processed.
-        node_data = self._fetch_node(node_id, require_indexed=False)
+        # 1. Phase 2 Guard: Only process fully-indexed nodes.
+        # _fetch_node with require_indexed=True (default) enforces:
+        #   data->>'vector_status' = 'indexed'
+        # If the node is pending or missing, return early.
+        node_data = self._fetch_node(node_id, require_indexed=True)
         if not node_data:
-            print(f"[DriftEngine] Node {node_id} not found. Skipping.")
+            # Could be: not found, still pending, or superseded (filtered by SQL)
+            # Check if the node exists at all for better logging.
+            raw = self._fetch_node(node_id, require_indexed=False)
+            if raw is None:
+                print(f"[DriftEngine] Node {node_id} not found. Skipping.")
+            else:
+                vs = raw.get("vector_status", "pending")
+                lc = raw.get("lifecycle", "unknown")
+                print(f"[DriftEngine] Node {node_id} not ready for drift "
+                      f"(vector_status={vs}, lifecycle={lc}). Skipping.")
             return
 
-        # Lifecycle Guard: Skip superseded nodes
+        # Lifecycle Guard: Skip superseded nodes (belt-and-suspenders —
+        # _fetch_node already excludes them via require_indexed, but we keep
+        # this explicit check for clarity and future schema changes).
         if node_data.get("lifecycle") == "superseded":
             print(f"[DriftEngine] Node {node_id} is SUPERSEDED. Skipping.")
             return
@@ -51,33 +75,21 @@ class DriftEngine:
             print(f"[DriftEngine] Node {node_id} has no statement. Skipping.")
             return
 
-        # 2. Embed & Store — gated: vector write must succeed or abort
-        already_indexed = self.vector_store.exists(node_id)
-        vector = self.embedding_service.embed(statement)
+        # 2. Fetch the pre-built vector from VectorStore.
+        # The vector was created and saved by index_node. We do NOT re-embed here.
+        if not self.vector_store.exists(node_id):
+            # This should not happen if vector_status='indexed', but guard anyway.
+            # Signal clearly so ops can investigate the inconsistency.
+            print(f"[DriftEngine] WARN: Node {node_id} has vector_status=indexed "
+                  f"but is missing from VectorStore. State inconsistency detected. "
+                  f"Skipping drift until re-index completes.")
+            return
 
-        if not already_indexed:
-            # D-01: Atomic gate — vector write must succeed before we proceed.
-            # If add() raises, we propagate the exception up. The caller (task
-            # handler) is wrapped in a transaction; it will rollback the
-            # graph.vector_meta record atomically.
-            self.vector_store.add(node_id, vector)   # raises on failure
-            self._record_vector_meta(node_id)         # DB record mirrors index state
-            self.vector_store.save()                  # Persist to disk immediately (not deferred)
-
-            # FZ-02: Flip vector_status to 'indexed' AFTER all three writes above
-            # have succeeded. This is the visibility gate: _fetch_node() will only
-            # return this node in future drift scans once this flip is committed.
-            # Order of operations is strict:
-            #   add() ✓  →  save() ✓  →  vector_meta ✓  →  vector_status=indexed
-            # Any failure before this line leaves vector_status='pending',
-            # keeping the node invisible to drift scans until a retry completes.
-            self._execute(
-                "UPDATE graph.nodes "
-                "SET data = jsonb_set(data, '{vector_status}', '\"indexed\"') "
-                "WHERE id = %s",
-                (node_id,)
-            )
-            print(f"[DriftEngine] Indexed node {node_id} (vector_status=indexed)")
+        vector = self.vector_store.get_vector(node_id)
+        if vector is None:
+            print(f"[DriftEngine] WARN: vector_store.get_vector({node_id}) returned None. "
+                  f"Skipping drift.")
+            return
 
         # 3. Search Similar Nodes — k=10 candidates
         candidates = self.vector_store.search(vector, k=10)
@@ -152,7 +164,7 @@ class DriftEngine:
         Setting require_indexed=False is only permitted for the indexer itself
         (process_node) to break the circular dependency.
         """
-        sql = "SELECT data FROM graph.nodes WHERE id = %s"
+        sql = "SELECT data FROM graph.nodes WHERE id = %s AND archived = FALSE"
         if require_indexed:
             sql += " AND data->>'vector_status' = 'indexed'"
 
@@ -160,22 +172,6 @@ class DriftEngine:
         if row:
             return row[0] if isinstance(row[0], dict) else json.loads(row[0])
         return None
-
-    def _record_vector_meta(self, node_id: str):
-        """
-        Records metadata about the embedding to ensure version consistency.
-        """
-        self._execute(
-            """
-            INSERT INTO graph.vector_meta (node_id, embedding_model, embedding_version, indexed_at)
-            VALUES (%s, %s, %s, NOW())
-            ON CONFLICT (node_id) DO UPDATE SET
-                embedding_model = EXCLUDED.embedding_model,
-                embedding_version = EXCLUDED.embedding_version,
-                indexed_at = NOW()
-            """,
-            (node_id, self.embedding_service.model_name, self.embedding_service.model_version())
-        )
 
     def _mark_vector_stale(self, node_id: str):
         """

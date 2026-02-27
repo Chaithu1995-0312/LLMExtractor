@@ -14,6 +14,10 @@ my_chatgpt_history/
 output/
 conversations.json
 src/nexus/graph/graph.db
+conversations.json
+databaseinfo/
+openaiconversations/
+
 
 ############################
 # Virtual Environments

@@ -40,7 +40,11 @@ import { NodeEditor } from './components/NodeEditor';
 import { ControlPanel } from './components/ControlPanel';
 import dagre from 'dagre';
 import { AppLayout } from './layout/AppLayout';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import OverviewPage from './pages/OverviewPage';
+import IngestionPage from './pages/IngestionPage';
+import GovernancePage from './pages/GovernancePage';
+import HealthPage from './pages/HealthPage';
 
 // --- Adapters ---
 
@@ -414,6 +418,7 @@ export default function App() {
   };
 
   return (
+    <ErrorBoundary>
     <AppLayout>
       <div className="h-full w-full relative">
         <AnimatePresence mode="wait">
@@ -431,8 +436,8 @@ export default function App() {
           )}
 
           {mode === 'ingestion' && (
-            <motion.div key="ingestion" className="h-full w-full flex items-center justify-center text-white/40 uppercase tracking-widest text-sm">
-              Ingestion Pipeline (Pending Implementation)
+            <motion.div key="ingestion" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full w-full">
+              <IngestionPage />
             </motion.div>
           )}
 
@@ -516,8 +521,8 @@ export default function App() {
           )}
 
           {mode === 'governance' && (
-            <motion.div key="governance" className="h-full w-full flex items-center justify-center text-white/40 uppercase tracking-widest text-sm">
-              Governance & Prompts (Pending Implementation)
+            <motion.div key="governance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full w-full">
+              <GovernancePage />
             </motion.div>
           )}
 
@@ -569,8 +574,8 @@ export default function App() {
           )}
 
           {mode === 'health' && (
-            <motion.div key="health" className="h-full w-full flex items-center justify-center text-white/40 uppercase tracking-widest text-sm">
-              Detailed System Health (Pending Implementation)
+            <motion.div key="health" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full w-full">
+              <HealthPage />
             </motion.div>
           )}
 
@@ -653,5 +658,6 @@ export default function App() {
 
       <ControlPanel isOpen={controlPanelOpen} onClose={() => setControlPanelOpen(false)} />
     </AppLayout>
+    </ErrorBoundary>
   );
 }

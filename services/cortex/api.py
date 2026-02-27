@@ -173,35 +173,97 @@ class CortexAPI:
             "status": "success"
         }
 
-    def ask_preview(self, query: str) -> Dict:
-        print(f"[{datetime.now(timezone.utc).isoformat()}] [CortexAPI] Processing ask_preview for query: '{query}'")
-        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "nexus-cli")))
-        from nexus.ask.recall import recall_bricks_readonly
+    def ask_preview(self, query: str, top_k: int = 10, lifecycle_filter: str = None) -> Dict:
+        """
+        Hybrid semantic preview — now powered by GraphManager.semantic_query.
 
-        # Explicitly enforce global scope for unauthenticated previews
-        recalled_bricks = recall_bricks_readonly(query, allowed_scopes=["global"])
-        
-        print(f"[{datetime.now(timezone.utc).isoformat()}] [CortexAPI] ask_preview found {len(recalled_bricks)} bricks.")
+        Replaces the legacy recall_bricks_readonly path with a direct
+        vector + graph query so results are lifecycle-aware and carry
+        a confidence score derived from embedding distance.
 
-        top_bricks_output = []
-        for brick in recalled_bricks:
-            brick_id = brick["brick_id"]
-            # Enrichment: Fetch actual content from BrickStore
-            full_brick = self.brick_store.get_brick(brick_id)
-            statement = full_brick.get("statement", "No content available") if full_brick else "Brick not found"
-            
-            top_bricks_output.append({
-                "brick_id": brick_id,
-                "confidence": round(brick["confidence"], 4),
-                "statement": statement,
-                "metadata": full_brick.get("metadata", {}) if full_brick else {}
-            })
+        Falls back to the legacy path gracefully if the vector layer is
+        unavailable (e.g. FAISS not installed).
+        """
+        print(f"[{datetime.now(timezone.utc).isoformat()}] [CortexAPI] ask_preview (hybrid): '{query}'")
 
-        return {
-            "query": query,
-            "top_bricks": top_bricks_output,
-            "status": "preview"
-        }
+        try:
+            filters: Dict = {}
+            if lifecycle_filter:
+                filters["lifecycle"] = lifecycle_filter
+
+            results = self.graph_manager.semantic_query(
+                text=query,
+                filters=filters if filters else None,
+                top_k=top_k,
+            )
+
+            top_bricks_output = [
+                {
+                    "brick_id": r["id"],
+                    "statement": r["statement"],
+                    "vector_score": r["vector_score"],
+                    "confidence": r["confidence"],
+                    "lifecycle": r["lifecycle"],
+                    "type": r["type"],
+                    "created_at": r["created_at"],
+                    "metadata": r.get("metadata", {}),
+                }
+                for r in results
+            ]
+
+            print(f"[{datetime.now(timezone.utc).isoformat()}] [CortexAPI] ask_preview returned {len(top_bricks_output)} results.")
+            return {
+                "query": query,
+                "top_bricks": top_bricks_output,
+                "source": "hybrid_graph_vector",
+                "status": "preview",
+            }
+
+        except Exception as e:
+            print(f"[CortexAPI] ask_preview hybrid path failed ({e}), falling back to legacy recall.")
+            # ── Legacy fallback ──────────────────────────────────────────────
+            sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "nexus-cli")))
+            from nexus.ask.recall import recall_bricks_readonly
+            recalled_bricks = recall_bricks_readonly(query, allowed_scopes=["global"])
+            top_bricks_output = []
+            for brick in recalled_bricks:
+                brick_id = brick["brick_id"]
+                full_brick = self.brick_store.get_brick(brick_id)
+                statement = full_brick.get("statement", "No content available") if full_brick else "Brick not found"
+                top_bricks_output.append({
+                    "brick_id": brick_id,
+                    "confidence": round(brick["confidence"], 4),
+                    "statement": statement,
+                    "metadata": full_brick.get("metadata", {}) if full_brick else {},
+                })
+            return {"query": query, "top_bricks": top_bricks_output, "source": "legacy_recall", "status": "preview"}
+
+    def get_system_story(
+        self,
+        limit: int = 50,
+        node_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+    ) -> Dict:
+        """
+        /jarvis/system-story — Return the replayable cognitive narrative stream.
+
+        Queries graph.pulse_events (written atomically by GraphManager) and
+        enriches each event with the node's current type and lifecycle.
+        """
+        try:
+            events = self.graph_manager.get_system_story(
+                limit=limit,
+                node_id=node_id,
+                event_type=event_type,
+            )
+            return {
+                "events": events,
+                "total": len(events),
+                "status": "success",
+            }
+        except Exception as e:
+            print(f"[CortexAPI] get_system_story failed: {e}")
+            return {"events": [], "total": 0, "error": str(e), "status": "failed"}
 
     def assemble(self, topic: str) -> Dict:
         """Endpoint: /cognition/assemble - Trigger topic assembly"""
@@ -585,5 +647,468 @@ class CortexAPI:
                     "updated_at": r[3]
                 })
             return {"clusters": clusters}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    # =========================================================================
+    # EVOLUTION V2 — Concept Evolution API (Phase 2)
+    # =========================================================================
+
+    def get_concept_roots(self, limit: int = 100, cluster_id: Optional[str] = None) -> Dict:
+        """
+        GET /evolution/concepts
+        Returns all active concept roots (nodes with no incoming superseded_by edge).
+        """
+        try:
+            from nexus.evolution.concept_evolution import ConceptEvolutionAPI
+            from dataclasses import asdict
+            api = ConceptEvolutionAPI(db=self.graph_manager.db)
+            roots = api.get_concept_roots(limit=limit, cluster_id=cluster_id)
+            return {"concepts": [asdict(r) for r in roots], "total": len(roots)}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def get_evolution_chain(self, concept_id: str) -> Dict:
+        """
+        GET /evolution/concepts/<id>/chain
+        Returns the full supersession chain from the concept root.
+        """
+        try:
+            from nexus.evolution.concept_evolution import ConceptEvolutionAPI
+            from dataclasses import asdict
+            api = ConceptEvolutionAPI(db=self.graph_manager.db)
+            chain = api.get_evolution_chain(concept_id)
+            if not chain:
+                return {"error": "Concept not found or archived", "status": "not_found"}
+            return asdict(chain)
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def get_node_detail(self, node_id: str) -> Dict:
+        """
+        GET /evolution/nodes/<id>
+        Returns full node detail with all edge relationships.
+        """
+        try:
+            from nexus.evolution.concept_evolution import ConceptEvolutionAPI
+            from dataclasses import asdict
+            api = ConceptEvolutionAPI(db=self.graph_manager.db)
+            detail = api.get_node_detail(node_id)
+            if not detail:
+                return {"error": "Node not found", "status": "not_found"}
+            return asdict(detail)
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def get_concept_timeline(self, concept_id: str) -> Dict:
+        """
+        GET /evolution/concepts/<id>/timeline
+        Returns version history including archived chains (read-only).
+        """
+        try:
+            from nexus.evolution.concept_evolution import ConceptEvolutionAPI
+            api = ConceptEvolutionAPI(db=self.graph_manager.db)
+            return api.get_concept_timeline(concept_id)
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def get_cluster_nodes(self, cluster_id: str, include_archived: bool = False) -> Dict:
+        """
+        GET /evolution/clusters/<id>/nodes
+        Returns nodes in a semantic cluster.
+        """
+        try:
+            from nexus.evolution.concept_evolution import ConceptEvolutionAPI
+            api = ConceptEvolutionAPI(db=self.graph_manager.db)
+            return api.get_cluster_nodes(cluster_id, include_archived=include_archived)
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def get_evolution_live_metrics(self) -> Dict:
+        """
+        GET /evolution/metrics/live
+        Returns real-time metrics from materialized views (cluster health, velocity, convergence).
+        """
+        try:
+            from nexus.evolution.concept_evolution import ConceptEvolutionAPI
+            api = ConceptEvolutionAPI(db=self.graph_manager.db)
+            return api.get_live_metrics()
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def refresh_evolution_metrics(self) -> Dict:
+        """
+        POST /evolution/metrics/refresh
+        Triggers CONCURRENT refresh of all materialized views.
+        """
+        try:
+            from nexus.evolution.concept_evolution import ConceptEvolutionAPI
+            api = ConceptEvolutionAPI(db=self.graph_manager.db)
+            success = api.refresh_metrics()
+            return {"status": "refreshed" if success else "failed"}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    # =========================================================================
+    # EVOLUTION V2 — AI Advisory API (Layer 2)
+    # =========================================================================
+
+    def get_ai_suggestions(self, limit: int = 50) -> Dict:
+        """
+        GET /evolution/ai/suggestions
+        Returns pending AI advisory suggestions for human review.
+        These are read-only advisory items — none modify Core.
+        """
+        try:
+            from nexus.evolution.ai_advisory import AIAdvisory
+            advisory = AIAdvisory(db=self.graph_manager.db)
+            suggestions = advisory.get_pending_suggestions(limit=limit)
+            return {"suggestions": suggestions, "total": len(suggestions)}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def approve_ai_suggestion(self, suggestion_id: str, actor: str, notes: str = "") -> Dict:
+        """
+        POST /evolution/ai/suggestions/<id>/approve
+        Mark a suggestion as approved. Does NOT auto-apply structural changes.
+        Human must separately decide what action to take.
+        """
+        try:
+            from nexus.evolution.ai_advisory import AIAdvisory
+            advisory = AIAdvisory(db=self.graph_manager.db)
+            success = advisory.approve_suggestion(suggestion_id, actor, notes)
+            if success:
+                self.graph_manager._log_audit_event(
+                    event_type="AI_SUGGESTION_APPROVED",
+                    agent=actor,
+                    component="ai_advisory",
+                    decision_action=self.graph_manager.__class__.__module__,  # use DecisionAction
+                    reason=notes or "User approved AI suggestion",
+                    metadata={"suggestion_id": suggestion_id},
+                )
+            return {"status": "approved" if success else "failed"}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def reject_ai_suggestion(self, suggestion_id: str, actor: str, notes: str = "") -> Dict:
+        """
+        POST /evolution/ai/suggestions/<id>/reject
+        Mark a suggestion as rejected.
+        """
+        try:
+            from nexus.evolution.ai_advisory import AIAdvisory
+            advisory = AIAdvisory(db=self.graph_manager.db)
+            success = advisory.reject_suggestion(suggestion_id, actor, notes)
+            return {"status": "rejected" if success else "failed"}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def run_ai_analysis(self, period: str = "nightly") -> Dict:
+        """
+        POST /evolution/ai/run
+        Trigger an on-demand AI advisory analysis cycle.
+        Writes to graph_ai.suggestions only — never to Core.
+        """
+        try:
+            from nexus.evolution.ai_advisory import AIAdvisory
+            advisory = AIAdvisory(db=self.graph_manager.db)
+            return advisory.run_analysis(period=period)
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def get_ai_analysis_runs(self, limit: int = 20) -> Dict:
+        """
+        GET /evolution/ai/runs
+        Returns recent AI analysis run history.
+        """
+        try:
+            from nexus.evolution.ai_advisory import AIAdvisory
+            advisory = AIAdvisory(db=self.graph_manager.db)
+            runs = advisory.get_analysis_runs(limit=limit)
+            return {"runs": runs, "total": len(runs)}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    # =========================================================================
+    # EVOLUTION V2 — Sandbox Promotion Engine (Layer 3)
+    # =========================================================================
+
+    def analyze_sandbox_conflict(self, run_id: str, concept_id: str) -> Dict:
+        """
+        GET /evolution/sandbox/<run_id>/conflict/<concept_id>
+        Analyzes conflict between a sandbox run and the Core concept chain.
+        Returns conflict severity and details for UI display before promotion.
+        """
+        try:
+            from nexus.evolution.promotion_engine import PromotionEngine
+            from dataclasses import asdict
+            engine = PromotionEngine(db=self.graph_manager.db)
+            report = engine.analyze_conflict(run_id, concept_id)
+            return asdict(report)
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def promote_sandbox(
+        self,
+        run_id: str,
+        concept_id: str,
+        strategy: str,
+        actor: str,
+        change_reason: str = "",
+    ) -> Dict:
+        """
+        POST /evolution/sandbox/<run_id>/promote
+        Promote a sandbox evolution chain into Core.
+
+        strategy: REPLACE | BRANCH | NEW_CONCEPT | MANUAL
+        INVARIANT: Atomic transaction. On failure, Core is not modified.
+        """
+        try:
+            from nexus.evolution.promotion_engine import PromotionEngine, ResolutionStrategy
+            from dataclasses import asdict
+            engine = PromotionEngine(db=self.graph_manager.db)
+
+            try:
+                strat = ResolutionStrategy(strategy.upper())
+            except ValueError:
+                return {
+                    "error": f"Invalid strategy '{strategy}'. Must be one of: REPLACE, BRANCH, NEW_CONCEPT, MANUAL",
+                    "status": "invalid_input",
+                }
+
+            result = engine.promote(
+                run_id=run_id,
+                concept_id=concept_id,
+                strategy=strat,
+                actor=actor,
+                change_reason=change_reason,
+            )
+
+            if result.success:
+                self.graph_manager._log_audit_event(
+                    event_type="SANDBOX_PROMOTED",
+                    agent=actor,
+                    component="promotion_engine",
+                    decision_action="ACCEPTED",
+                    reason=change_reason or f"Sandbox promotion via {strategy}",
+                    metadata={
+                        "run_id": run_id,
+                        "concept_id": concept_id,
+                        "strategy": strategy,
+                        "archived_count": len(result.archived_node_ids),
+                        "inserted_count": len(result.inserted_node_ids),
+                        "new_version": result.new_version_number,
+                    },
+                )
+
+            return asdict(result)
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def discard_sandbox(self, run_id: str, actor: str) -> Dict:
+        """
+        POST /evolution/sandbox/<run_id>/discard
+        Discard a sandbox run. Does not touch Core.
+        """
+        try:
+            from nexus.evolution.promotion_engine import PromotionEngine
+            engine = PromotionEngine(db=self.graph_manager.db)
+            success = engine.discard_sandbox(run_id, actor)
+            return {"status": "discarded" if success else "failed"}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    # =========================================================================
+    # COGNITIVE COMPILER — Export, Refiner & Ontology API (Spec §7, §8, §4)
+    # =========================================================================
+
+    def export_topic(self, topic_id: str, fmt: str = "json", save_snapshot: bool = False) -> Dict:
+        """
+        Compile a topic into a StructuredDocument and optionally snapshot it.
+
+        GET /export/topic/<id>?format=json|md&snapshot=true|false
+
+        READ-ONLY with respect to the knowledge graph.
+        Writes only to cognition.topic_snapshots (when save_snapshot=True).
+        """
+        try:
+            from nexus.projection.document_compiler import DocumentCompiler, _document_to_dict
+            from dataclasses import asdict
+
+            compiler = DocumentCompiler(db=self.graph_manager.db, persist_snapshots=True)
+
+            if save_snapshot:
+                doc = compiler.compile_and_snapshot(topic_id)
+            else:
+                doc = compiler.compile_topic(topic_id)
+
+            if fmt == "md":
+                md = compiler.render_markdown(doc)
+                return {
+                    "topic_id": topic_id,
+                    "version": doc.version,
+                    "hash": doc.hash,
+                    "generated_at": doc.generated_at,
+                    "markdown": md,
+                    "status": "success",
+                }
+
+            # JSON format — default
+            return {
+                **_document_to_dict(doc),
+                "status": "success",
+            }
+
+        except ValueError as ve:
+            return {"error": str(ve), "status": "not_found"}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def get_topic_snapshot(self, topic_id: str) -> Optional[Dict]:
+        """
+        Return the latest persisted snapshot without recompiling.
+        Returns None if no snapshot exists.
+        """
+        try:
+            from nexus.projection.document_compiler import DocumentCompiler
+            compiler = DocumentCompiler(db=self.graph_manager.db, persist_snapshots=False)
+            return compiler.get_latest_snapshot(topic_id)
+        except Exception as e:
+            print(f"[CortexAPI] get_topic_snapshot failed: {e}")
+            return None
+
+    def get_drift_reports(self, topic_id: str, limit: int = 100) -> Dict:
+        """
+        GET /api/topics/<id>/drift-reports
+        Return unresolved Refiner advisory reports for a topic.
+        Advisory only — no graph mutations are implied.
+        """
+        try:
+            from nexus.cognition.refiner import Refiner
+            refiner = Refiner(db=self.graph_manager.db)
+            reports = refiner.get_open_reports(topic_id=topic_id, limit=limit)
+            return {
+                "topic_id": topic_id,
+                "reports": reports,
+                "total": len(reports),
+                "status": "success",
+            }
+        except Exception as e:
+            return {"error": str(e), "status": "failed", "reports": []}
+
+    def resolve_drift_report(self, report_id: str, resolved_by: str) -> Dict:
+        """
+        POST /api/drift-reports/<id>/resolve
+        Mark a drift report as human-resolved.
+        Does NOT modify any graph node.
+        """
+        try:
+            from nexus.cognition.refiner import Refiner
+            refiner = Refiner(db=self.graph_manager.db)
+            success = refiner.mark_resolved(report_id, resolved_by)
+            return {"status": "success" if success else "failed", "report_id": report_id}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def get_topic_ontology(self, topic_id: str) -> Dict:
+        """
+        GET /api/topics/<id>/ontology
+        Return the ontology parent chain for a topic by walking IS_SUBTOPIC_OF edges.
+        Read-only.
+        """
+        try:
+            db = self.graph_manager.db
+
+            # Walk the IS_SUBTOPIC_OF chain upward from this topic
+            chain = []
+            current_id = topic_id
+            visited = set()
+
+            while current_id and current_id not in visited:
+                visited.add(current_id)
+
+                # Fetch the current node
+                row = db.fetch_one(
+                    "SELECT type, data FROM graph.nodes WHERE id = %s",
+                    (current_id,),
+                )
+                if not row:
+                    break
+
+                import json as _json
+                node_type = row[0]
+                node_data = row[1] if isinstance(row[1], dict) else _json.loads(row[1] or "{}")
+                chain.append({
+                    "id": current_id,
+                    "type": node_type,
+                    "name": node_data.get("name") or node_data.get("statement") or current_id,
+                })
+
+                # Find parent via IS_SUBTOPIC_OF edge
+                parent_row = db.fetch_one(
+                    """
+                    SELECT target_id FROM graph.edges
+                    WHERE source_id = %s AND edge_type = 'IS_SUBTOPIC_OF'
+                    LIMIT 1
+                    """,
+                    (current_id,),
+                )
+                current_id = parent_row[0] if parent_row else None
+
+            return {
+                "topic_id": topic_id,
+                "ontology_chain": chain,
+                "depth": len(chain),
+                "status": "success",
+            }
+        except Exception as e:
+            return {"error": str(e), "status": "failed", "ontology_chain": []}
+
+    def register_ontology_node(
+        self,
+        ontology_id: str,
+        name: str,
+        parent_id: Optional[str] = None,
+    ) -> Dict:
+        """
+        Register an Ontology node and optionally link it to a parent via IS_SUBTOPIC_OF.
+        All mutations go through GraphManager — never raw SQL.
+        """
+        try:
+            self.graph_manager.register_node(
+                "ontology",
+                ontology_id,
+                {"name": name, "lifecycle": "frozen"},
+            )
+            if parent_id:
+                self.graph_manager.register_edge(
+                    ("ontology", ontology_id),
+                    ("ontology", parent_id),
+                    "IS_SUBTOPIC_OF",
+                )
+            return {"status": "success", "ontology_id": ontology_id}
+        except Exception as e:
+            return {"error": str(e), "status": "failed"}
+
+    def link_topic_to_ontology(self, topic_id: str, ontology_id: str) -> Dict:
+        """
+        Create an IS_SUBTOPIC_OF edge from a Topic node to an Ontology node.
+        Validates that the ontology node exists before linking.
+        """
+        try:
+            ont_row = self.graph_manager.get_node(ontology_id)
+            if not ont_row or ont_row[0] != "ontology":
+                return {
+                    "error": f"Ontology node {ontology_id} not found or wrong type",
+                    "status": "not_found",
+                }
+            self.graph_manager.register_edge(
+                ("topic", topic_id),
+                ("ontology", ontology_id),
+                "IS_SUBTOPIC_OF",
+            )
+            return {"status": "success", "topic_id": topic_id, "ontology_id": ontology_id}
+        except ValueError as ve:
+            return {"error": str(ve), "status": "rejected"}
         except Exception as e:
             return {"error": str(e), "status": "failed"}

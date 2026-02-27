@@ -472,31 +472,37 @@ def jarvis_brick_full():
 
 @app.route("/jarvis/ask-preview", methods=["GET"])
 def jarvis_ask_preview():
+    """
+    Hybrid semantic preview.
+    ?query=<text>  — required
+    ?top_k=10      — optional, default 10
+    ?lifecycle=frozen — optional lifecycle filter
+    """
     query = request.args.get("query")
-    use_genai = request.args.get("use_genai", "false").lower() == "true"
-    
-    print(f"[{get_utc_now()}] [JARVIS_PREVIEW] Processing query: '{query}' (use_genai={use_genai})")
+    top_k = int(request.args.get("top_k", 10))
+    lifecycle_filter = request.args.get("lifecycle") or None
 
     if not query:
-        print(f"[{get_utc_now()}] [JARVIS_PREVIEW] Error: Query parameter is required")
         return jsonify({"error": "Query parameter is required"}), 400
 
-    # Use the read-only recall adapter
-    recalled_bricks = recall_bricks_readonly(query, use_genai=use_genai)
-    
-    print(f"[{get_utc_now()}] [JARVIS_PREVIEW] Recalled {len(recalled_bricks)} bricks for query: '{query}'")
+    result = cortex_api.ask_preview(query=query, top_k=top_k, lifecycle_filter=lifecycle_filter)
+    return jsonify(result)
 
-    top_bricks_output = [
-        {"brick_id": brick["brick_id"], "confidence": round(brick["confidence"], 4)}
-        for brick in recalled_bricks
-    ]
 
-    response_data = {
-        "query": query,
-        "top_bricks": top_bricks_output,
-        "status": "preview"
-    }
-    return jsonify(response_data)
+@app.route("/jarvis/system-story", methods=["GET"])
+def jarvis_system_story():
+    """
+    Replayable cognitive narrative stream.
+    ?limit=50        — max events to return (default 50)
+    ?node_id=<id>    — filter by node
+    ?event_type=<t>  — filter by event type
+    """
+    limit = int(request.args.get("limit", 50))
+    node_id = request.args.get("node_id") or None
+    event_type = request.args.get("event_type") or None
+
+    result = cortex_api.get_system_story(limit=limit, node_id=node_id, event_type=event_type)
+    return jsonify(result)
 
 @app.route("/cognition/assemble", methods=["POST"])
 def cognition_assemble():
@@ -518,6 +524,137 @@ def cognition_synthesize():
 
     TaskQueue.enqueue("synthesize_relationships", {"topic_id": topic_id})
     return jsonify({"status": "queued"}), 202
+
+
+# =============================================================================
+# COGNITIVE COMPILER — Export & Refiner Endpoints  (Spec §7, §8)
+# =============================================================================
+
+@app.route("/export/topic/<topic_id>", methods=["GET"])
+def export_topic(topic_id: str):
+    """
+    GET /export/topic/<id>?format=json|md&snapshot=true|false
+
+    Compile and optionally snapshot a topic, then return:
+      - format=json  → StructuredDocument as JSON  (default)
+      - format=md    → Markdown rendering
+
+    Query params:
+        format    : 'json' | 'md'   (default: 'json')
+        snapshot  : 'true' | 'false' (default: 'false')
+                    When true, persists a versioned snapshot and bumps version.
+
+    The compilation is READ-ONLY with respect to the graph.
+    """
+    fmt = request.args.get("format", "json").lower()
+    save_snap = request.args.get("snapshot", "false").lower() == "true"
+
+    result = cortex_api.export_topic(topic_id, fmt=fmt, save_snapshot=save_snap)
+
+    if "error" in result:
+        status_code = 404 if "not found" in result["error"].lower() else 500
+        return jsonify(result), status_code
+
+    if fmt == "md":
+        # Return raw Markdown as plain text for easy download
+        md_content = result.get("markdown", "")
+        from flask import Response
+        return Response(
+            md_content,
+            mimetype="text/markdown",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="topic_{topic_id}_{result.get("version", "1.0.0")}.md"'
+                )
+            },
+        )
+
+    return jsonify(result)
+
+
+@app.route("/export/topic/<topic_id>/snapshot", methods=["GET"])
+def get_topic_snapshot(topic_id: str):
+    """
+    GET /export/topic/<id>/snapshot
+    Return the latest persisted snapshot without recompiling.
+    """
+    result = cortex_api.get_topic_snapshot(topic_id)
+    if not result:
+        return jsonify({"error": "No snapshot found", "topic_id": topic_id}), 404
+    return jsonify(result)
+
+
+@app.route("/cognition/compile", methods=["POST"])
+def queue_topic_compile():
+    """
+    POST /cognition/compile
+    Queue a background compile_topic_document task.
+
+    Body: { "topic_id": "...", "save_snapshot": true }
+    """
+    data = request.json or {}
+    topic_id = data.get("topic_id")
+    if not topic_id:
+        return jsonify({"error": "topic_id is required"}), 400
+
+    save_snapshot = data.get("save_snapshot", True)
+    TaskQueue.enqueue("compile_topic_document", {
+        "topic_id": topic_id,
+        "save_snapshot": save_snapshot,
+    })
+    return jsonify({"status": "queued", "topic_id": topic_id}), 202
+
+
+@app.route("/cognition/refine", methods=["POST"])
+def queue_refiner_audit():
+    """
+    POST /cognition/refine
+    Queue a background run_refiner_audit task (advisory, non-destructive).
+
+    Body: { "topic_id": "..." }
+    """
+    data = request.json or {}
+    topic_id = data.get("topic_id")
+    if not topic_id:
+        return jsonify({"error": "topic_id is required"}), 400
+
+    TaskQueue.enqueue("run_refiner_audit", {"topic_id": topic_id})
+    return jsonify({"status": "queued", "topic_id": topic_id}), 202
+
+
+@app.route("/api/topics/<topic_id>/drift-reports", methods=["GET"])
+def get_topic_drift_reports(topic_id: str):
+    """
+    GET /api/topics/<id>/drift-reports?limit=100
+    Return unresolved Refiner advisory reports for a topic.
+    """
+    limit = request.args.get("limit", default=100, type=int)
+    result = cortex_api.get_drift_reports(topic_id, limit=limit)
+    return jsonify(result)
+
+
+@app.route("/api/drift-reports/<report_id>/resolve", methods=["POST"])
+def resolve_drift_report(report_id: str):
+    """
+    POST /api/drift-reports/<id>/resolve
+    Mark a drift report as human-resolved.
+
+    Body: { "resolved_by": "actor_name" }
+    """
+    data = request.json or {}
+    resolved_by = data.get("resolved_by", "user")
+    result = cortex_api.resolve_drift_report(report_id, resolved_by)
+    return jsonify(result)
+
+
+@app.route("/api/topics/<topic_id>/ontology", methods=["GET"])
+def get_topic_ontology(topic_id: str):
+    """
+    GET /api/topics/<id>/ontology
+    Return the ontology parent chain for a topic.
+    """
+    result = cortex_api.get_topic_ontology(topic_id)
+    return jsonify(result)
 
 @app.route("/tasks/sync", methods=["POST"])
 def trigger_sync():

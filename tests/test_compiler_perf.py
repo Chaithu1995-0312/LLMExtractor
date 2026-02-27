@@ -1,6 +1,6 @@
 import unittest
 import json
-from nexus.sync.compiler import NexusCompiler, MAX_MESSAGES_PER_BATCH, MAX_CHARS_PER_BATCH
+from nexus.sync.compiler import NexusCompiler
 from nexus.sync.db import SyncDatabase
 
 class MockLLM:

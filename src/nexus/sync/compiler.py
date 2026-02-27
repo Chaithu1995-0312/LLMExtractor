@@ -21,6 +21,18 @@ class NexusCompiler:
         # CoverageSentinel removed from Level 0 to maintain Zero-LLM purity
         self.alert_manager = AlertManager()
 
+        # Entity Resolver — optional pre-graph filter.
+        # Injected here (not constructed inside compile_run) so it is
+        # instantiated once per compiler lifetime, not per-run.
+        # The resolver is never used to mutate the graph directly.
+        # All writes still go through GraphManager.
+        try:
+            from nexus.cognition.entity_resolver import EntityResolver
+            self._resolver = EntityResolver()
+        except Exception as resolver_err:
+            print(f"[NexusCompiler] EntityResolver unavailable (non-fatal): {resolver_err}")
+            self._resolver = None
+
     def compile_run(self, run_id: str, topic_id: str) -> int:
         """
         Main entry point for the compiler.

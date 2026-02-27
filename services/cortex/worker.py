@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import uuid
+import threading
 import traceback
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -19,6 +20,47 @@ class PGWorker:
         self.db = get_adapter()
         # Visibility timeout: How long before a 'running' task with no lock is reclaimed
         self.visibility_timeout = timedelta(minutes=5)
+
+    # ------------------------------------------------------------------
+    # Heartbeat — keeps locked_at fresh for long-running LLM tasks
+    # ------------------------------------------------------------------
+
+    def _start_heartbeat(self, task_id: str, interval: float = 60.0) -> threading.Event:
+        """
+        Starts a background thread that refreshes locked_at every `interval`
+        seconds for the given task_id while it is still 'running'.
+
+        This prevents the visibility-timeout janitor from reclaiming a legitimately
+        long-running task (e.g., L3 Sage reasoning > 5 min).
+
+        Returns a stop_event; call stop_event.set() to terminate the thread.
+        The thread is daemon=True so it won't block process shutdown.
+        """
+        stop_event = threading.Event()
+
+        def _beat():
+            while not stop_event.wait(timeout=interval):
+                try:
+                    db = get_adapter()
+                    db.execute(
+                        """
+                        UPDATE graph.l3_tasks
+                        SET locked_at = NOW()
+                        WHERE id = %s AND status = 'running'
+                        """,
+                        (task_id,),
+                    )
+                    print(f"[{self.worker_id}] Heartbeat refreshed for task {task_id}")
+                except Exception as hb_err:
+                    # Heartbeat failure is non-fatal — log and continue.
+                    # Worst case: janitor reclaims after visibility_timeout.
+                    print(
+                        f"[{self.worker_id}] WARN: Heartbeat failed for task {task_id}: {hb_err}"
+                    )
+
+        t = threading.Thread(target=_beat, daemon=True, name=f"hb-{task_id[:8]}")
+        t.start()
+        return stop_event
 
     def run_once(self) -> bool:
         """
@@ -42,9 +84,14 @@ class PGWorker:
         the rolled-back (pre-increment) value, AND the handler's attempt
         increment was also rolled back — making effective attempt count = 0
         after first failure, allowing permanent retry loops.
+
+        HEARTBEAT FIX: A background thread refreshes locked_at every 60 s so
+        that legitimate long-running LLM tasks (> 5 min) are not incorrectly
+        reclaimed by the janitor.
         """
         task_id = None
         task_type = None
+        heartbeat_stop: Optional[threading.Event] = None
 
         try:
             # 1. Open ONE transaction for the entire claim + execute lifecycle.
@@ -84,7 +131,13 @@ class PGWorker:
                     WHERE id = %s
                 """, (self.worker_id, task_id))
 
-                # C. Execute Handler (participates in the same TX)
+            # ── Heartbeat starts AFTER the claim TX commits ──────────────
+            # The task is now durably 'running' in the DB. We use a fresh
+            # outer block so the handler's TX is separate from the claim TX.
+            heartbeat_stop = self._start_heartbeat(task_id)
+
+            with self.db.transaction() as cur:
+                # C. Execute Handler (participates in its own TX)
                 handler = TaskRegistry.get_handler(task_type)
                 if not handler:
                     raise ValueError(f"No handler registered for task_type={task_type!r}")
@@ -113,6 +166,11 @@ class PGWorker:
                 # increment from the failed main TX.
                 self._record_failure(task_id, str(e), tb)
             return True
+
+        finally:
+            # Always stop the heartbeat thread, whether we succeeded or failed.
+            if heartbeat_stop is not None:
+                heartbeat_stop.set()
 
     def _record_failure(self, task_id: str, error: str, tb: str):
         """

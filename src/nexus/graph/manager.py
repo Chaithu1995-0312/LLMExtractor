@@ -1,7 +1,10 @@
 import json
 import os
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Dict, Any, Tuple, List, Optional, Union, Generator
+
+import numpy as np
 
 from nexus.graph.schema import (
     Intent, Source, ScopeNode, Edge, EdgeType, IntentLifecycle, 
@@ -11,7 +14,14 @@ from nexus.config import AUDIT_LOG_PATH
 from nexus.db import get_adapter
 from nexus.db.init_db import init_database
 
+# Node types whose text content should be embedded and indexed in FAISS.
+EMBEDDABLE_TYPES = frozenset({"brick", "intent", "concept", "source"})
+
+
 class GraphManager:
+    # Class-level lock so all GraphManager instances share one FAISS write-gate.
+    _vector_lock: Lock = Lock()
+
     def __init__(self, db_path: str = None, db=None):
         # db_path is ignored in Postgres implementation
         # db can be an injected cursor for transactional coupling
@@ -20,6 +30,25 @@ class GraphManager:
             self._init_db()
             # Enforce unified storage on startup - Idempotent
             self.sync_bricks_to_nodes()
+
+        # -------------------------------------------------------------------
+        # Vector primitive — initialise once, not per call.
+        # VectorEmbedder uses a shared class-level model cache so loading
+        # the sentence-transformer only happens once per process.
+        # -------------------------------------------------------------------
+        try:
+            from nexus.vector.embedder import VectorEmbedder
+            from nexus.vector.vector_store import VectorStore
+            self.embedder = VectorEmbedder()
+            self.vector_store = VectorStore()
+        except Exception as e:
+            print(f"[GraphManager] Vector layer unavailable (non-fatal): {e}")
+            self.embedder = None
+            self.vector_store = None
+
+        # Pending-write counter used to batch FAISS persistence.
+        self._vector_write_counter: int = 0
+        self._VECTOR_PERSIST_EVERY: int = 20
 
     def _init_db(self):
         """Initialize the database with the schema."""
@@ -54,13 +83,53 @@ class GraphManager:
         """
         Register a generic node. Idempotent by default.
         If merge=True, updates existing node data.
+
+        Two-Phase Commit strategy:
+          Phase 1 — DB Transaction: upsert node + insert pulse (ACID).
+          Phase 2 — Vector Index:   add to FAISS after DB commit (eventual).
+
+        If the DB commit fails, no vector entry is written.
+        If the FAISS write fails, the DB entry is preserved; vector drift
+        can be repaired via reindex_all().
         """
-        # If we have a cursor, we skip the with db.transaction() which starts a new one
+        # Pre-compute the embedding BEFORE the transaction.
+        # This way, if embedding fails we never enter the DB transaction
+        # and the caller gets a clean exception with no partial state.
+        #
+        # NOTE: Vector updates (merge=True) are NOT supported in-place because
+        # IndexFlatIP has no delete/update primitive. If statement text changes,
+        # call reindex_all() to rebuild a clean index. Partial overwrite would
+        # silently pollute the index with stale duplicate vectors.
+        vector = None
+        text = attrs.get("statement") or attrs.get("content") or ""
+        if node_type in EMBEDDABLE_TYPES and text and self.embedder and self.vector_store:
+            # Always embed; VectorStore.add() is idempotent (skips if already indexed).
+            # On merge=True with changed text, reindex_all() must be called separately.
+            try:
+                raw = self.embedder.embed_query(text)
+                # embed_query returns shape (1, 384); flatten to (384,)
+                vector = raw.flatten()
+            except Exception as emb_err:
+                # Fail fast: embedding error prevents node creation so index stays clean.
+                raise RuntimeError(f"[GraphManager] Embedding failed for {node_id}: {emb_err}") from emb_err
+
+        # Phase 1 — DB Transaction (ACID)
         if self._is_adapter():
             with self.db.transaction() as cur:
                 self._register_node_logic(cur, node_type, node_id, attrs, merge)
-        else: # Cursor
+                # Persist pulse inside same transaction.
+                self._persist_pulse_in_tx(
+                    cur,
+                    event_type="node_registered",
+                    node_id=node_id,
+                    payload={"node_type": node_type, "merge": merge},
+                )
+        else:
             self._register_node_logic(self.db, node_type, node_id, attrs, merge)
+
+        # Phase 2 — Post-Commit Vector Index (eventual consistency)
+        if vector is not None:
+            self._commit_vector(node_id, vector)
 
     def _register_node_logic(self, cur, node_type: str, node_id: str, attrs: Dict[str, Any], merge: bool = False):
         try:
@@ -86,6 +155,238 @@ class GraphManager:
         except Exception as e:
             print(f"Error registering node {node_id}: {e}")
             raise
+
+    # ------------------------------------------------------------------
+    # VECTOR HELPERS
+    # ------------------------------------------------------------------
+
+    def _commit_vector(self, node_id: str, vector: np.ndarray):
+        """Thread-safe post-commit write to FAISS. Never raises — errors are logged."""
+        try:
+            with GraphManager._vector_lock:
+                self.vector_store.add(node_id, vector)
+                self._vector_write_counter += 1
+                if self._vector_write_counter >= self._VECTOR_PERSIST_EVERY:
+                    self.vector_store.save()
+                    self._vector_write_counter = 0
+        except Exception as ve:
+            print(f"[GraphManager] ⚠️  Vector write failed for {node_id} (non-fatal): {ve}")
+            try:
+                self._execute(
+                    """
+                    INSERT INTO governance.audit_trace (event_type, actor, payload, created_at)
+                    VALUES (%s, %s, %s, NOW())
+                    """,
+                    ("VECTOR_INDEX_FAILED", "GraphManager", json.dumps({"node_id": node_id, "error": str(ve)}))
+                )
+            except Exception:
+                pass  # Audit failure must not disrupt caller
+
+    def semantic_query(
+        self,
+        text: str,
+        filters: Optional[Dict[str, Any]] = None,
+        top_k: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Hybrid semantic search: vector similarity → SQL join → lifecycle filter → re-rank.
+
+        Args:
+            text:    Natural-language query string.
+            filters: Optional dict of JSONB field filters, e.g.:
+                     {"lifecycle": "frozen", "type": "brick"}
+            top_k:   Number of results to return.
+
+        Returns:
+            List of node dicts enriched with `vector_score` and `confidence`.
+        """
+        if not self.embedder or not self.vector_store:
+            print("[GraphManager] semantic_query: vector layer not available.")
+            return []
+
+        # Step 1 — Embed the query.
+        raw = self.embedder.embed_query(text)
+        query_vec = raw.flatten()
+
+        # Step 2 — FAISS: oversample to absorb filtering losses.
+        oversample = max(top_k * 3, 30)
+        candidates = self.vector_store.search(query_vec, k=oversample)
+        if not candidates:
+            return []
+
+        # Step 3 — Preserve vector scores for re-ranking after SQL.
+        id_score_map: Dict[str, float] = {node_id: score for node_id, score in candidates}
+        candidate_ids = list(id_score_map.keys())
+
+        # Step 4 — SQL fetch + inline filters.
+        #   We use ANY(%s) for the IN clause so psycopg2 can bind a list.
+        base_query = "SELECT id, type, data, created_at FROM graph.nodes WHERE id = ANY(%s)"
+        params: List[Any] = [candidate_ids]
+
+        type_filter = (filters or {}).get("type")
+        lifecycle_filter = (filters or {}).get("lifecycle")
+
+        if type_filter:
+            base_query += " AND type = %s"
+            params.append(type_filter)
+        if lifecycle_filter:
+            base_query += " AND data->>'lifecycle' = %s"
+            params.append(lifecycle_filter)
+
+        rows = self._fetch_all(base_query, tuple(params))
+
+        # Step 5 — Governance-aware hybrid re-ranking.
+        #
+        # final_score = base_score × lifecycle_weight × recency_boost
+        #
+        # base_score:       cosine sim [-1,1] normalised to [0,1] via (s+1)/2
+        # lifecycle_weight: governance authority — frozen nodes are more authoritative
+        # recency_boost:    slight favour for recently-created nodes (decays over time)
+        #
+        # This moves retrieval from "most semantically similar" to
+        # "most semantically similar AND most authoritative", which is
+        # correct behaviour for a governed memory substrate.
+
+        _LIFECYCLE_WEIGHT = {
+            "frozen":    1.2,
+            "forming":   1.1,
+            "loose":     1.0,
+            "superseded": 0.6,
+            "killed":    0.1,
+        }
+
+        now = datetime.now(timezone.utc)
+        results = []
+
+        for r in rows:
+            node_id = r[0]
+            node_type = r[1]
+            created_at = r[3]
+            data = r[2] if isinstance(r[2], dict) else json.loads(r[2] or "{}")
+
+            cosine = id_score_map.get(node_id, 0.0)
+
+            # Normalise cosine similarity [-1,1] → [0,1]
+            base_score = (float(cosine) + 1.0) / 2.0
+
+            lifecycle = data.get("lifecycle", "loose")
+            lifecycle_weight = _LIFECYCLE_WEIGHT.get(lifecycle, 1.0)
+
+            # Recency boost: starts at 1.1 for brand-new nodes, decays to 1.0
+            # after 10 days, stays at 1.0 thereafter. Handles missing/bad timestamps.
+            try:
+                if created_at:
+                    if hasattr(created_at, "replace"):
+                        # psycopg2 returns datetime; ensure UTC-aware
+                        ca = created_at.replace(tzinfo=timezone.utc) if created_at.tzinfo is None else created_at
+                        days_old = (now - ca).days
+                    else:
+                        days_old = 999
+                else:
+                    days_old = 999
+            except Exception:
+                days_old = 999
+
+            recency_boost = max(1.0, 1.1 - (days_old * 0.01))
+
+            final_score = min(base_score * lifecycle_weight * recency_boost, 2.0)
+
+            results.append({
+                "id": node_id,
+                "type": node_type,
+                "statement": data.get("statement") or data.get("content", ""),
+                "lifecycle": lifecycle,
+                "created_at": str(created_at),
+                "vector_score": round(float(cosine), 6),
+                "confidence": round(base_score, 4),
+                "final_score": round(final_score, 6),
+                "metadata": data.get("metadata", {}),
+            })
+
+        results.sort(key=lambda x: x["final_score"], reverse=True)
+        return results[:top_k]
+
+    # ------------------------------------------------------------------
+    # INDEX MAINTENANCE
+    # ------------------------------------------------------------------
+
+    def reindex_all(self, batch_size: int = 100) -> int:
+        """
+        Rebuild the FAISS index from scratch using all embeddable nodes in the DB.
+        Use after model upgrades, corruption, or initial bootstrap.
+
+        Returns the number of nodes indexed.
+        """
+        if not self.embedder or not self.vector_store:
+            print("[GraphManager] reindex_all: vector layer not available.")
+            return 0
+
+        import faiss
+        print("[GraphManager] reindex_all: clearing and rebuilding vector index …")
+
+        # Fetch all embeddable node types
+        type_list = list(EMBEDDABLE_TYPES)
+        rows = self._fetch_all(
+            "SELECT id, type, data FROM graph.nodes WHERE type = ANY(%s)",
+            (type_list,)
+        )
+
+        # Rebuild in-memory index
+        new_index = faiss.IndexFlatIP(384)
+        new_id_map: Dict[str, int] = {}
+        new_reverse_map: Dict[int, str] = {}
+        counter = 0
+        skipped = 0
+
+        for r in rows:
+            node_id = r[0]
+            data = r[2] if isinstance(r[2], dict) else json.loads(r[2] or "{}")
+            text = data.get("statement") or data.get("content") or ""
+            if not text:
+                skipped += 1
+                continue
+            try:
+                vec = self.embedder.embed_query(text).flatten().reshape(1, -1)
+                new_index.add(vec)
+                new_id_map[node_id] = counter
+                new_reverse_map[counter] = node_id
+                counter += 1
+            except Exception as e:
+                print(f"[GraphManager] reindex_all: skip {node_id}: {e}")
+                skipped += 1
+
+        # Atomically replace the in-memory index and persist
+        with GraphManager._vector_lock:
+            self.vector_store.index = new_index
+            self.vector_store.id_map = new_id_map
+            self.vector_store.reverse_id_map = new_reverse_map
+            self.vector_store.next_id = counter
+            self.vector_store.save()
+
+        print(f"[GraphManager] reindex_all: indexed {counter} nodes, skipped {skipped}.")
+        return counter
+
+    def validate_vector_integrity(self) -> Dict[str, List[str]]:
+        """
+        Compare DB embeddable nodes vs FAISS index.
+        Returns missing_vectors (in DB but not FAISS) and orphaned_vectors
+        (in FAISS but not DB) as lists of node IDs.
+        """
+        if not self.vector_store:
+            return {"missing_vectors": [], "orphaned_vectors": [], "error": "vector layer unavailable"}
+
+        type_list = list(EMBEDDABLE_TYPES)
+        rows = self._fetch_all(
+            "SELECT id FROM graph.nodes WHERE type = ANY(%s)",
+            (type_list,)
+        )
+        db_ids = {r[0] for r in rows}
+        index_ids = set(self.vector_store.id_map.keys())
+
+        return {
+            "missing_vectors": sorted(db_ids - index_ids),
+            "orphaned_vectors": sorted(index_ids - db_ids),
+        }
 
     def get_intents_by_topic(self, topic_node_id: str) -> List[Intent]:
         """
@@ -160,6 +461,15 @@ class GraphManager:
             if cycle:
                 raise ValueError(f"Cycle detected for {edge_type_str}: {' -> '.join(cycle)}")
 
+        # ── Ontology Acyclicity Guard ──────────────────────────────────
+        # IS_SUBTOPIC_OF must not form cycles in the ontology hierarchy.
+        if edge_type_str == "IS_SUBTOPIC_OF":
+            cycle = self._check_for_cycle(src_id, dst_id, edge_type_str)
+            if cycle:
+                raise ValueError(
+                    f"Ontology cycle detected for IS_SUBTOPIC_OF: {' -> '.join(cycle)}"
+                )
+
         if self._is_adapter():
             with self.db.transaction() as cur:
                 self._register_edge_logic(cur, src_id, dst_id, edge_type_str, attrs)
@@ -228,20 +538,39 @@ class GraphManager:
             return (row[0], data)
         return None
 
+    # ------------------------------------------------------------------
+    # PULSE / NARRATIVE LAYER
+    # ------------------------------------------------------------------
+
+    def _persist_pulse_in_tx(self, cur, event_type: str, node_id: Optional[str], payload: Dict[str, Any]):
+        """
+        Persist a pulse inside an ALREADY-OPEN transaction cursor.
+        Called from register_node so the pulse is atomic with the node upsert.
+        """
+        try:
+            cur.execute(
+                "INSERT INTO graph.pulse_events (event_type, node_id, payload) VALUES (%s, %s, %s)",
+                (event_type, node_id, json.dumps(payload)),
+            )
+        except Exception as e:
+            print(f"[GraphManager] pulse_in_tx insert failed (non-fatal): {e}")
+
     def _emit_pulse(
-        self, 
-        event_type: str, 
-        payload: Dict[str, Any], 
-        topic_id: Optional[str] = None, 
-        severity: str = "info", 
-        source: str = "GraphManager"
+        self,
+        event_type: str,
+        payload: Dict[str, Any],
+        topic_id: Optional[str] = None,
+        severity: str = "info",
+        source: str = "GraphManager",
     ):
         """
-        Fire-and-forget call to the L1 Narrator.
-        Emits a standardized Pulse Envelope.
+        Emit a Pulse Envelope — now with durable DB persistence.
+
+        1. Writes to graph.pulse_events (narrative stream).
+        2. Prints to stdout (legacy tooling compatibility).
+        3. Emits via SocketIO if server is active.
         """
         import uuid
-        
         envelope = {
             "pulse_id": str(uuid.uuid4()),
             "pulse_type": event_type,
@@ -249,16 +578,90 @@ class GraphManager:
             "severity": severity,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source": source,
-            "payload": payload
+            "payload": payload,
         }
-        
+
+        # 1. Persist to DB
         try:
-            # We assume the gateway is running or we import it for a quick local call
-            # For simplicity, we just print the 'Intent' of the pulse here.
-            # In full implementation, this calls JarvisGateway.pulse()
-            print(f"⚡ [PULSE L1] {json.dumps(envelope)}")
+            if self._is_adapter():
+                with self.db.transaction() as cur:
+                    cur.execute(
+                        "INSERT INTO graph.pulse_events (event_type, node_id, payload) VALUES (%s, %s, %s)",
+                        (event_type, topic_id, json.dumps(payload)),
+                    )
+            else:
+                self.db.execute(
+                    "INSERT INTO graph.pulse_events (event_type, node_id, payload) VALUES (%s, %s, %s)",
+                    (event_type, topic_id, json.dumps(payload)),
+                )
         except Exception as e:
-            print(f"Failed to emit pulse: {e}")
+            print(f"[GraphManager] Pulse persist failed (non-fatal): {e}")
+
+        # 2. Stdout
+        try:
+            print(f"⚡ [PULSE L1] {json.dumps(envelope)}")
+        except Exception:
+            pass
+
+        # 3. SocketIO broadcast
+        try:
+            from services.cortex.server import socketio
+            if socketio:
+                socketio.emit("pulse_event", envelope)
+        except (ImportError, RuntimeError):
+            pass
+
+    def get_system_story(
+        self,
+        limit: int = 50,
+        node_id: Optional[str] = None,
+        event_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Return recent pulse events from graph.pulse_events enriched with
+        node context. Powers the /jarvis/system-story endpoint.
+        """
+        query = """
+            SELECT
+                pe.id::text,
+                pe.event_type,
+                pe.node_id,
+                pe.payload,
+                pe.created_at,
+                n.type            AS node_type,
+                n.data->>'lifecycle' AS lifecycle
+            FROM graph.pulse_events pe
+            LEFT JOIN graph.nodes n ON n.id = pe.node_id
+        """
+        conditions: List[str] = []
+        params: List[Any] = []
+
+        if node_id:
+            conditions.append("pe.node_id = %s")
+            params.append(node_id)
+        if event_type:
+            conditions.append("pe.event_type = %s")
+            params.append(event_type)
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY pe.created_at DESC LIMIT %s"
+        params.append(limit)
+
+        rows = self._fetch_all(query, tuple(params))
+        events = []
+        for r in rows:
+            pld = r[3] if isinstance(r[3], dict) else json.loads(r[3] or "{}")
+            events.append({
+                "id": r[0],
+                "event_type": r[1],
+                "node_id": r[2],
+                "payload": pld,
+                "created_at": str(r[4]),
+                "node_type": r[5],
+                "lifecycle": r[6],
+            })
+        return events
 
     def _log_audit_event(
         self, 
@@ -704,11 +1107,11 @@ class GraphManager:
 
         if self._is_adapter():
             with self.db.transaction() as cur:
-                self._mark_forming_logic(cur, brick_id, data, actor)
+                self._mark_forming_logic(cur, brick_id, data, actor, resolved_by)
         else:  # Cursor already in transaction
-            self._mark_forming_logic(self.db, brick_id, data, actor)
+            self._mark_forming_logic(self.db, brick_id, data, actor, resolved_by)
 
-    def _mark_forming_logic(self, cur, brick_id, data, actor: str = "system"):
+    def _mark_forming_logic(self, cur, brick_id, data, actor: str = "system", resolved_by: str = ""):
         # Single write path: graph.nodes is authoritative.
         # sync.bricks is updated as a projection mirror ONLY — not read for truth.
         cur.execute("UPDATE graph.nodes SET data=%s WHERE id=%s", (json.dumps(data), brick_id))

@@ -218,6 +218,13 @@ class SyncDatabase:
             node_data = {
                 "statement": brick["content"],
                 "lifecycle": state_map.get(brick["state"], "loose"),
+                # Phase 2: Explicit lifecycle state fields.
+                # vector_status: 'pending' → set to 'indexed' by index_node task.
+                # drift_status:  'pending' → set to 'complete' by process_drift task.
+                # Both default to 'pending' so the node is invisible to drift scans
+                # until the index_node task completes and sets vector_status='indexed'.
+                "vector_status": "pending",
+                "drift_status": "pending",
                 "metadata": {
                     "sync_topic_id": brick["topic_id"],
                     "sync_topic_name": "Nexus Server Sync Architecture", 
@@ -293,14 +300,17 @@ class SyncDatabase:
                         (old_id, brick["id"])
                     )
 
-            # 4. Enqueue Drift Analysis (Async) - outside of transaction correctness scope but fine here
+            # 4. Phase 2: Enqueue index_node instead of process_drift directly.
+            # New flow: Node inserted → index_node → process_drift
+            # index_node is responsible for embedding + vector_status='indexed', then schedules process_drift.
+            # Legacy nodes not touched by this path continue to work via existing logic.
             try:
                 from services.cortex.orchestration import TaskQueue
-                TaskQueue.enqueue("process_drift", {"node_id": brick["id"]})
+                TaskQueue.enqueue("index_node", {"node_id": brick["id"]})
             except ImportError:
                 pass
             except Exception as e:
-                print(f"[SyncDB] Warning: Failed to enqueue drift task: {e}")
+                print(f"[SyncDB] Warning: Failed to enqueue index_node task: {e}")
 
     def get_fingerprints_for_topic(self, topic_id: str) -> List[str]:
         rows = self.db.fetch_all("SELECT fingerprint FROM sync.bricks WHERE topic_id = %s", (topic_id,))

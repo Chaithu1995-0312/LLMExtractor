@@ -5,6 +5,11 @@ from nexus.cognition.persistence import CognitionLogger
 from nexus.cognition.escalation_router import EscalationRouter
 from nexus.cognition.confidence_engine import ConfidenceEngine
 
+# Maximum characters for brick content in prompts.
+# Prevents token overflow on large cognitive tasks (P1 fix).
+_MAX_CONTENT_CHARS = 2000
+
+
 class L2Narrator:
     """
     Level 2 (L2) - The Narrator
@@ -20,20 +25,39 @@ class L2Narrator:
         self.confidence_engine = ConfidenceEngine()
         self.logger = CognitionLogger()
 
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _truncate(text: str, max_chars: int = _MAX_CONTENT_CHARS) -> str:
+        """
+        Safely truncate content to max_chars to avoid token overflow.
+        Appends an ellipsis marker so the model knows the text was cut.
+        """
+        if not text:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + " …[truncated]"
+
     def explain_supersession(self, old_brick: Dict, new_brick: Dict) -> str:
         """
         Explains why a new brick superseded an old one.
         Uses Hybrid Escalation Logic.
         """
         start_time = time.time()
-        
+
+        old_content = self._truncate(old_brick.get("content", ""))
+        new_content = self._truncate(new_brick.get("content", ""))
+
         # 1. Prepare Snapshot
         snapshot = {
             "event": "SUPERCESSION",
             "old_brick_id": old_brick.get("id"),
-            "old_content": old_brick.get("content"),
+            "old_content": old_content,
             "new_brick_id": new_brick.get("id"),
-            "new_content": new_brick.get("content"),
+            "new_content": new_content,
             "topic_id": new_brick.get("topic_id")
         }
         snapshot_hash = self.logger.generate_snapshot_hash(snapshot)
@@ -46,11 +70,12 @@ class L2Narrator:
             "Do not hallucinate external reasons. Focus on the text evolution.\n"
             "Output JSON format: {\"explanation\": \"...\", \"confidence\": 0.0-1.0}"
         )
-        
+
+        # Content is already truncated above — safe to embed directly in prompt.
         user_prompt = f"""
-        Old Content: "{old_brick.get('content')}"
-        New Content: "{new_brick.get('content')}"
-        
+        Old Content: "{old_content}"
+        New Content: "{new_content}"
+
         Explain the refinement.
         """
         

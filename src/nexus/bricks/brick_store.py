@@ -18,14 +18,10 @@ class BrickStore:
         """
         Retrieves brick metadata from the DB.
         """
-        conn = self.db._get_conn()
-        c = conn.cursor()
-        c.execute("""
+        row = self.db.db.fetch_one("""
             SELECT id, topic_id, content, run_id, json_path, start_index, end_index 
-            FROM bricks WHERE id = ?
+            FROM sync.bricks WHERE id = %s
         """, (brick_id,))
-        row = c.fetchone()
-        conn.close()
 
         if row:
             return {
@@ -45,11 +41,7 @@ class BrickStore:
         """
         Retrieves the raw text content of a brick from the DB.
         """
-        conn = self.db._get_conn()
-        c = conn.cursor()
-        c.execute("SELECT content FROM bricks WHERE id = ?", (brick_id,))
-        row = c.fetchone()
-        conn.close()
+        row = self.db.db.fetch_one("SELECT content FROM sync.bricks WHERE id = %s", (brick_id,))
         
         if row:
             return row[0]

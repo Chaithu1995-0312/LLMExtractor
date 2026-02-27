@@ -8,6 +8,8 @@ import { ReactNode } from 'react';
 import { Lock, Bell, Settings, User } from 'lucide-react';
 import { TopStatusBar } from './TopStatusBar';
 import { useNexusStore, type AppMode } from '../store';
+import { ConnectionStatusBadge } from '../components/ConnectionStatusBadge';
+import { GlobalSearch, GlobalSearchTrigger } from '../components/GlobalSearch';
 
 // ─── Nav tab definitions (matching concept image) ─────────────
 const NAV_TABS: { id: AppMode; label: string }[] = [
@@ -15,6 +17,7 @@ const NAV_TABS: { id: AppMode; label: string }[] = [
   { id: 'graph',       label: 'GRAPH MAP' },
   { id: 'cognition',   label: 'INTENT FOCUS' },
   { id: 'audit',       label: 'AUDIT STREAM' },
+  { id: 'ingestion',   label: 'INGESTION' },
   { id: 'governance',  label: 'GOVERNANCE' },
   { id: 'health',      label: 'OPS CENTER' },
 ];
@@ -39,7 +42,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     background: 'rgba(4, 8, 13, 0.95)',
     borderBottom: 'none',
     margin: 0,
-    padding: 0,
+     padding: 0,
   }}
 >
 
@@ -83,7 +86,12 @@ export function AppLayout({ children }: AppLayoutProps) {
         })}
 
         {/* Right side controls */}
-        <div className="ml-auto flex items-center gap-1 pr-2">
+        <div className="ml-auto flex items-center gap-3 pr-2">
+          {/* Global Search trigger */}
+          <GlobalSearchTrigger />
+          {/* Live WebSocket connection indicator */}
+          <ConnectionStatusBadge />
+
           {[
             { Icon: Lock,     title: 'Security' },
             { Icon: Bell,     title: 'Alerts' },
@@ -131,6 +139,9 @@ export function AppLayout({ children }: AppLayoutProps) {
           <div className="h-full w-full overflow-auto">{children}</div>
         </main>
       </div>
+
+      {/* ── Global Search overlay (mounted once at root) ── */}
+      <GlobalSearch />
     </div>
   );
 }

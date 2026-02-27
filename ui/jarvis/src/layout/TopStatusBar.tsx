@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSystemStore } from '../state/system-store';
 import { hydrateHealthFromApi } from '../reducers/system-reducer';
+import { ConnectionStatusBadge } from '../components/ConnectionStatusBadge';
 
 const HEALTH_POLL_INTERVAL_MS = 15000;
 
