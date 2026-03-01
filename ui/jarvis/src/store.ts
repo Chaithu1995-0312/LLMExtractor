@@ -19,7 +19,8 @@ export type AppMode =
   | 'governance'
   | 'recall'
   | 'audit'
-  | 'health';
+  | 'health'
+  | 'control_plane';
 
 interface NexusState {
   mode: AppMode;

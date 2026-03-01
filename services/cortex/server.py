@@ -59,6 +59,97 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 cortex_api = CortexAPI()
 
+# ── Memory Layer Routes ────────────────────────────────────────────────────
+# Register the Memory Layer API blueprints. This is additive — it does not
+# modify any existing route and cannot affect GraphManager invariants.
+try:
+    from nexus.memory.api_routes import register_memory_routes
+    register_memory_routes(app)
+    print("[Cortex] Memory Layer routes registered (/api/v1/memory/*, /api/v1/bricks/from_memory).")
+except Exception as _mem_err:
+    print(f"[Cortex] WARNING: Memory Layer routes could not be loaded: {_mem_err}")
+# ──────────────────────────────────────────────────────────────────────────
+
+# ── Cognitive Control Plane v2 ─────────────────────────────────────────────
+# Lazy singleton for QueryOrchestrator — heavy subsystems initialise on first
+# request, not at server startup, to avoid blocking the Flask worker.
+_query_orchestrator = None
+
+def _get_orchestrator():
+    global _query_orchestrator
+    if _query_orchestrator is None:
+        from nexus.orchestration.query_orchestrator import QueryOrchestrator
+        _query_orchestrator = QueryOrchestrator()
+    return _query_orchestrator
+
+
+@app.route("/api/v2/query", methods=["POST"])
+def api_v2_query():
+    """
+    POST /api/v2/query
+
+    Unified Cognitive Control Plane endpoint (v2).
+
+    Accepts:
+        {
+            "query":     "<natural language question>",
+            "overrides": {                       (optional)
+                "force_route":          "graph" | "memory" | "hybrid",
+                "disable_escalation":   true | false,
+                "threshold_override":   0.0–1.0
+            }
+        }
+
+    Returns:
+        Full execution payload from QueryOrchestrator including:
+        route, retrieval, confidence breakdown, hybrid_conflict,
+        escalation state, execution timeline, system_state, response.
+
+    Always returns HTTP 200 with status in payload body.
+    Returns HTTP 400 on missing query.
+    Returns HTTP 500 only on unrecoverable orchestration crash.
+    """
+    body = request.get_json(silent=True) or {}
+    query = (body.get("query") or "").strip()
+    overrides = body.get("overrides") or {}
+
+    if not query:
+        return jsonify({
+            "status": "failed",
+            "error": "query is required and must be a non-empty string",
+        }), 400
+
+    # Validate overrides shape — silently strip invalid keys
+    sanitised_overrides = {}
+    force_route = overrides.get("force_route")
+    if force_route in ("graph", "memory", "hybrid"):
+        sanitised_overrides["force_route"] = force_route
+
+    disable_esc = overrides.get("disable_escalation")
+    if isinstance(disable_esc, bool):
+        sanitised_overrides["disable_escalation"] = disable_esc
+
+    threshold = overrides.get("threshold_override")
+    if isinstance(threshold, (int, float)) and 0.0 <= float(threshold) <= 1.0:
+        sanitised_overrides["threshold_override"] = float(threshold)
+
+    try:
+        orchestrator = _get_orchestrator()
+        result = orchestrator.execute(query=query, overrides=sanitised_overrides)
+        return jsonify(result), 200
+
+    except Exception as exc:
+        logging.getLogger(__name__).error(
+            "[/api/v2/query] Orchestration error for query='%s': %s",
+            query[:80], exc, exc_info=True,
+        )
+        return jsonify({
+            "status": "failed",
+            "error": "orchestration_error",
+            "message": str(exc)[:300],
+        }), 500
+# ──────────────────────────────────────────────────────────────────────────
+
 @app.before_request
 def log_request_info():
     if request.path.startswith("/jarvis") or request.path.startswith("/api") or request.path.startswith("/cognition"):

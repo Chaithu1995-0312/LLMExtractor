@@ -124,16 +124,16 @@ class DriftEngine:
         return self.db.execute(sql, params)
 
     def _fetch_one(self, sql, params=None):
-        if hasattr(self.db, 'fetchone'):
-            self.db.execute(sql, params)
-            return self.db.fetchone()
-        return self.db.fetch_one(sql, params)
+        if hasattr(self.db, 'fetch_one'):
+            return self.db.fetch_one(sql, params)
+        self.db.execute(sql, params)
+        return self.db.fetchone()
 
     def _fetch_all(self, sql, params=None):
-        if hasattr(self.db, 'fetchall'):
-            self.db.execute(sql, params)
-            return self.db.fetchall()
-        return self.db.fetch_all(sql, params)
+        if hasattr(self.db, 'fetch_all'):
+            return self.db.fetch_all(sql, params)
+        self.db.execute(sql, params)
+        return self.db.fetchall()
 
     def _edge_exists(self, source_id: str, target_id: str, edge_type: str) -> bool:
         """

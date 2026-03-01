@@ -1,10 +1,13 @@
 import json
+import logging
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from nexus.cognition.persistence import CognitionLogger
 from nexus.db import get_adapter
 from nexus.cognition.escalation_router import EscalationRouter
 from nexus.cognition.confidence_engine import ConfidenceEngine
+
+logger = logging.getLogger(__name__)
 
 class L3Sage:
     """
@@ -46,11 +49,16 @@ class L3Sage:
             "Output strictly JSON: {\"analysis\": \"...\", \"risk_score\": 0.0-1.0, \"recommendations\": [], \"confidence\": 0.0-1.0}"
         )
         
+        # 2b. Advisory Memory Injection (pre-prompt hook).
+        # Memory context is injected ONLY if retrieval confidence is HIGH.
+        # Graph remains canonical — memory is advisory and non-authoritative.
+        memory_context_block = self._get_advisory_memory_context(topic_id)
+
         user_prompt = f"""
         Topic ID: {topic_id}
         Metric Snapshot:
         {metrics_summary_text}
-        
+        {memory_context_block}
         Perform strategic audit.
         """
         
@@ -148,6 +156,155 @@ class L3Sage:
             "supersession_ratio": superseded / max(total, 1),
             "topic_churn_7d": churn_row[0] if churn_row else 0
         }
+
+    def _get_advisory_memory_context(self, topic_id: str) -> str:
+        """
+        Pre-prompt hook: Fetches advisory context from the Memory Layer.
+
+        Retrieves memory chunks related to the topic_id query, evaluates
+        retrieval confidence via ConfidenceEngine, and returns a formatted
+        context block ONLY if confidence is HIGH enough to be trustworthy.
+
+        Invariants:
+          - Memory is advisory ONLY — it augments, never overrides graph data.
+          - Returns empty string on low confidence or any failure (silent fallback).
+          - MUST NOT raise — this hook must never crash the audit flow.
+          - Injection is labeled [ADVISORY MEMORY — NON-AUTHORITATIVE] so the
+            LLM understands the epistemic weight of the provided context.
+          - Uses ConfidenceEngine for gating — does NOT define its own threshold.
+
+        Returns:
+            Formatted string block to append to user_prompt, or "" if skipped.
+        """
+        # Advisory memory injection threshold — must exceed this to inject.
+        # We use a higher bar than summarize() (0.40) since this is LLM input.
+        ADVISORY_CONFIDENCE_THRESHOLD = 0.55
+
+        try:
+            # Lazy import to avoid circular dependency at module load time.
+            from nexus.memory.memory_service import MemoryService
+            from nexus.memory.retriever import MemoryRetriever
+
+            # Use retriever directly (no LLM call) to check retrieval quality.
+            retriever = MemoryRetriever()
+            retrieval_result = retriever.retrieve(
+                query=topic_id,
+                top_k=5,
+            )
+
+            if not retrieval_result.chunks:
+                logger.info(
+                    "[L3Sage] Advisory memory: no chunks found for topic_id='%s'. Skipping injection.",
+                    topic_id,
+                )
+                self._log_advisory_event(topic_id, "L3_MEMORY_ADVISORY_SKIPPED", reason="no_chunks")
+                return ""
+
+            # Evaluate retrieval confidence via ConfidenceEngine.
+            all_scores = [c.score for c in retrieval_result.chunks]
+            retrieved_texts = [c.text for c in retrieval_result.chunks]
+            top_score = retrieval_result.retrieval_metadata.get("top_score", 0.0)
+
+            retrieval_conf = self.confidence_engine.compute_retrieval_confidence(
+                top_score=top_score,
+                all_scores=all_scores,
+                retrieved_texts=retrieved_texts,
+                query_text=topic_id,
+                threshold=ADVISORY_CONFIDENCE_THRESHOLD,
+            )
+
+            if not retrieval_conf["gate_pass"]:
+                logger.info(
+                    "[L3Sage] Advisory memory: retrieval confidence %.4f below advisory "
+                    "threshold %.2f for topic='%s'. Skipping injection.",
+                    retrieval_conf["retrieval_confidence"],
+                    ADVISORY_CONFIDENCE_THRESHOLD,
+                    topic_id,
+                )
+                self._log_advisory_event(
+                    topic_id,
+                    "L3_MEMORY_ADVISORY_SKIPPED",
+                    reason="low_confidence",
+                    confidence=retrieval_conf["retrieval_confidence"],
+                )
+                return ""
+
+            # Build the advisory context block.
+            context_lines = []
+            for idx, chunk in enumerate(retrieval_result.chunks, start=1):
+                role = chunk.metadata.get("role", "?")
+                score = chunk.score
+                # Truncate each chunk to avoid prompt bloat.
+                text_preview = chunk.text[:400].replace("\n", " ").strip()
+                context_lines.append(
+                    f"  [{idx}] (score={score:.3f}, role={role}): {text_preview}"
+                )
+
+            context_block = "\n".join(context_lines)
+
+            logger.info(
+                "[L3Sage] Advisory memory injected: %d chunks, confidence=%.4f for topic='%s'.",
+                len(retrieval_result.chunks),
+                retrieval_conf["retrieval_confidence"],
+                topic_id,
+            )
+            self._log_advisory_event(
+                topic_id,
+                "L3_MEMORY_ADVISORY_INJECTED",
+                reason="confidence_sufficient",
+                confidence=retrieval_conf["retrieval_confidence"],
+                chunks_injected=len(retrieval_result.chunks),
+            )
+
+            return (
+                f"\n[ADVISORY MEMORY — NON-AUTHORITATIVE]\n"
+                f"The following context is retrieved from historical memory. "
+                f"It is advisory only. Graph data above takes precedence.\n"
+                f"Retrieval confidence: {retrieval_conf['retrieval_confidence']:.3f}\n"
+                f"{context_block}\n"
+                f"[END ADVISORY MEMORY]\n"
+            )
+
+        except Exception as exc:
+            # Never crash audit_topic_health due to advisory failure.
+            logger.warning(
+                "[L3Sage] Advisory memory hook failed silently: %s. Proceeding without injection.",
+                exc,
+            )
+            return ""
+
+    def _log_advisory_event(
+        self,
+        topic_id: str,
+        event: str,
+        reason: str = "",
+        confidence: float = 0.0,
+        chunks_injected: int = 0,
+    ) -> None:
+        """
+        Log advisory memory injection events to the cognition logger.
+
+        Uses trigger_event field so events are traceable in cognition_logs.
+        """
+        try:
+            self.logger.log_insight(
+                layer="L3",
+                topic_id=topic_id,
+                trigger_event=event,
+                input_snapshot_hash="",
+                prompt="",
+                output=json.dumps({
+                    "reason": reason,
+                    "retrieval_confidence": confidence,
+                    "chunks_injected": chunks_injected,
+                }),
+                model="memory_retriever",
+                confidence_score=confidence,
+                latency_ms=0,
+                token_usage=0,
+            )
+        except Exception as log_exc:
+            logger.debug("[L3Sage] Advisory event log failed: %s", log_exc)
 
     def _parse_response(self, raw_response: str) -> Dict[str, Any]:
         # Handle cases where LLM output is not valid JSON

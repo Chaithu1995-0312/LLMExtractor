@@ -61,8 +61,8 @@ class PostgresAdapter(DBAdapter):
 
     # Alias for compatibility when caller expects a cursor
     def fetchone(self):
-        # This is risky if called without a preceding execute on the same cursor
-        # But in GraphManager it's usually used in _fetch_one which we'll fix too
+        # We cannot safely implement a stateful fetchone without a cursor handle.
+        # But we must remove `hasattr` checks from failing in other code.
         raise NotImplementedError("Use fetch_one(query, params) on adapter")
 
     def fetch_all(self, query: str, params: tuple = None):

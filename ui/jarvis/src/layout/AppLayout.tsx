@@ -12,14 +12,15 @@ import { ConnectionStatusBadge } from '../components/ConnectionStatusBadge';
 import { GlobalSearch, GlobalSearchTrigger } from '../components/GlobalSearch';
 
 // ─── Nav tab definitions (matching concept image) ─────────────
-const NAV_TABS: { id: AppMode; label: string }[] = [
-  { id: 'overview',    label: 'COGNITIVE WALL' },
-  { id: 'graph',       label: 'GRAPH MAP' },
-  { id: 'cognition',   label: 'INTENT FOCUS' },
-  { id: 'audit',       label: 'AUDIT STREAM' },
-  { id: 'ingestion',   label: 'INGESTION' },
-  { id: 'governance',  label: 'GOVERNANCE' },
-  { id: 'health',      label: 'OPS CENTER' },
+const NAV_TABS: { id: AppMode; label: string; accent?: string }[] = [
+  { id: 'overview',       label: 'COGNITIVE WALL' },
+  { id: 'graph',          label: 'GRAPH MAP' },
+  { id: 'cognition',      label: 'INTENT FOCUS' },
+  { id: 'audit',          label: 'AUDIT STREAM' },
+  { id: 'ingestion',      label: 'INGESTION' },
+  { id: 'governance',     label: 'GOVERNANCE' },
+  { id: 'health',         label: 'OPS CENTER' },
+  { id: 'control_plane',  label: 'CONTROL PLANE', accent: '#10b981' },
 ];
 
 interface AppLayoutProps {
@@ -49,6 +50,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         {/* Tab buttons */}
         {NAV_TABS.map((tab) => {
           const active = mode === tab.id;
+          const accentColor = tab.accent ?? '#22d3ee';
           return (
             <button
               key={tab.id}
@@ -58,16 +60,10 @@ export function AppLayout({ children }: AppLayoutProps) {
                 fontSize: 11,
                 fontWeight: 700,
                 letterSpacing: '0.15em',
-                color: active
-                  ? '#22d3ee'
-                  : 'rgba(255,255,255,0.38)',
-                borderBottom: active
-                  ? '2px solid #22d3ee'
-                  : '2px solid transparent',
-                background: active
-                  ? 'rgba(34,211,238,0.04)'
-                  : 'transparent',
-                boxShadow: active ? '0 0 8px 2px rgba(34, 211, 238, 0.5)' : 'none',
+                color: active ? accentColor : 'rgba(255,255,255,0.38)',
+                borderBottom: active ? `2px solid ${accentColor}` : '2px solid transparent',
+                background: active ? `${accentColor}08` : 'transparent',
+                boxShadow: active ? `0 0 8px 2px ${accentColor}50` : 'none',
               }}
             >
               {tab.label}
@@ -76,8 +72,8 @@ export function AppLayout({ children }: AppLayoutProps) {
                 <span
                   className="absolute bottom-0 left-0 right-0 h-0.5"
                   style={{
-                    background: '#22d3ee',
-                    boxShadow: '0 0 8px 2px rgba(34,211,238,0.5)',
+                    background: accentColor,
+                    boxShadow: `0 0 8px 2px ${accentColor}80`,
                   }}
                 />
               )}

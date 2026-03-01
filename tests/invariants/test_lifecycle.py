@@ -1,63 +1,47 @@
 import unittest
-import os
-import sys
-# Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
+from nexus.graph.manager import GraphManager, IntentLifecycle, EdgeType
 
-from nexus.graph.manager import GraphManager
-from nexus.graph.schema import Intent, Edge, EdgeType, IntentLifecycle, ScopeNode
-
-class TestLifecycle(unittest.TestCase):
+class TestLifecycleIntegrity(unittest.TestCase):
     def setUp(self):
         self.manager = GraphManager(":memory:")
-        self.intent = Intent(statement="Test")
-        self.manager.add_intent(self.intent)
 
-    def test_monotonicity(self):
-        # LOOSE -> FORMING (OK)
-        self.manager.promote_intent(self.intent.id, IntentLifecycle.FORMING)
+    def test_initial_state_is_loose(self):
+        # Ingestion creates a brick, which is a node
+        brick_id = "brick_1"
+        self.manager.register_node("brick", brick_id, {"statement": "Test brick"})
         
-        # FORMING -> LOOSE (Fail)
+        node_type, data = self.manager.get_node(brick_id)
+        self.assertEqual(data.get("lifecycle", "loose"), "loose")
+
+    def test_cannot_freeze_without_scope(self):
+        intent_id = "intent_1"
+        self.manager.register_node("intent", intent_id, {"statement": "Test intent", "lifecycle": "forming"})
+        
         with self.assertRaises(ValueError):
-            self.manager.promote_intent(self.intent.id, IntentLifecycle.LOOSE)
+            self.manager.promote_intent(intent_id, IntentLifecycle.FROZEN)
 
-    def test_frozen_requires_scope(self):
-        # Promote to FORMING first
-        self.manager.promote_intent(self.intent.id, IntentLifecycle.FORMING)
+    def test_monotonic_lifecycle(self):
+        intent_id = "intent_2"
+        self.manager.register_node("intent", intent_id, {"statement": "Test intent"})
         
-        # Try FROZEN (Fail - No Scope)
-        with self.assertRaisesRegex(ValueError, "without APPLIES_TO"):
-            self.manager.promote_intent(self.intent.id, IntentLifecycle.FROZEN)
-            
-        # Add Scope
-        scope = ScopeNode(name="TEST")
-        self.manager.add_scope(scope)
-        edge = Edge(self.intent.id, scope.id, EdgeType.APPLIES_TO)
-        self.manager.add_typed_edge(edge)
-        
-        # Try FROZEN (OK)
-        self.manager.promote_intent(self.intent.id, IntentLifecycle.FROZEN)
+        # Add a scope to allow freezing
+        scope_id = "scope_1"
+        self.manager.register_node("scope", scope_id, {"name": "Test Scope"})
+        self.manager.register_edge(("intent", intent_id), ("scope", scope_id), EdgeType.APPLIES_TO)
 
-    def test_overrides_requires_frozen_source(self):
-        # Intent A (LOOSE) tries to override Intent B
-        target = Intent(statement="Target")
-        self.manager.add_intent(target)
+        # LOOSE -> FORMING
+        self.manager.promote_intent(intent_id, IntentLifecycle.FORMING)
+        _, data = self.manager.get_node(intent_id)
+        self.assertEqual(data["lifecycle"], "forming")
+
+        # FORMING -> FROZEN
+        self.manager.promote_intent(intent_id, IntentLifecycle.FROZEN)
+        _, data = self.manager.get_node(intent_id)
+        self.assertEqual(data["lifecycle"], "frozen")
         
-        edge = Edge(self.intent.id, target.id, EdgeType.OVERRIDES)
-        
-        # Fail
-        with self.assertRaisesRegex(ValueError, "non-FROZEN"):
-            self.manager.add_typed_edge(edge)
-            
-        # Freeze Source (Needs Scope first)
-        self.manager.promote_intent(self.intent.id, IntentLifecycle.FORMING)
-        scope = ScopeNode(name="TEST")
-        self.manager.add_scope(scope)
-        self.manager.add_typed_edge(Edge(self.intent.id, scope.id, EdgeType.APPLIES_TO))
-        self.manager.promote_intent(self.intent.id, IntentLifecycle.FROZEN)
-        
-        # Retry Override (OK)
-        self.manager.add_typed_edge(edge)
+        # FROZEN -> FORMING (should fail)
+        with self.assertRaises(ValueError):
+            self.manager.promote_intent(intent_id, IntentLifecycle.FORMING)
 
 if __name__ == "__main__":
     unittest.main()

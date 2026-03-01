@@ -45,6 +45,7 @@ import OverviewPage from './pages/OverviewPage';
 import IngestionPage from './pages/IngestionPage';
 import GovernancePage from './pages/GovernancePage';
 import HealthPage from './pages/HealthPage';
+import ControlPlanePage from './pages/ControlPlanePage';
 
 // --- Adapters ---
 
@@ -576,6 +577,12 @@ export default function App() {
           {mode === 'health' && (
             <motion.div key="health" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full w-full">
               <HealthPage />
+            </motion.div>
+          )}
+
+          {mode === 'control_plane' && (
+            <motion.div key="control_plane" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full w-full">
+              <ControlPlanePage />
             </motion.div>
           )}
 

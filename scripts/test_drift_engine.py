@@ -18,18 +18,34 @@ def setup_test_nodes(db):
         ("test_drift_E", "The UI should be blue."), # Expected: Unrelated
     ]
 
+    engine = DriftEngine()
+    
     for node_id, statement in nodes:
         # Check if exists
         exists = db.fetch_one("SELECT id FROM graph.nodes WHERE id = %s", (node_id,))
         if not exists:
-            data = {"statement": statement, "lifecycle": "forming"}
+            data = {"statement": statement, "lifecycle": "forming", "vector_status": "indexed"}
             db.execute(
                 "INSERT INTO graph.nodes (id, type, data, created_at) VALUES (%s, 'intent', %s, NOW())",
                 (node_id, json.dumps(data))
             )
             print(f"Inserted {node_id}")
         else:
-            print(f"Node {node_id} already exists")
+            # Force update vector_status to indexed
+            data = {"statement": statement, "lifecycle": "forming", "vector_status": "indexed"}
+            db.execute(
+                "UPDATE graph.nodes SET data = %s WHERE id = %s",
+                (json.dumps(data), node_id)
+            )
+            print(f"Node {node_id} already exists, forced vector_status=indexed")
+            
+        # Also ensure vector store has it
+        if not engine.vector_store.exists(node_id):
+            vector = engine.embedding_service.embed(statement)
+            engine.vector_store.add(node_id, vector)
+            print(f"Embedded and added {node_id} to VectorStore")
+            
+    engine.vector_store.save()
     
     return [n[0] for n in nodes]
 
