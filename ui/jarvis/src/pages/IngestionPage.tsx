@@ -191,23 +191,35 @@ export default function IngestionPage() {
             RAW JSON → SEMANTIC BRICKS → KNOWLEDGE GRAPH
           </p>
         </div>
-        <button
-          onClick={() => triggerSync.mutate()}
-          disabled={isRunning || triggerSync.isPending}
-          className="flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold uppercase transition-all"
-          style={{
-            fontSize: 11, letterSpacing: '0.2em',
-            background: isRunning ? 'rgba(34,211,238,0.05)' : 'linear-gradient(135deg, rgba(34,211,238,0.15), rgba(59,130,246,0.15))',
-            border: `1px solid ${isRunning ? 'rgba(34,211,238,0.2)' : 'rgba(34,211,238,0.4)'}`,
-            color: isRunning ? 'rgba(34,211,238,0.5)' : '#22d3ee',
-            boxShadow: isRunning ? 'none' : '0 0 16px rgba(34,211,238,0.15)',
-          }}
-        >
-          {isRunning
-            ? <><RefreshCw style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> SYNCING...</>
-            : <><PlayCircle style={{ width: 14, height: 14 }} /> RUN SYNC</>
-          }
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { alert('Stopping sync is not yet implemented.'); }}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold uppercase transition-all text-red-400 bg-red-500/0 hover:bg-red-500/10 border border-red-500/40"
+            style={{ fontSize: 11, letterSpacing: '0.2em' }}
+          >
+            <XCircle size={14} />
+            <span>STOP</span>
+          </button>
+          <button
+            onClick={() => triggerSync.mutate()}
+            disabled={isRunning || triggerSync.isPending}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold uppercase transition-all disabled:opacity-50"
+            style={{
+              fontSize: 11,
+              letterSpacing: '0.2em',
+              background: 'linear-gradient(135deg, #00D9FF, #00A9FF)',
+              color: '#030609',
+              border: '1px solid #00D9FF',
+              boxShadow: '0 0 20px 0 #00D9FF40',
+            }}
+          >
+            {isRunning ? (
+              <><RefreshCw size={14} className="animate-spin" /> SYNCING...</>
+            ) : (
+              <><PlayCircle size={14} /> RUN SYNC</>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Stats row */}

@@ -38,49 +38,59 @@ export default function ControlPlanePage() {
       {/* ── Header strip ──────────────────────────────────────────── */}
       <div
         style={{
-          padding: '10px 20px 6px',
-          borderBottom: '1px solid rgba(255,255,255,0.05)',
+          padding: '12px 20px',
+          borderBottom: '1px solid rgba(0, 217, 255, 0.15)',
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: 12,
           flexShrink: 0,
+          background: 'rgba(0, 217, 255, 0.02)',
         }}
       >
-        <span
+        <h1
           style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.25em',
-            color: '#22d3ee',
+            fontSize: 11,
+            fontWeight: 800,
+            letterSpacing: '0.3em',
+            color: '#00D9FF',
+            textShadow: '0 0 10px rgba(0, 217, 255, 0.4)',
           }}
         >
-          NEXUS
-        </span>
-        <span style={{ color: 'rgba(255,255,255,0.1)', fontSize: 10 }}>·</span>
+          COGNITIVE CONTROL PLANE
+        </h1>
+        <div
+          style={{
+            height: 12,
+            width: 1,
+            background: 'rgba(255,255,255,0.15)',
+          }}
+        />
         <span
           style={{
             fontSize: 9,
             fontWeight: 700,
-            letterSpacing: '0.2em',
+            letterSpacing: '0.15em',
             color: 'rgba(255,255,255,0.4)',
+            textTransform: 'uppercase',
           }}
         >
-          COGNITIVE CONTROL PLANE
+          Nexus Instance
         </span>
         <span
           style={{
-            marginLeft: 6,
+            marginLeft: 'auto',
             fontSize: 8,
-            fontWeight: 700,
-            letterSpacing: '0.15em',
-            color: 'rgba(16,185,129,0.7)',
-            background: 'rgba(16,185,129,0.08)',
-            border: '1px solid rgba(16,185,129,0.2)',
-            padding: '1px 7px',
-            borderRadius: 3,
+            fontWeight: 800,
+            letterSpacing: '0.1em',
+            color: '#00D9FF',
+            background: 'rgba(0, 217, 255, 0.1)',
+            border: '1px solid rgba(0, 217, 255, 0.3)',
+            padding: '2px 8px',
+            borderRadius: 4,
+            textShadow: '0 0 5px rgba(0, 217, 255, 0.5)',
           }}
         >
-          v2
+          V2.0.4-STABLE
         </span>
       </div>
 

@@ -1,76 +1,62 @@
 import { useControlPlaneStore } from '../../store/controlPlaneStore';
 import { useQueryExecution } from '../../hooks/useQueryExecution';
+import { Send, CornerDownLeft, HelpCircle } from 'lucide-react';
+import { Tooltip } from 'react-tooltip';
 
 export default function QueryConsole() {
   const { query, setQuery, loading } = useControlPlaneStore();
   const { execute } = useQueryExecution();
+  const disabled = loading || !query.trim();
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      execute(query);
+      if (!disabled) execute(query);
     }
   };
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 mb-1">
-        <span style={{ fontSize: 9, letterSpacing: '0.18em', color: 'rgba(34,211,238,0.7)', fontWeight: 700 }}>
-          COGNITIVE QUERY CONSOLE
-        </span>
-        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.1em' }}>
-          v2 · CONTROL PLANE
-        </span>
+      {/* Header */}
+      <div className="flex items-center gap-2.5">
+        <span className="font-bold text-xs tracking-[0.2em] text-cyan-400">QUERY CONSOLE</span>
+        <div className="flex items-center gap-1.5 text-[9px] font-semibold text-white/30 tracking-widest">
+          <HelpCircle
+            size={12}
+            className="text-white/20"
+            data-tooltip-id="query-help"
+            data-tooltip-content="Press Enter to execute, Shift+Enter for a new line."
+          />
+          <Tooltip id="query-help" place="top" effect="solid" className="tooltip" />
+        </div>
       </div>
-      <div
-        className="flex gap-3"
-        style={{
-          background: 'rgba(4,8,13,0.95)',
-          border: '1px solid rgba(34,211,238,0.18)',
-          borderRadius: 6,
-          padding: '2px 4px',
-        }}
-      >
+
+      {/* Main input container */}
+      <div className="flex gap-2 p-1.5 rounded-lg bg-[#1A1A2E] border border-white/10 focus-within:border-cyan-400 transition-all">
         <textarea
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Nexus... (Enter to execute, Shift+Enter for newline)"
+          placeholder="Ask Nexus..."
           rows={2}
-          style={{
-            flex: 1,
-            background: 'transparent',
-            border: 'none',
-            outline: 'none',
-            resize: 'none',
-            color: 'rgba(255,255,255,0.85)',
-            fontSize: 13,
-            fontFamily: 'monospace',
-            padding: '10px 12px',
-            letterSpacing: '0.02em',
-          }}
+          className="flex-1 bg-transparent border-none outline-none resize-none text-white/90 text-sm font-mono p-2.5 tracking-wider placeholder:text-white/20"
         />
         <button
           onClick={() => execute(query)}
-          disabled={loading || !query.trim()}
+          disabled={disabled}
+          data-tooltip-id="exec-button-tooltip"
+          data-tooltip-content={!query.trim() ? 'Type a query to enable execution' : ''}
+          className="self-end mb-1 mr-1 px-5 py-2.5 rounded-md flex items-center gap-2.5 text-xs font-bold tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           style={{
-            alignSelf: 'flex-end',
-            marginBottom: 6,
-            marginRight: 6,
-            padding: '6px 20px',
-            background: loading ? 'rgba(34,211,238,0.08)' : 'rgba(34,211,238,0.15)',
-            border: '1px solid rgba(34,211,238,0.35)',
-            borderRadius: 4,
-            color: loading ? 'rgba(34,211,238,0.4)' : '#22d3ee',
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.15em',
-            cursor: loading || !query.trim() ? 'not-allowed' : 'pointer',
-            transition: 'all 0.15s',
+            background: disabled ? 'rgba(0, 217, 255, 0.1)' : '#00D9FF',
+            color: disabled ? 'rgba(0, 217, 255, 0.5)' : '#030609',
+            boxShadow: disabled ? 'none' : '0 0 15px 0 rgba(0, 217, 255, 0.4)',
           }}
         >
-          {loading ? 'EXECUTING…' : 'EXECUTE'}
+          <Send size={14} />
+          <span>{loading ? 'EXECUTING…' : 'EXECUTE'}</span>
         </button>
+        {!disabled && <Tooltip id="exec-button-tooltip" place="top" effect="solid" />}
       </div>
     </div>
   );

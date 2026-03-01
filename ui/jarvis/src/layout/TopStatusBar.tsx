@@ -46,7 +46,7 @@ export function TopStatusBar() {
   const healthItems = [
     { label: 'Sync Engine', status: systemState !== 'BOOTING' ? 'ACTIVE' : 'BOOTING' },
     { label: 'LLM Cognition', status: health?.llm === 'ONLINE' ? 'ONLINE' : health?.llm === 'DEGRADED' ? 'DEGRADED' : 'OFFLINE' },
-    { label: 'Graph DB', status: health?.db === 'ONLINE' ? 'OPTIMAL' : 'DEGRADED' },
+    { label: 'Graph DB', status: health?.db === 'ONLINE' ? 'HEALTHY' : 'DEGRADED' },
     { label: 'Redis Queue', status: health?.redis === 'ONLINE' ? 'ACTIVE' : 'OFFLINE' },
   ];
 
@@ -146,17 +146,17 @@ export function TopStatusBar() {
             <HoloOrb />
             <div className="text-center">
               <h1
-                className="text-[34px] font-black tracking-[0.45em] text-white"
+                className="text-[38px] font-black tracking-[0.5em] text-white"
                 style={{
                   textShadow:
-                    'rgba(34, 211, 238, 0.6) 0px 0px 20px, rgba(34, 211, 238, 0.2) 0px 0px 50px',
+                    'rgba(34, 211, 238, 0.6) 0px 0px 24px, rgba(34, 211, 238, 0.2) 0px 0px 60px',
                 }}
               >
                 JARVIS
               </h1>
               <p
-                className="text-[10px] tracking-[0.35em] uppercase mt-1"
-                style={{ color: 'rgba(34, 211, 238, 0.55)' }}
+                className="text-[9px] font-medium tracking-[0.4em] uppercase mt-2 opacity-60"
+                style={{ color: 'rgba(34, 211, 238, 0.8)' }}
               >
                 COGNITIVE CONTROL SYSTEM
               </p>
@@ -187,40 +187,40 @@ export function TopStatusBar() {
             </div>
 
             {/* Divider */}
-            <div style={{ width: '1px', background: 'rgba(34, 211, 238, 0.2)' }} />
+            <div style={{ width: '1px', background: 'rgba(34, 211, 238, 0.25)' }} />
 
             {/* Nodes */}
             <div style={{ textAlign: 'center' }}>
               <div className="text-[8px] uppercase tracking-[0.2em] font-bold" style={{ color: 'rgba(255, 255, 255, 0.35)' }}>
                 Nodes
               </div>
-              <div className="text-[12px] font-bold font-mono mt-1" style={{ color: 'rgb(34, 211, 238)' }}>
+              <div className="text-[12px] font-bold font-mono mt-1" style={{ color: 'rgb(0, 217, 255)' }}>
                 {metrics.nodes.toLocaleString()}
               </div>
             </div>
 
             {/* Divider */}
-            <div style={{ width: '1px', background: 'rgba(34, 211, 238, 0.2)' }} />
+            <div style={{ width: '1px', background: 'rgba(34, 211, 238, 0.25)' }} />
 
             {/* Edges */}
             <div style={{ textAlign: 'center' }}>
               <div className="text-[8px] uppercase tracking-[0.2em] font-bold" style={{ color: 'rgba(255, 255, 255, 0.35)' }}>
                 Edges
               </div>
-              <div className="text-[12px] font-bold font-mono mt-1" style={{ color: 'rgb(34, 211, 238)' }}>
+              <div className="text-[12px] font-bold font-mono mt-1" style={{ color: 'rgb(0, 217, 255)' }}>
                 {metrics.edges.toLocaleString()}
               </div>
             </div>
 
             {/* Divider */}
-            <div style={{ width: '1px', background: 'rgba(34, 211, 238, 0.2)' }} />
+            <div style={{ width: '1px', background: 'rgba(34, 211, 238, 0.25)' }} />
 
             {/* Alerts */}
             <div style={{ textAlign: 'center' }}>
               <div className="text-[8px] uppercase tracking-[0.2em] font-bold" style={{ color: 'rgba(255, 255, 255, 0.35)' }}>
                 Alerts
               </div>
-              <div className="text-[12px] font-bold font-mono mt-1" style={{ color: metrics.alerts > 0 ? 'rgb(248, 113, 113)' : 'rgb(52, 211, 153)' }}>
+              <div className="text-[12px] font-bold font-mono mt-1" style={{ color: metrics.alerts > 0 ? '#FF0000' : '#00D9FF' }}>
                 {metrics.alerts}
               </div>
             </div>
@@ -248,9 +248,9 @@ export function TopStatusBar() {
                 Extraction
               </span>
               <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255, 255, 255, 0.06)' }}>
-                <div className="h-full rounded-full" style={{ width: '100%', background: 'rgb(52, 211, 153)' }} />
+                <div className="h-full rounded-full" style={{ width: '100%', background: '#00D9FF' }} />
               </div>
-              <span className="text-[9px] font-bold w-8 text-right font-mono" style={{ color: 'rgb(52, 211, 153)' }}>
+              <span className="text-[9px] font-bold w-8 text-right font-mono" style={{ color: '#00D9FF' }}>
                 100%
               </span>
             </div>
@@ -260,9 +260,9 @@ export function TopStatusBar() {
                 Rerank
               </span>
               <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255, 255, 255, 0.06)' }}>
-                <div className="h-full rounded-full" style={{ width: '96%', background: 'rgb(52, 211, 153)' }} />
+                <div className="h-full rounded-full" style={{ width: '96%', background: '#00D9FF' }} />
               </div>
-              <span className="text-[9px] font-bold w-8 text-right font-mono" style={{ color: 'rgb(52, 211, 153)' }}>
+              <span className="text-[9px] font-bold w-8 text-right font-mono" style={{ color: '#00D9FF' }}>
                 96%
               </span>
             </div>
@@ -392,14 +392,41 @@ function HoloOrb() {
 }
 
 function HealthMetric({ icon, label, status }: { icon: React.ReactNode; label: string; status: string }) {
-  const ok = status === 'ACTIVE' || status === 'ONLINE' || status === 'OPTIMAL';
+  const getStatusConfig = (s: string) => {
+    switch (s.toUpperCase()) {
+      case 'ACTIVE':
+      case 'ONLINE':
+      case 'OPTIMAL':
+      case 'HEALTHY':
+        return { color: '#00D9FF', bg: 'rgba(0, 217, 255, 0.1)', border: 'rgba(0, 217, 255, 0.3)' };
+      case 'BOOTING':
+        return { color: '#FFA500', bg: 'rgba(255, 165, 0, 0.1)', border: 'rgba(255, 165, 0, 0.3)' };
+      case 'DEGRADED':
+        return { color: '#FF6B35', bg: 'rgba(255, 107, 53, 0.1)', border: 'rgba(255, 107, 53, 0.3)' };
+      case 'OFFLINE':
+      case 'ERROR':
+        return { color: '#FF0000', bg: 'rgba(255, 0, 0, 0.1)', border: 'rgba(255, 0, 0, 0.3)' };
+      default:
+        return { color: '#4A4A5E', bg: 'rgba(74, 74, 94, 0.1)', border: 'rgba(74, 74, 94, 0.3)' };
+    }
+  };
+
+  const config = getStatusConfig(status);
+
   return (
     <div className="flex items-center gap-2">
-      <div style={{ color: ok ? 'rgb(52, 211, 153)' : 'rgb(248, 113, 113)' }}>{icon}</div>
-      <span className="text-[10px] w-28 shrink-0" style={{ color: 'rgba(255, 255, 255, 0.55)' }}>
+      <div style={{ color: config.color }}>{icon}</div>
+      <span className="text-[10px] w-28 shrink-0 font-medium" style={{ color: 'rgba(255, 255, 255, 0.55)' }}>
         {label}
       </span>
-      <span className="text-[8px] font-bold px-1.5 py-0.5 rounded border" style={{ color: ok ? 'rgb(52, 211, 153)' : 'rgb(248, 113, 113)', borderColor: ok ? 'rgba(52, 211, 153, 0.3)' : 'rgba(248, 113, 113, 0.3)', background: ok ? 'rgba(52, 211, 153, 0.08)' : 'rgba(248, 113, 113, 0.08)' }}>
+      <span
+        className="text-[8px] font-bold px-1.5 py-0.5 rounded border tracking-wider"
+        style={{
+          color: config.color,
+          borderColor: config.border,
+          background: config.bg,
+        }}
+      >
         {status}
       </span>
     </div>

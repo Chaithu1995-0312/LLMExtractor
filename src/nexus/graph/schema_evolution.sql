@@ -26,14 +26,22 @@ CREATE TABLE IF NOT EXISTS graph.edge_candidates (
     UNIQUE(source_intent_id, target_intent_id, suggested_edge_type)
 );
 
--- 2. Vector Metadata (Model Versioning)
+-- 2. Vector Metadata (Real Embedding Storage)
 CREATE TABLE IF NOT EXISTS graph.vector_meta (
     node_id TEXT PRIMARY KEY REFERENCES graph.nodes(id) ON DELETE CASCADE,
 
+    embedding VECTOR(1536) NOT NULL,
+
     embedding_model TEXT NOT NULL,
     embedding_version TEXT NOT NULL,
+
     indexed_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Index for fast similarity search
+CREATE INDEX IF NOT EXISTS idx_vector_embedding
+ON graph.vector_meta
+USING ivfflat (embedding vector_cosine_ops);
 
 -- 3. Cluster Statistics (Evolution Metrics)
 CREATE TABLE IF NOT EXISTS graph.cluster_stats (
@@ -75,3 +83,4 @@ CREATE INDEX IF NOT EXISTS idx_system_stats_date ON graph.system_stats(computed_
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_edge_candidates_status ON graph.edge_candidates(status);
 CREATE INDEX IF NOT EXISTS idx_edge_candidates_source ON graph.edge_candidates(source_intent_id);
+CREATE INDEX IF NOT EXISTS idx_edge_candidates_similarity ON graph.edge_candidates(similarity_score DESC);

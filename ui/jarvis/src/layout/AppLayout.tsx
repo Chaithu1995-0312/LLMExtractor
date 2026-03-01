@@ -5,22 +5,35 @@
 // ============================================================
 
 import { ReactNode } from 'react';
-import { Lock, Bell, Settings, User } from 'lucide-react';
+import {
+  Lock,
+  Bell,
+  Settings,
+  User,
+  LayoutDashboard,
+  Network,
+  Target,
+  Activity,
+  ArrowRightCircle,
+  ShieldCheck,
+  Zap,
+  Cpu,
+} from 'lucide-react';
 import { TopStatusBar } from './TopStatusBar';
 import { useNexusStore, type AppMode } from '../store';
 import { ConnectionStatusBadge } from '../components/ConnectionStatusBadge';
 import { GlobalSearch, GlobalSearchTrigger } from '../components/GlobalSearch';
 
 // ─── Nav tab definitions (matching concept image) ─────────────
-const NAV_TABS: { id: AppMode; label: string; accent?: string }[] = [
-  { id: 'overview',       label: 'COGNITIVE WALL' },
-  { id: 'graph',          label: 'GRAPH MAP' },
-  { id: 'cognition',      label: 'INTENT FOCUS' },
-  { id: 'audit',          label: 'AUDIT STREAM' },
-  { id: 'ingestion',      label: 'INGESTION' },
-  { id: 'governance',     label: 'GOVERNANCE' },
-  { id: 'health',         label: 'OPS CENTER' },
-  { id: 'control_plane',  label: 'CONTROL PLANE', accent: '#10b981' },
+const NAV_TABS: { id: AppMode; label: string; accent?: string; icon: any }[] = [
+  { id: 'overview',       label: 'COGNITIVE WALL', icon: LayoutDashboard },
+  { id: 'graph',          label: 'GRAPH MAP',      icon: Network },
+  { id: 'cognition',      label: 'INTENT FOCUS',   icon: Target },
+  { id: 'audit',          label: 'AUDIT STREAM',   icon: Activity },
+  { id: 'ingestion',      label: 'INGESTION',      icon: ArrowRightCircle },
+  { id: 'governance',     label: 'GOVERNANCE',     icon: ShieldCheck },
+  { id: 'health',         label: 'OPS CENTER',     icon: Zap },
+  { id: 'control_plane',  label: 'CONTROL PLANE',  icon: Cpu, accent: '#00D9FF' },
 ];
 
 interface AppLayoutProps {
@@ -50,31 +63,55 @@ export function AppLayout({ children }: AppLayoutProps) {
         {/* Tab buttons */}
         {NAV_TABS.map((tab) => {
           const active = mode === tab.id;
-          const accentColor = tab.accent ?? '#22d3ee';
+          const accentColor = tab.accent ?? '#00D9FF';
+          const Icon = tab.icon;
           return (
             <button
               key={tab.id}
               onClick={() => setMode(tab.id)}
-              className="relative px-5 h-full flex items-center transition-all"
+              className="relative px-5 h-full flex items-center gap-2.5 transition-all group overflow-hidden"
               style={{
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.15em',
-                color: active ? accentColor : 'rgba(255,255,255,0.38)',
+                fontSize: 10,
+                fontWeight: active ? 800 : 600,
+                letterSpacing: '0.12em',
+                color: active ? accentColor : 'rgba(255,255,255,0.45)',
+                background: active ? `linear-gradient(to bottom, ${accentColor}15, ${accentColor}05)` : 'transparent',
                 borderBottom: active ? `2px solid ${accentColor}` : '2px solid transparent',
-                background: active ? `${accentColor}08` : 'transparent',
-                boxShadow: active ? `0 0 8px 2px ${accentColor}50` : 'none',
               }}
             >
-              {tab.label}
-              {/* Active glow */}
+              <Icon
+                style={{
+                  width: 14,
+                  height: 14,
+                  color: active ? accentColor : 'rgba(255,255,255,0.3)',
+                  filter: active ? `drop-shadow(0 0 5px ${accentColor}80)` : 'none',
+                }}
+              />
+              <span className="relative z-10">{tab.label}</span>
+
+              {/* Active glow & background highlights */}
               {active && (
-                <span
-                  className="absolute bottom-0 left-0 right-0 h-0.5"
-                  style={{
-                    background: accentColor,
-                    boxShadow: `0 0 8px 2px ${accentColor}80`,
-                  }}
+                <>
+                  <div
+                    className="absolute inset-0 opacity-20"
+                    style={{
+                      background: `radial-gradient(circle at center, ${accentColor}40 0%, transparent 70%)`,
+                    }}
+                  />
+                  <span
+                    className="absolute bottom-0 left-0 right-0 h-[2px]"
+                    style={{
+                      background: accentColor,
+                      boxShadow: `0 0 15px 2px ${accentColor}`,
+                    }}
+                  />
+                </>
+              )}
+
+              {/* Hover effect for inactive tabs */}
+              {!active && (
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
                 />
               )}
             </button>
