@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 """
-L2 Semantic Substrate — Backfill Runner
-========================================
+L2 Semantic Substrate — Backfill Runner (State-Driven)
+======================================================
 CLI entry point for the embedding backfill job.
+Updated to support Cloud Autonomous Pipeline with status tracking.
 
 Usage:
     python scripts/run_l2_backfill.py
     python scripts/run_l2_backfill.py --batch-size 25
     python scripts/run_l2_backfill.py --dry-run
-    python scripts/run_l2_backfill.py --log-level DEBUG
-
-Exits with code 0 if failures == 0, else code 1.
-Prints the summary JSON to stdout regardless of exit code so CI/CD
-pipelines can capture it even on partial failure.
 """
 
 import argparse
@@ -20,270 +16,203 @@ import json
 import logging
 import os
 import sys
-import time
+import psycopg2
+import hashlib
 from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
-# Path bootstrap — ensure 'src/' is on sys.path so nexus imports resolve
-# when running from repo root.
+# Path bootstrap
 # ---------------------------------------------------------------------------
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _SRC_DIR = os.path.join(_REPO_ROOT, "src")
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-# ---------------------------------------------------------------------------
-# Load .env if dotenv is available (non-fatal if not installed)
-# ---------------------------------------------------------------------------
 try:
     from dotenv import load_dotenv
     _env_path = os.path.join(_REPO_ROOT, ".env")
     if os.path.exists(_env_path):
         load_dotenv(_env_path)
-        # Loaded silently — logger not yet configured at this point
 except ImportError:
-    pass  # python-dotenv not installed; rely on environment variables being pre-set
-
-
-# ---------------------------------------------------------------------------
-# Argument parsing
-# ---------------------------------------------------------------------------
-
-def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="L2 Semantic Substrate — OpenAI embedding backfill for graph.nodes",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Standard run with default batch size of 50
-  python scripts/run_l2_backfill.py
-
-  # Smaller batches (useful for debugging or slow API)
-  python scripts/run_l2_backfill.py --batch-size 10
-
-  # Dry run: count eligible nodes without calling API or writing DB
-  python scripts/run_l2_backfill.py --dry-run
-
-  # Verbose logging
-  python scripts/run_l2_backfill.py --log-level DEBUG
-        """,
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=50,
-        metavar="N",
-        help="Number of nodes to process per batch (default: 50)",
-    )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging verbosity (default: INFO)",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Count eligible nodes and print estimate without calling API or writing to DB.",
-    )
-    return parser.parse_args()
-
+    pass
 
 # ---------------------------------------------------------------------------
-# Logging setup
+# Logging
 # ---------------------------------------------------------------------------
-
-def _configure_logging(level_str: str) -> None:
+def _configure_logging(level_str: str, log_filename: str) -> None:
     level = getattr(logging, level_str.upper(), logging.INFO)
+    
+    # Clear existing handlers to prevent duplicate output if called multiple times
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
     logging.basicConfig(
         level=level,
         format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
-        stream=sys.stderr,   # Structured logs → stderr; JSON summary → stdout
+        handlers=[
+            logging.FileHandler(log_filename),  # Log to file
+            logging.StreamHandler(sys.stderr)  # Also log to stderr
+        ]
     )
 
-
 # ---------------------------------------------------------------------------
-# Dry-run helper
+# OpenAI Helper
 # ---------------------------------------------------------------------------
-
-def _dry_run(database_url: str) -> None:
+def generate_openai_embedding(text: str, api_key: str):
     """
-    Counts eligible nodes without touching the API or writing to DB.
-    Prints a human-readable pre-flight report.
+    Generates embedding using OpenAI API (text-embedding-3-small).
     """
-    import psycopg2
-
-    ELIGIBLE_LIFECYCLES = ("loose", "forming")
-
-    _SQL_COUNT = """
-        SELECT COUNT(*)
-        FROM graph.nodes
-        WHERE data->>'lifecycle' = ANY(%s)
-        AND   (data->>'vector_status' IS NULL OR data->>'vector_status' != 'indexed')
-    """
-    _SQL_BREAKDOWN = """
-        SELECT data->>'lifecycle' AS lifecycle, COUNT(*) AS cnt
-        FROM graph.nodes
-        WHERE data->>'lifecycle' = ANY(%s)
-        AND   (data->>'vector_status' IS NULL OR data->>'vector_status' != 'indexed')
-        GROUP BY 1
-        ORDER BY 1
-    """
-    _SQL_ALREADY_INDEXED = """
-        SELECT COUNT(*)
-        FROM graph.nodes
-        WHERE data->>'vector_status' = 'indexed'
-    """
-    _SQL_TOTAL = """
-        SELECT COUNT(*) FROM graph.nodes
-    """
-
-    conn = psycopg2.connect(database_url)
     try:
-        with conn.cursor() as cur:
-            cur.execute(_SQL_COUNT, (list(ELIGIBLE_LIFECYCLES),))
-            eligible = cur.fetchone()[0]
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        response = client.embeddings.create(
+            input=text,
+            model="text-embedding-3-small"
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        logging.error(f"OpenAI Embedding Error: {e}")
+        return None
 
-            cur.execute(_SQL_BREAKDOWN, (list(ELIGIBLE_LIFECYCLES),))
-            breakdown = cur.fetchall()
+def compute_fingerprint(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-            cur.execute(_SQL_ALREADY_INDEXED)
-            already_indexed = cur.fetchone()[0]
+# ---------------------------------------------------------------------------
+# State-Driven Logic
+# ---------------------------------------------------------------------------
 
-            cur.execute(_SQL_TOTAL)
-            total = cur.fetchone()[0]
+def run_state_driven_backfill(database_url: str, openai_api_key: str, batch_size: int = 50):
+    """
+    Processing loop that:
+    1. Fetches nodes with status='L1_COMPLETE'
+    2. Runs embedding generation
+    3. Updates status='L2_COMPLETE'
+    """
+    logger = logging.getLogger("l2_state_runner")
+    
+    conn = psycopg2.connect(database_url)
+    total_processed = 0
+    
+    try:
+        while True:
+            with conn.cursor() as cur:
+                # 1. Fetch Candidates
+                cur.execute("""
+                    SELECT id, data 
+                    FROM graph.nodes 
+                    WHERE status = 'L1_COMPLETE'
+                    LIMIT %s
+                    FOR UPDATE SKIP LOCKED
+                """, (batch_size,))
+                
+                rows = cur.fetchall()
+                
+                if not rows:
+                    logger.info("No 'L1_COMPLETE' nodes found. Backfill complete.")
+                    break
+                
+                logger.info(f"Processing batch of {len(rows)} nodes...")
+                
+                # 2. Process Batch
+                for r in rows:
+                    node_id = r[0]
+                    node_data = r[1]
+                    
+                    # Mark started
+                    cur.execute("UPDATE graph.nodes SET l2_started_at = NOW() WHERE id = %s", (node_id,))
+                    
+                    try:
+                        text = node_data.get("statement") or node_data.get("content")
+                        if not text:
+                            # Skip empty nodes
+                            cur.execute("UPDATE graph.nodes SET status = 'L2_COMPLETE', l2_completed_at = NOW() WHERE id = %s", (node_id,))
+                            continue
+
+                        # Generate Embedding
+                        vector = generate_openai_embedding(text, openai_api_key)
+                        
+                        if vector:
+                            # Update Node Status
+                            cur.execute("""
+                                UPDATE graph.nodes 
+                                SET status = 'L2_COMPLETE', l2_completed_at = NOW()
+                                WHERE id = %s
+                            """, (node_id,))
+                            
+                            # Create Sync Brick (Mirror)
+                            fingerprint = compute_fingerprint(text)
+                            cur.execute("""
+                                INSERT INTO sync.bricks (
+                                    id, content, state, created_at, status, 
+                                    l2_completed_at, fingerprint, 
+                                    json_path, start_index, end_index, source_checksum
+                                )
+                                VALUES (%s, %s, 'FINAL', NOW(), 'L2_COMPLETE', NOW(), %s, %s, %s, %s, %s)
+                                ON CONFLICT (id) DO UPDATE SET status = 'L2_COMPLETE', l2_completed_at = NOW()
+                            """, (node_id, text, fingerprint, 'N/A', 0, len(text), fingerprint))
+                            
+                            total_processed += 1
+                        else:
+                            logger.warning(f"Failed to generate embedding for node {node_id}")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to process node {node_id}: {e}")
+                        
+                conn.commit()
+                
     finally:
         conn.close()
-
-    print("\n" + "=" * 60)
-    print("  L2 BACKFILL — DRY RUN REPORT")
-    print("=" * 60)
-    print(f"  Total nodes in graph.nodes : {total}")
-    print(f"  Already indexed            : {already_indexed}")
-    print(f"  Eligible (will be embedded): {eligible}")
-    print()
-    print("  Lifecycle breakdown of eligible nodes:")
-    for row in breakdown:
-        print(f"    {row[0]:<20}  {row[1]:>6}")
-    print()
-    print(f"  Estimated API calls        : {eligible}")
-    print(f"  Estimated cost (approx)    : ${eligible * 0.00002:.4f}  "
-          f"(text-embedding-3-small @ $0.02 / 1M tokens, ~1 token/node avg)")
-    print("=" * 60)
-    print("  Run without --dry-run to execute.\n")
-
+        
+    return total_processed
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    args = _parse_args()
-    _configure_logging(args.log_level)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch-size", type=int, default=50)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--log-level", default="INFO")
+    args = parser.parse_args()
 
-    logger = logging.getLogger("l2_backfill_runner")
-    logger.info("=" * 60)
-    logger.info("  L2 Semantic Substrate — Embedding Backfill")
-    logger.info("  Started at: %s", datetime.now(timezone.utc).isoformat())
-    logger.info("=" * 60)
+    # Ensure logs directory exists
+    log_dir = os.path.join(_REPO_ROOT, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Create a timestamped log file
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    log_filename = os.path.join(log_dir, f"l2_backfill_{timestamp}.log")
+    
+    _configure_logging(args.log_level, log_filename)
+    logger = logging.getLogger("l2_main")
 
-    # Validate environment before importing the engine
     database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        logger.error("DATABASE_URL is not set. Cannot connect to PostgreSQL.")
-        print(json.dumps({
-            "error": "DATABASE_URL not set",
-            "total_nodes_scanned": 0,
-            "total_embeddings_created": 0,
-            "failures": 0,
-            "duration_seconds": 0.0,
-        }))
-        return 1
-
     openai_api_key = os.environ.get("OPENAI_API_KEY")
-    if not openai_api_key and not args.dry_run:
-        logger.error("OPENAI_API_KEY is not set. Cannot call embedding API.")
-        print(json.dumps({
-            "error": "OPENAI_API_KEY not set",
-            "total_nodes_scanned": 0,
-            "total_embeddings_created": 0,
-            "failures": 0,
-            "duration_seconds": 0.0,
-        }))
+
+    if not database_url:
+        # Fallback to defaults if env vars missing (local dev)
+        database_url = "postgresql://nexus:nexus@localhost:5432/nexus"
+    
+    if not openai_api_key:
+        logger.error("Missing OPENAI_API_KEY")
         return 1
 
-    # ----------------------------------------------------------------
-    # Dry-run path
-    # ----------------------------------------------------------------
     if args.dry_run:
-        logger.info("Dry-run mode activated. No API calls or DB writes will be made.")
-        try:
-            _dry_run(database_url)
-        except Exception as exc:
-            logger.error("Dry-run failed: %s", exc, exc_info=True)
-            return 1
+        conn = psycopg2.connect(database_url)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM graph.nodes WHERE status = 'L1_COMPLETE'")
+            count = cur.fetchone()[0]
+        print(f"Dry Run: Found {count} nodes waiting for L2.")
         return 0
 
-    # ----------------------------------------------------------------
-    # Live run
-    # ----------------------------------------------------------------
-    logger.info("Batch size: %d", args.batch_size)
-
-    try:
-        from nexus.vector.l2_backfill import L2BackfillEngine
-    except ImportError as exc:
-        logger.error("Failed to import L2BackfillEngine: %s", exc, exc_info=True)
-        print(json.dumps({
-            "error": f"Import failed: {exc}",
-            "total_nodes_scanned": 0,
-            "total_embeddings_created": 0,
-            "failures": 0,
-            "duration_seconds": 0.0,
-        }))
-        return 1
-
-    try:
-        engine = L2BackfillEngine(
-            database_url=database_url,
-            openai_api_key=openai_api_key,
-        )
-        summary = engine.run(batch_size=args.batch_size)
-    except Exception as exc:
-        logger.error("Backfill engine raised an unhandled exception: %s", exc, exc_info=True)
-        print(json.dumps({
-            "error": str(exc),
-            "total_nodes_scanned": 0,
-            "total_embeddings_created": 0,
-            "failures": 1,
-            "duration_seconds": 0.0,
-        }))
-        return 1
-
-    # ----------------------------------------------------------------
-    # Output summary JSON to stdout
-    # ----------------------------------------------------------------
-    summary_dict = summary.to_dict()
-    summary_dict["completed_at"] = datetime.now(timezone.utc).isoformat()
-    summary_dict["model"] = "text-embedding-3-small"
-    summary_dict["embedding_version"] = "v1"
-    summary_dict["batch_size_used"] = args.batch_size
-
-    print(json.dumps(summary_dict, indent=2))
-
-    # ----------------------------------------------------------------
-    # Exit code: 0 = fully clean, 1 = partial failures
-    # ----------------------------------------------------------------
-    if summary.failures > 0:
-        logger.warning(
-            "%d node(s) failed to embed. Re-run to retry — they remain 'pending'.",
-            summary.failures,
-        )
-        return 1
-
-    logger.info("Backfill completed with zero failures. ✅")
+    # Execute
+    logger.info("Starting State-Driven L2 Backfill...")
+    
+    processed = run_state_driven_backfill(database_url, openai_api_key, args.batch_size)
+    logger.info(f"Completed. Processed {processed} nodes.")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
