@@ -21,7 +21,6 @@ const cognitiveEngineFSM = createCognitiveEngineFSM();
 
 export interface SystemHealth {
   db: SystemStatus;
-  redis: SystemStatus;
   llm: SystemStatus;
   sync: SystemStatus;
   celery_workers: number;
@@ -102,7 +101,6 @@ export const useSystemStore = create<SystemStoreState>((set) => ({
       const merged: SystemHealth = {
         ...(state.health ?? {
           db: 'ONLINE',
-          redis: 'ONLINE',
           llm: 'ONLINE',
           sync: 'ONLINE',
           celery_workers: 0,

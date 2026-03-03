@@ -1112,3 +1112,53 @@ class CortexAPI:
             return {"error": str(ve), "status": "rejected"}
         except Exception as e:
             return {"error": str(e), "status": "failed"}
+
+    def get_topics(self):
+        """
+        GET /jarvis/topics
+        Return all root topics.
+        """
+        topics = self.graph_manager.get_root_topics()
+        return sorted(topics, key=lambda x: x["label"])
+
+    def get_intents(self, topic_id: Optional[str] = None) -> List[Dict]:
+        """
+        GET /api/intents
+        Returns all intents (optionally filtered by topic), normalized for Lifecycle Grid.
+        """
+        if topic_id:
+            # Get intents for specific topic
+            intents = self.graph_manager.get_intents_by_topic(topic_id)
+        else:
+            # Get all intents
+            intents = self.graph_manager.get_all_intents()
+
+        results = []
+        for i in intents:
+            brick_counts = self.graph_manager.get_intent_brick_counts(i.id)
+            node_count = sum(brick_counts.values())
+            
+            # Use authoritative column
+            lifecycle = i.lifecycle.value.upper()
+            
+            results.append({
+                "id": i.id,
+                "name": i.statement[:100] + ("..." if len(i.statement) > 100 else ""),
+                "lifecycle": lifecycle,
+                "confidence": i.metadata.get("confidence", 0.0),
+                "node_count": node_count,
+                "brick_counts": brick_counts,
+                "last_updated": i.created_at.isoformat() if hasattr(i.created_at, "isoformat") else str(i.created_at)
+            })
+            
+        return results
+
+    def compile_topic(self, topic_id: str, mode: str = "SYNTHESIS"):
+        """
+        POST /jarvis/compile-topic
+        Compile a topic into an in-memory ZIP package.
+        """
+        from nexus.compiler.topic_compiler import TopicCompiler
+        compiler = TopicCompiler()
+        zip_buffer = compiler.run_in_memory(topic_id, mode=mode)
+        return zip_buffer

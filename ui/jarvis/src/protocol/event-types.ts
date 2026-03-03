@@ -102,7 +102,6 @@ export interface SystemHealthEvent
     sync: SystemStatus;
     llm: SystemStatus;
     db: SystemStatus;
-    redis: SystemStatus;
     celery_workers: number;
     last_sync: string;
   }> {

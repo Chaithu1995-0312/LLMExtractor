@@ -37,72 +37,29 @@ export default function ControlPlanePage() {
     >
       {/* ── Header strip ──────────────────────────────────────────── */}
       <div
-        style={{
-          padding: '12px 20px',
-          borderBottom: '1px solid rgba(0, 217, 255, 0.15)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          flexShrink: 0,
-          background: 'rgba(0, 217, 255, 0.02)',
-        }}
+        className="flex items-center gap-3 px-5 py-3 border-b border-white/5 bg-white/2"
       >
-        <h1
-          style={{
-            fontSize: 11,
-            fontWeight: 800,
-            letterSpacing: '0.3em',
-            color: '#00D9FF',
-            textShadow: '0 0 10px rgba(0, 217, 255, 0.4)',
-          }}
-        >
-          COGNITIVE CONTROL PLANE
+        <h1 className="text-[12px] font-black tracking-[0.2em] text-cyan-400 uppercase">
+          Cognitive Control Plane
         </h1>
-        <div
-          style={{
-            height: 12,
-            width: 1,
-            background: 'rgba(255,255,255,0.15)',
-          }}
-        />
-        <span
-          style={{
-            fontSize: 9,
-            fontWeight: 700,
-            letterSpacing: '0.15em',
-            color: 'rgba(255,255,255,0.4)',
-            textTransform: 'uppercase',
-          }}
-        >
+        <div className="h-3 w-px bg-white/10" />
+        <span className="text-[9px] font-bold tracking-widest text-white/30 uppercase">
           Nexus Instance
         </span>
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontSize: 8,
-            fontWeight: 800,
-            letterSpacing: '0.1em',
-            color: '#00D9FF',
-            background: 'rgba(0, 217, 255, 0.1)',
-            border: '1px solid rgba(0, 217, 255, 0.3)',
-            padding: '2px 8px',
-            borderRadius: 4,
-            textShadow: '0 0 5px rgba(0, 217, 255, 0.5)',
-          }}
-        >
+        <span className="ml-auto text-[8px] font-black tracking-widest text-cyan-400 bg-cyan-400/10 border border-cyan-400/30 px-2 py-1 rounded">
           V2.0.4-STABLE
         </span>
       </div>
 
       {/* ── Scrollable main body ───────────────────────────────────── */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px 10px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
         {/* Query input row */}
-        <div style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: 24 }}>
           <QueryConsole />
         </div>
 
         {/* Advanced controls (collapsible) */}
-        <div style={{ marginBottom: 14 }}>
+        <div style={{ marginBottom: 24 }}>
           <AdvancedControls />
         </div>
 
@@ -110,26 +67,26 @@ export default function ControlPlanePage() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 12,
+            gridTemplateColumns: '20% 55% 25%',
+            gap: 24,
             alignItems: 'start',
           }}
         >
           {/* Column 1: Route + Timeline */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             <RouteInspector />
             <ExecutionTimeline />
           </div>
 
           {/* Column 2: Confidence + Hybrid Conflict + Escalation */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             <ConfidencePanel />
             <HybridConflictPanel />
             <EscalationPanel />
           </div>
 
           {/* Column 3: Retrieval + Response */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             <RetrievalPanel />
             <ResponsePanel />
           </div>

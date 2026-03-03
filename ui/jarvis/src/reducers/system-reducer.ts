@@ -19,7 +19,6 @@ export function handleSystemHealth(event: SystemHealthEvent): void {
 
   store.applyHealthUpdate({
     db: payload.db,
-    redis: payload.redis,
     llm: payload.llm,
     sync: payload.sync,
     celery_workers: payload.celery_workers,
@@ -82,7 +81,6 @@ export function hydrateHealthFromApi(raw: {
 
   store.applyHealthUpdate({
     db: mapStatus(raw.db),
-    redis: mapStatus(raw.redis),
     llm: mapStatus(raw.llm),
     sync: 'ONLINE',
     celery_workers: raw.celery_workers,

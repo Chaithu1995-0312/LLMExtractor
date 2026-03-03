@@ -47,7 +47,6 @@ export function TopStatusBar() {
     { label: 'Sync Engine', status: systemState !== 'BOOTING' ? 'ACTIVE' : 'BOOTING' },
     { label: 'LLM Cognition', status: health?.llm === 'ONLINE' ? 'ONLINE' : health?.llm === 'DEGRADED' ? 'DEGRADED' : 'OFFLINE' },
     { label: 'Graph DB', status: health?.db === 'ONLINE' ? 'HEALTHY' : 'DEGRADED' },
-    { label: 'Redis Queue', status: health?.redis === 'ONLINE' ? 'ACTIVE' : 'OFFLINE' },
   ];
 
   return (

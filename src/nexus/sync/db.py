@@ -176,13 +176,23 @@ class SyncDatabase:
         Level 0 Hardening: Ensures graph consistency even on crash.
         """
         with self.db.transaction() as cur:
+            # Mapping state to lifecycle
+            state_map_literal = {
+                "IMPROVISE": "Loose",
+                "FORMING": "Forming",
+                "FINAL": "Frozen",
+                "SUPERSEDED": "Killed"
+            }
+            lifecycle = state_map_literal.get(brick["state"], "Loose")
+
             # 1. Insert/Update the new brick
             cur.execute(
                 """
                 INSERT INTO sync.bricks (
                     id, topic_id, content, fingerprint, state, 
-                    run_id, json_path, start_index, end_index, source_checksum
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    run_id, json_path, start_index, end_index, source_checksum,
+                    lifecycle
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     topic_id = EXCLUDED.topic_id,
                     content = EXCLUDED.content,
@@ -192,7 +202,8 @@ class SyncDatabase:
                     json_path = EXCLUDED.json_path,
                     start_index = EXCLUDED.start_index,
                     end_index = EXCLUDED.end_index,
-                    source_checksum = EXCLUDED.source_checksum
+                    source_checksum = EXCLUDED.source_checksum,
+                    lifecycle = EXCLUDED.lifecycle
                 """,
                 (
                     brick["id"],
@@ -204,7 +215,8 @@ class SyncDatabase:
                     brick["source_address"]["json_path"],
                     brick["source_address"]["indices"][0],
                     brick["source_address"]["indices"][1],
-                    brick["source_address"]["checksum"]
+                    brick["source_address"]["checksum"],
+                    lifecycle
                 )
             )
             
@@ -319,7 +331,8 @@ class SyncDatabase:
     def get_bricks_for_topic(self, topic_id: str) -> List[Dict]:
         rows = self.db.fetch_all("""
             SELECT id, topic_id, content, fingerprint, state, 
-                   run_id, json_path, start_index, end_index, source_checksum
+                   run_id, json_path, start_index, end_index, source_checksum,
+                   lifecycle
             FROM sync.bricks 
             WHERE topic_id = %s
             ORDER BY created_at ASC
@@ -336,7 +349,8 @@ class SyncDatabase:
                 "json_path": row[6],
                 "indices": [row[7], row[8]],
                 "checksum": row[9]
-            }
+            },
+            "lifecycle": row[10]
         } for row in rows]
 
     def truncate_sync_data(self):

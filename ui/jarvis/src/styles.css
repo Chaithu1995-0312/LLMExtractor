@@ -19,15 +19,30 @@
     --radius: 0.5rem;
   }
 
+  :root {
+    --spacing-xs: 0.5rem;   /* 8px */
+    --spacing-sm: 1rem;     /* 16px */
+    --spacing-md: 1.5rem;   /* 24px */
+    --spacing-lg: 2rem;     /* 32px */
+
+    --font-size-label: 0.75rem;   /* 12px */
+    --font-size-body: 0.875rem;    /* 14px */
+    --font-size-header: 1.125rem;  /* 18px */
+  }
+
   body {
     @apply bg-[#030609] text-slate-200 selection:bg-cyan-500/30;
     font-family: 'Inter', sans-serif;
+    font-size: var(--font-size-body);
     overflow: hidden;
   }
 
   * {
     box-sizing: border-box;
   }
+
+  h1 { font-size: var(--font-size-header); font-weight: 700; }
+  label, .text-xs { font-size: var(--font-size-label); }
 }
 
 /* ─── Holographic ring animations ─────────────────────────────── */

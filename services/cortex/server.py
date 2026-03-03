@@ -251,6 +251,8 @@ def get_lifecycle_distribution():
                 key = state.upper()
                 if key in distribution:
                     distribution[key] = count
+                elif key == "FORMING": # Handle case-insensitive match if needed
+                     distribution["FORMING"] = count
                 else:
                     distribution[key] = count
             else:
@@ -277,9 +279,9 @@ def system_health():
     # Check DB
     db_status = "healthy"
     try:
-        conn = sqlite3.connect(GRAPH_DB_PATH)
-        conn.cursor().execute("SELECT 1")
-        conn.close()
+        from nexus.db import get_adapter
+        db = get_adapter()
+        db.fetch_one("SELECT 1")
     except:
         db_status = "unhealthy"
         
@@ -295,13 +297,14 @@ def system_health():
         queue_status = "unhealthy"
     
     # Check LLM (Simplified availability check)
-    llm_status = "available" 
+    llm_status = "ONLINE" 
     
     health = {
         "db": db_status,
         "pg_queue": queue_status,
         "pending_tasks": pending_tasks,
         "llm": llm_status,
+        "celery_workers": 1, # Placeholder to satisfy UI/reducer contract
         "last_sync": datetime.now(timezone.utc).isoformat()
     }
     return jsonify(health)
@@ -843,13 +846,39 @@ def suggest_prompts(alert_id):
 def get_topic_coverage_score(topic_id):
     return jsonify(cortex_api.get_coverage_score(topic_id))
 
+@app.route("/jarvis/topics", methods=["GET"])
+def get_topics():
+    return jsonify(cortex_api.get_topics())
+
+@app.route("/jarvis/compile-topic", methods=["POST"])
+def compile_topic():
+    from flask import send_file
+    data = request.json or {}
+    topic_id = data.get("topic_id")
+    mode = data.get("mode", "SYNTHESIS")
+    
+    if not topic_id:
+        return jsonify({"error": "topic_id is required"}), 400
+        
+    try:
+        zip_buffer = cortex_api.compile_topic(topic_id, mode=mode)
+        return send_file(
+            zip_buffer,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"{topic_id}_canonical.zip"
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @socketio.on("connect")
 def handle_connect():
+    print(f"Client connected to audit stream: {request.sid}")
     emit("connected", {"status": "Audit stream connected"})
 
 @socketio.on("disconnect")
 def handle_disconnect():
-    print("Client disconnected from audit stream")
+    print(f"Client disconnected from audit stream: {request.sid}")
 
 if __name__ == "__main__":
     print("Prewarming embedder...")

@@ -212,6 +212,53 @@ export default function App() {
   const [viewMode, setViewMode] = useState<'wall' | 'graph'>('wall'); 
   const queryClient = useQueryClient();
 
+  // Topic Compiler State
+  const [selectedTopic, setSelectedTopic] = useState('');
+  const [compileMode, setCompileMode] = useState<'STRICT' | 'SYNTHESIS'>('SYNTHESIS');
+  const [isCompiling, setIsCompiling] = useState(false);
+
+  const { data: topics = [] } = useQuery({
+    queryKey: ['jarvis-topics'],
+    queryFn: async () => {
+      const res = await fetch('/jarvis/topics');
+      if (!res.ok) throw new Error('Failed to fetch topics');
+      return res.json();
+    }
+  });
+
+  const handleCompile = async () => {
+    if (!selectedTopic) return;
+    setIsCompiling(true);
+    try {
+      const res = await fetch("/jarvis/compile-topic", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          topic_id: selectedTopic,
+          mode: compileMode
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Compilation failed');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${selectedTopic}_canonical.zip`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsCompiling(false);
+    }
+  };
+
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
 
@@ -430,9 +477,74 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="h-full w-full"
+              className="h-full w-full p-6"
             >
-              <OverviewPage />
+              <div className="max-w-4xl mx-auto space-y-8">
+                <OverviewPage />
+
+                <div className="glass-panel p-6 border-white/10 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-bold tracking-tight text-white/90">Topic Compiler</h3>
+                      <p className="text-xs text-white/40 font-mono-data uppercase">Package canonical topic data</p>
+                    </div>
+                    <div className="flex bg-black/40 rounded-lg p-1 border border-white/5">
+                      <button 
+                        onClick={() => setCompileMode('STRICT')}
+                        className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${compileMode === 'STRICT' ? 'bg-primary text-white' : 'text-white/40 hover:text-white'}`}
+                      >
+                        STRICT
+                      </button>
+                      <button 
+                        onClick={() => setCompileMode('SYNTHESIS')}
+                        className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${compileMode === 'SYNTHESIS' ? 'bg-primary text-white' : 'text-white/40 hover:text-white'}`}
+                      >
+                        SYNTHESIS
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <select 
+                      value={selectedTopic} 
+                      onChange={(e) => setSelectedTopic(e.target.value)}
+                      className="flex-1 bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-sm text-white/90 focus:outline-none focus:ring-1 focus:ring-primary appearance-none"
+                    >
+                      <option value="" disabled>Select a Root Topic...</option>
+                      {topics.map((t: any) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button 
+                      onClick={handleCompile}
+                      disabled={!selectedTopic || isCompiling}
+                      className={`px-6 py-3 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 min-w-[200px] ${
+                        !selectedTopic || isCompiling 
+                        ? 'bg-white/5 text-white/20 cursor-not-allowed' 
+                        : 'bg-primary text-primary-foreground hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_20px_-5px_rgba(59,130,246,0.5)]'
+                      }`}
+                    >
+                      {isCompiling ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                          COMPILING...
+                        </>
+                      ) : (
+                        'COMPILE CANONICAL PACKAGE'
+                      )}
+                    </button>
+                  </div>
+                  
+                  {isCompiling && (
+                    <p className="text-[10px] text-center text-primary animate-pulse font-mono-data">
+                      DETERMINISTIC COMPILER ACTIVE — ENFORCING ARCHITECTURAL PURITY
+                    </p>
+                  )}
+                </div>
+              </div>
             </motion.div>
           )}
 

@@ -113,6 +113,9 @@ class GraphManager:
                 # Fail fast: embedding error prevents node creation so index stays clean.
                 raise RuntimeError(f"[GraphManager] Embedding failed for {node_id}: {emb_err}") from emb_err
 
+        # root_topic flag
+        root_topic = attrs.get("root_topic", False)
+
         # Phase 1 — DB Transaction (ACID)
         if self._is_adapter():
             with self.db.transaction() as cur:
@@ -133,8 +136,9 @@ class GraphManager:
 
     def _register_node_logic(self, cur, node_type: str, node_id: str, attrs: Dict[str, Any], merge: bool = False):
         try:
+            root_topic = attrs.get("root_topic", False)
             # Check if exists
-            cur.execute("SELECT data FROM graph.nodes WHERE id = %s", (node_id,))
+            cur.execute("SELECT data, root_topic FROM graph.nodes WHERE id = %s", (node_id,))
             row = cur.fetchone()
             
             if row:
@@ -142,15 +146,15 @@ class GraphManager:
                     existing_data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
                     existing_data.update(attrs)
                     cur.execute(
-                        "UPDATE graph.nodes SET data = %s WHERE id = %s",
-                        (json.dumps(existing_data), node_id)
+                        "UPDATE graph.nodes SET data = %s, root_topic = %s WHERE id = %s",
+                        (json.dumps(existing_data), root_topic, node_id)
                     )
                 return # Already exists or updated
             
             # Insert
             cur.execute(
-                "INSERT INTO graph.nodes (id, type, data, created_at) VALUES (%s, %s, %s, NOW())",
-                (node_id, node_type, json.dumps(attrs))
+                "INSERT INTO graph.nodes (id, type, data, root_topic, created_at) VALUES (%s, %s, %s, %s, NOW())",
+                (node_id, node_type, json.dumps(attrs), root_topic)
             )
         except Exception as e:
             print(f"Error registering node {node_id}: {e}")
@@ -1007,6 +1011,24 @@ class GraphManager:
             )
             scopes[r[0]] = s
         return scopes
+
+    def get_root_topics(self) -> List[Dict[str, Any]]:
+        """
+        Return all nodes marked as root_topic = True, sorted by label.
+        """
+        rows = self._fetch_all(
+            "SELECT id, type, data FROM graph.nodes WHERE root_topic = True"
+        )
+        topics = []
+        for r in rows:
+            data = r[2] if isinstance(r[2], dict) else json.loads(r[2] or "{}")
+            topics.append({
+                "id": r[0],
+                "type": r[1],
+                "label": data.get("name") or data.get("label") or r[0],
+                **data
+            })
+        return sorted(topics, key=lambda x: x["label"])
     
     def get_all_sources(self) -> Dict[str, Source]:
         rows = self._fetch_all("SELECT id, data, created_at FROM graph.nodes WHERE type='source'")
@@ -1127,7 +1149,7 @@ class GraphManager:
             # lifecycle into graph.nodes.
             # States NOT IN ('SUPERSEDED', 'FINAL') = {IMPROVISE, FORMING} — safe to update.
             cur.execute(
-                "UPDATE sync.bricks SET state = 'FORMING' WHERE id = %s "
+                "UPDATE sync.bricks SET state = 'FORMING', lifecycle = 'Forming' WHERE id = %s "
                 "AND state NOT IN ('SUPERSEDED', 'FINAL')",
                 (brick_id,)
             )
@@ -1144,6 +1166,41 @@ class GraphManager:
             reason="Deterministic structural match with user input",
             metadata={"brick_id": brick_id, "resolved_by": resolved_by}
         )
+
+    def get_intent_brick_counts(self, intent_id: str) -> Dict[str, int]:
+        """
+        Governance helper: Count bricks associated with an intent, grouped by lifecycle.
+        Uses DERIVED_FROM edges (Intent -> Source) where source is a brick.
+        """
+        query = """
+            SELECT n.data->>'lifecycle' as lifecycle, COUNT(*)
+            FROM graph.nodes n
+            JOIN graph.edges e ON n.id = e.target_id
+            WHERE e.source_id = %s 
+              AND e.edge_type = 'derived_from'
+              AND n.type = 'brick'
+            GROUP BY n.data->>'lifecycle'
+        """
+        rows = self._fetch_all(query, (intent_id,))
+        
+        counts = {
+            "LOOSE": 0,
+            "FORMING": 0,
+            "FROZEN": 0,
+            "CONFLICT": 0
+        }
+        
+        for r in rows:
+            lifecycle = (r[0] or "LOOSE").upper()
+            if lifecycle in counts:
+                counts[lifecycle] = int(r[1])
+            else:
+                # Map other states to reasonable categories if needed
+                if lifecycle == "KILLED":
+                    # KILLED bricks don't typically count towards intent formation
+                    pass
+                
+        return counts
 
     def get_all_nodes_raw(self) -> List[Dict]:
         """
