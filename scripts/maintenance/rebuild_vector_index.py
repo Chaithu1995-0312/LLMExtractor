@@ -41,7 +41,7 @@ def rebuild_index():
 
     # 2. Reset Index Files
     # We will create a new index in memory and overwrite
-    dimension = 384
+    dimension = 768
     new_index = faiss.IndexFlatL2(dimension)
     new_brick_ids = []
     

@@ -51,6 +51,8 @@ class CortexAPI:
         self.llm_client = LLMClient()
         self.prompt_generator = PromptGenerator(self.llm_client, self.alert_manager, self.coverage_scorer)
 
+        self.validate_vector_status()
+
         self.agent_profiles = {
             "Jarvis": "Expert in financial markets, trading, stocks, and economic analysis.",
             "Architect": "Expert in software architecture, code implementation, design patterns, and system engineering.",
@@ -466,6 +468,38 @@ class CortexAPI:
         }
         with open(self.audit_log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
+
+    def validate_vector_status(self):
+        """
+        Check if FAISS index and Postgres DB are in sync.
+        """
+        try:
+            print("[CortexAPI] Validating vector synchronization...")
+            
+            # Count DB Nodes (Embeddable types)
+            query = "SELECT COUNT(*) FROM graph.nodes WHERE type IN ('brick', 'intent', 'concept', 'source')"
+            if hasattr(self.graph_manager.db, 'fetch_one'):
+                db_count = self.graph_manager.db.fetch_one(query)[0]
+            else:
+                self.graph_manager.db.execute(query)
+                db_count = self.graph_manager.db.fetchone()[0]
+
+            # Count FAISS Vectors
+            if self.graph_manager.vector_store and self.graph_manager.vector_store.index:
+                faiss_count = self.graph_manager.vector_store.index.ntotal
+            else:
+                faiss_count = 0
+                
+            print(f"[CortexAPI] Status: DB Nodes={db_count}, Vector Index={faiss_count}")
+            
+            if abs(db_count - faiss_count) > 0:
+                print(f"⚠️ [WARNING] Vector mismatch detected! Missing {db_count - faiss_count} vectors.")
+                print("Suggestion: Run scripts/rebuild_vector_index.py or restart server to trigger auto-hydration.")
+            else:
+                print("[CortexAPI] ✅ Vector store is fully synchronized.")
+
+        except Exception as e:
+            print(f"[CortexAPI] Validation failed: {e}")
 
     # --- Governance / Coverage API Methods ---
 

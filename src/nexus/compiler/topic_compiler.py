@@ -2,7 +2,7 @@ import json
 import os
 import hashlib
 import re
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from nexus.graph.manager import GraphManager
 from nexus.compiler.conflict_resolver import ConflictResolver
 from nexus.compiler.packaging import ZipPackager
@@ -171,15 +171,6 @@ class TopicCompiler:
         """
         Synthesizes documents with LLM and enforces Synthesis Guard Rules.
         """
-        # In this minimal patch, we simulate LLM synthesis call.
-        # In production, this would call self.graph_manager.llm_service.generate()
-        
-        # Simulate LLM response for validation demonstration
-        # A valid paragraph must have [brick_id: XXXXX]
-        
-        # For the purpose of the patch, we will call _assemble_documents which generates valid tags,
-        # but we add the validation logic here as requested.
-        
         docs = self._assemble_documents(bricks, "SYNTHESIS", conflicts)
         
         for doc in docs:
@@ -194,7 +185,6 @@ class TopicCompiler:
                     raise SynthesisGuardException(f"Paragraph missing brick reference: {p[:50]}...")
                 
                 # b) No entities introduced that do not exist in bricks (Simplified check)
-                # We check if any ID cited actually exists in our brick list
                 citations = re.findall(r"\[brick_id: ([a-zA-Z0-9_\-]+)\]", p)
                 valid_ids = {b["id"] for b in bricks}
                 for cite in citations:
@@ -206,7 +196,7 @@ class TopicCompiler:
     def _assemble_documents(self, bricks: List[Dict], mode: str, conflicts: List[Dict] = None) -> List[Dict]:
         """
         Deterministic Document Assembly.
-        Strict Mode disables LLM synthesis.
+        Intent-Aware: Bricks are grouped by Intent within each section.
         """
         # Group bricks into 8 virtual documents as per TOPIC_OVERVIEW
         doc_titles = [
@@ -218,12 +208,24 @@ class TopicCompiler:
         # Sort bricks for determinism
         sorted_bricks = sorted(bricks, key=lambda x: x["id"])
         
+        # Fetch Intent Names for grouping
+        intent_ids = list(set(b.get("intent_id") for b in bricks if b.get("intent_id")))
+        intent_map = {}
+        if intent_ids:
+            rows = self.graph_manager._fetch_all(
+                "SELECT id, data FROM graph.nodes WHERE id = ANY(%s)",
+                (intent_ids,)
+            )
+            for i_id, i_data_raw in rows:
+                i_data = i_data_raw if isinstance(i_data_raw, dict) else json.loads(i_data_raw)
+                intent_map[i_id] = i_data.get("name") or i_id
+
         # Round-robin distribution for demo purposes in Phase 2
         for i, title in enumerate(doc_titles):
             doc_bricks = sorted_bricks[i::8]
             content = f"# {title}\n\n"
             
-            # Patch 1: Inject Multi-Frozen Conflict section in the first doc (Overview) or a specific doc
+            # Inject Multi-Frozen Conflict section in the first doc (Overview)
             if i == 0 and conflicts:
                 for conflict in conflicts:
                     if conflict["type"] == "MULTI_FROZEN":
@@ -236,9 +238,21 @@ class TopicCompiler:
             if not doc_bricks:
                 content += "No data available for this section.\n"
             else:
+                # Group by Intent
+                bricks_by_intent = {}
                 for b in doc_bricks:
-                    text = b.get("statement") or b.get("content") or ""
-                    content += f"{text} [brick_id: {b['id']}]\n\n"
+                    i_id = b.get("intent_id", "unknown")
+                    if i_id not in bricks_by_intent:
+                        bricks_by_intent[i_id] = []
+                    bricks_by_intent[i_id].append(b)
+                
+                for i_id, i_bricks in sorted(bricks_by_intent.items()):
+                    if i_id != "unknown":
+                        content += f"## Intent: {intent_map.get(i_id, i_id)}\n\n"
+                    
+                    for b in i_bricks:
+                        text = b.get("statement") or b.get("content") or ""
+                        content += f"{text} [brick_id: {b['id']}]\n\n"
                 
                 content += "---\n## Footnotes\n"
                 for b in doc_bricks:

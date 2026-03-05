@@ -7,9 +7,10 @@ import uuid
 class IntentLifecycle(Enum):
     LOOSE = "loose"
     FORMING = "forming"
+    ACTIVE = "active"
     FROZEN = "frozen"
-    SUPERSEDED = "superseded"
     KILLED = "killed"
+    COMPLETED = "completed"
 
 class IntentType(Enum):
     RULE = "rule"
@@ -110,11 +111,26 @@ class ScopeNode(GraphNode):
     node_type: str = "scope"
 
 @dataclass
+class Topic(GraphNode):
+    name: str = ""
+    canonical_name: Optional[str] = None
+    embedding: Optional[List[float]] = None
+    node_type: str = "topic"
+
+@dataclass
 class Intent(GraphNode):
-    statement: str = ""
+    name: str = ""
+    summary: str = ""
     lifecycle: IntentLifecycle = IntentLifecycle.LOOSE
     intent_type: IntentType = IntentType.UNKNOWN
     node_type: str = "intent"
+
+@dataclass
+class IntentMetrics:
+    intent_id: str
+    brick_count: int = 0
+    momentum_score: float = 0.0
+    last_activity: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
 @dataclass
 class Edge:

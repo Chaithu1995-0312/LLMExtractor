@@ -12,7 +12,7 @@ class VectorStore:
     
     INDEX_FILE = "data/vector_index.faiss"
     ID_MAP_FILE = "data/vector_ids.pkl"
-    DIMENSION = 384
+    DIMENSION = 768
 
     def __new__(cls):
         if cls._instance is None:

@@ -41,6 +41,10 @@ class GraphManager:
             from nexus.vector.vector_store import VectorStore
             self.embedder = VectorEmbedder()
             self.vector_store = VectorStore()
+            
+            # OPTION B: Hydrate FAISS from Postgres on startup
+            self.load_vectors_from_postgres()
+            
         except Exception as e:
             print(f"[GraphManager] Vector layer unavailable (non-fatal): {e}")
             self.embedder = None
@@ -185,6 +189,70 @@ class GraphManager:
                 )
             except Exception:
                 pass  # Audit failure must not disrupt caller
+
+    def load_vectors_from_postgres(self):
+        """
+        Hydrate the FAISS index from the graph.vector_meta table on startup.
+        This bridges the gap between sync_agent (Postgres) and GraphManager (FAISS).
+        """
+        if not self.vector_store:
+            return
+
+        print("[GraphManager] Hydrating FAISS index from Postgres graph.vector_meta...")
+        try:
+            # Check if table exists
+            if self._is_adapter():
+                exists = self.db.fetch_one("SELECT to_regclass('graph.vector_meta')")
+            else:
+                self.db.execute("SELECT to_regclass('graph.vector_meta')")
+                exists = self.db.fetchone()
+                
+            if not exists or not exists[0]:
+                print("[GraphManager] graph.vector_meta table not found. Skipping hydration.")
+                return
+
+            # Fetch all vectors not in FAISS (optimization: fetch all for now to be safe/simple)
+            # vector_meta has: node_id, embedding (vector string/array)
+            # Postgres 'vector' type returns as string "[0.1, 0.2, ...]" or list depending on adapter
+            query = "SELECT node_id, embedding FROM graph.vector_meta"
+            if self._is_adapter():
+                rows = self.db.fetch_all(query)
+            else:
+                self.db.execute(query)
+                rows = self.db.fetchall()
+
+            added_count = 0
+            for r in rows:
+                node_id = r[0]
+                embedding_raw = r[1]
+                
+                # Parse embedding
+                if isinstance(embedding_raw, str):
+                    embedding = json.loads(embedding_raw)
+                elif isinstance(embedding_raw, list):
+                    embedding = embedding_raw
+                elif isinstance(embedding_raw, np.ndarray):
+                    embedding = embedding_raw.tolist()
+                else:
+                    continue
+
+                # Add to FAISS if not exists
+                if not self.vector_store.exists(node_id):
+                    vec_np = np.array(embedding, dtype="float32")
+                    try:
+                        self.vector_store.add(node_id, vec_np)
+                        added_count += 1
+                    except Exception as e:
+                        print(f"Failed to add vector for {node_id}: {e}")
+
+            if added_count > 0:
+                self.vector_store.save()
+                print(f"[GraphManager] Hydrated {added_count} vectors from Postgres.")
+            else:
+                print("[GraphManager] FAISS index up to date with Postgres.")
+
+        except Exception as e:
+            print(f"[GraphManager] Failed to hydrate vectors from Postgres: {e}")
 
     def semantic_query(
         self,
@@ -410,7 +478,8 @@ class GraphManager:
             i = Intent(
                 id=r[0],
                 created_at=r[2],
-                statement=data.get("statement", ""),
+                name=data.get("name", ""),
+                summary=data.get("summary", ""),
                 lifecycle=IntentLifecycle(data.get("lifecycle", "loose")),
                 intent_type=IntentType(data.get("intent_type", "unknown")),
                 metadata=data.get("metadata", {})
@@ -501,7 +570,8 @@ class GraphManager:
     # Typed helpers for new Schema
     def add_intent(self, intent: Intent):
         data = {
-            "statement": intent.statement,
+            "name": intent.name,
+            "summary": intent.summary,
             "lifecycle": intent.lifecycle.value,
             "intent_type": intent.intent_type.value,
             "metadata": intent.metadata
@@ -953,11 +1023,12 @@ class GraphManager:
         
         intents = []
         for r in rows:
-            data = json.loads(r[1])
+            data = r[1] if isinstance(r[1], dict) else json.loads(r[1])
             i = Intent(
                 id=r[0],
                 created_at=r[2],
-                statement=data.get("statement", ""),
+                name=data.get("name", ""),
+                summary=data.get("summary", ""),
                 lifecycle=IntentLifecycle(data.get("lifecycle", "loose")),
                 intent_type=IntentType(data.get("intent_type", "unknown")),
                 metadata=data.get("metadata", {})
