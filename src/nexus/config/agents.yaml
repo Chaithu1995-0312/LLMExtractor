@@ -1,0 +1,195 @@
+# Nexus Agents Configuration
+# Centralized configuration for all LLM Agents in the system.
+
+schema_version: 1
+
+system:
+  environment: development
+  max_parallel_tasks: 8
+
+# Global LLM Provider Routing (Control Plane)
+llm_router:
+  providers:
+    local:
+      engine: ollama
+      host: "http://127.0.0.1:11434"
+    flash:
+      tier: L2
+      provider: openai
+      model: gpt-4o-mini
+    pro:
+      tier: L3
+      provider: openai
+      model: gpt-4o
+  timeout_seconds: 30
+  retry_attempts: 2
+  rate_limits:
+    flash: 60 # requests per minute
+    pro: 20   # requests per minute
+  circuit_breaker:
+    failure_threshold: 5
+    cooldown_seconds: 60
+
+# Observability & Telemetry
+observability:
+  metrics: true
+  trace_llm_calls: true
+  track_tokens: true
+  log_level: info
+
+# Decision Cache Configuration (Recommended Upgrade)
+decision_cache:
+  enabled: true
+  backend: postgres
+  similarity_threshold: 0.92
+  ttl_hours: 168 # 7 days
+
+# Embedding Service (Unified Vector Space)
+embedding_service:
+  # Unified Architecture: text-embedding-3-small (1536)
+  default_model: text-embedding-3-small
+  dimension: 1536
+  provider_priority:
+    - openai
+    - ollama
+  
+  # Migration Status:
+  # - Memory Layer: Migrated to 1536 (OpenAI)
+  # - Backfill Engine: Confirmed 1536 (OpenAI)
+  # - Legacy vectors (768) are being deprecated via dual-index migration.
+
+# Global Defaults for Agents
+defaults:
+  provider: llm_client
+  timeout: 60
+  cost_tolerance: zero
+
+# Agent Registry
+agents:
+  topic_router:
+    version: 1
+    description: "Disambiguates topic assignment when keyword scoring is ambiguous."
+    capabilities: ["classification", "reasoning"]
+    strategies:
+      disambiguation:
+        l2_model: "flash"  # mapped to cost_tolerance="low"
+        l3_model: "pro"    # mapped to cost_tolerance="high"
+        min_confidence: 0.60
+        max_bricks_context: 5
+        max_chars_per_brick: 500
+    system_prompt: |
+      You are a topic classifier for the Nexus knowledge system.
+      Your job is to classify content into one of the defined topics.
+      Return ONLY valid JSON. No explanation. No markdown.
+
+  l23_linker:
+    version: 1
+    description: "Discovers hidden connections between new bricks and existing intents."
+    capabilities: ["reasoning", "synthesis"]
+    intent_class: "DEEP_SYNTHESIS"
+    cost_tolerance: "low" # Uses Flash/L2
+    batch_size: 20
+    system_prompt: |
+      You are the Nexus Cognitive Linker (L2.3). Your goal is to find non-obvious connections between a new thought and existing projects.
+      Think creatively. Connections can be functional, philosophical, or strategic.
+      Output strictly JSON: {"links": [{"target_id": "...", "reason": "...", "confidence": 0.0-1.0}]}
+
+  escalation_router:
+    version: 1
+    description: "Routes cognitive requests based on budget pressure and confidence."
+    capabilities: ["routing"]
+    tiers:
+      l1_local:
+        cost_tolerance: "zero"
+        intent_class: "USER_EXPLAIN"
+      l2_flash:
+        cost_tolerance: "low"
+        intent_class: "USER_EXPLAIN" # or DEEP_SYNTHESIS depending on task
+      l3_pro:
+        cost_tolerance: "high"
+        intent_class: "DEEP_SYNTHESIS"
+
+  coverage_sentinel:
+    version: 1
+    description: "Detects structural weaknesses in knowledge topics."
+    capabilities: ["analysis", "quality_control"]
+    intent_class: "COVERAGE_ANALYSIS"
+    history_size: 100
+    system_prompt: |
+      You are CoverageSentinel.
+      Your role is to detect structural weaknesses in a knowledge topic.
+      You do NOT create facts.
+      You do NOT rewrite content.
+      You do NOT answer user questions.
+      You only observe and report.
+      Rules:
+      - Be conservative but firm on declarations.
+      - Never hallucinate missing content.
+      - Output MUST be valid JSON only.
+
+  prompt_generator:
+    version: 1
+    description: "Generates ingestion questions to fill knowledge gaps."
+    capabilities: ["generation"]
+    intent_class: "INGEST_REWRITE"
+    cooldown_hours: 48
+    system_prompt: |
+      You are an ingestion prompt generator.
+      Your job is to generate precise, neutral questions
+      that would help fill known knowledge gaps.
+      Rules:
+      - Do NOT answer the questions.
+      - Do NOT speculate.
+      - Prefer factual, operational wording.
+      - Output JSON only.
+
+  llm_reranker:
+    version: 1
+    description: "Re-ranks search candidates by relevance using local LLM."
+    capabilities: ["ranking"]
+    provider: "llama_cpp"
+    model_path: "models/llama-3-8b-quantized.gguf"
+    context_window: 2048
+    timeout_ms: 500
+    generation_params:
+      max_tokens: 6
+      temperature: 0.0
+      stop: ["\n"]
+    prompt_template: |
+      Query: {query}
+      Text: {text}
+      Rate relevance (0.0-1.0):
+
+  memory_embedder:
+    version: 2
+    description: "Generates vector embeddings for memory items (Unified)."
+    capabilities: ["embedding"]
+    provider: "openai"
+    model: "text-embedding-3-small"
+    endpoint: "https://api.openai.com/v1"
+    dimension: 1536
+    max_retries: 3
+    request_timeout: 30
+
+  vector_backfill:
+    version: 1
+    description: "Backfills embeddings for graph nodes (cloud)."
+    capabilities: ["embedding"]
+    provider: "openai"
+    model: "text-embedding-3-small"
+    dimension: 1536
+    batch_size: 50
+    max_retries: 3
+
+  structured_ingest:
+    version: 1
+    description: "Extracts structured data from raw text during ingestion."
+    capabilities: ["extraction"]
+    provider: "ollama" # via llama_index
+    model: "phi3:latest" # or from env LOCAL_LLM_MODEL
+    parameters:
+      temperature: 0.0
+      num_ctx: 1024
+      num_thread: 2
+      num_predict: 256
+    timeout: 600.0

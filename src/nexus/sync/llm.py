@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from llama_index.llms.ollama import Ollama
 import urllib.request
 import urllib.error
+from nexus.config import get_agent_config
+from nexus.cache.decision_cache import get_decision_cache
 
 # --- TYPES ---
 
@@ -126,6 +128,24 @@ class LLMClient:
                 "Use StructuredIngestLLM instead."
             )
         
+        # --- DECISION CACHE START ---
+        cache = get_decision_cache()
+        # Use intent_class as agent name, and simple prompts as context
+        cache_key = cache.compute_key(
+            agent_name=intent_class, 
+            system_prompt=system_prompt, 
+            user_prompt=user_prompt
+        )
+        
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            print(f"[LLMClient] ⚡ Cache Hit for {intent_class}")
+            # Ensure we return a string, as callers expect str
+            if isinstance(cached_result, (dict, list)):
+                return json.dumps(cached_result)
+            return str(cached_result)
+        # --- DECISION CACHE END ---
+
         # Combined prompt for models that take a single string or for logging
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
         
@@ -153,17 +173,31 @@ class LLMClient:
 
         print(f"[LLMClient] Routing: {request.intent_class} -> {route.tier} ({route.provider}/{route.model})")
 
+        result = None
         if route.provider == "mock":
             # Explicit mocks are still allowed if requested via routing (e.g. intent=TEST)
-            return self._mock_response(user_prompt)
+            result = self._mock_response(user_prompt)
         
         elif route.provider == "ollama":
-            return self._call_ollama(route.model, system_prompt, user_prompt)
+            result = self._call_ollama(route.model, system_prompt, user_prompt)
             
         elif route.provider == "api":
-            return self._call_genai_api(route.model, system_prompt, user_prompt)
+            result = self._call_genai_api(route.model, system_prompt, user_prompt)
+        
+        else:
+            raise LLMRoutingError(f"Unsupported provider: {route.provider}")
 
-        raise LLMRoutingError(f"Unsupported provider: {route.provider}")
+        # --- DECISION CACHE WRITE ---
+        if result and "HARD_FAIL" not in result:
+            # Try to parse as JSON for cleaner storage if possible, else store as string
+            try:
+                json_result = json.loads(result)
+                cache.set(cache_key, intent_class, json_result)
+            except Exception:
+                cache.set(cache_key, intent_class, result)
+        # ----------------------------
+
+        return result
 
     def _call_genai_api(self, model: str, system_prompt: str, user_prompt: str) -> str:
         """
@@ -363,17 +397,23 @@ class StructuredIngestLLM:
     """
 
     def __init__(self):
-        model = os.getenv("LOCAL_LLM_MODEL", "phi3:latest")
+        self.config = get_agent_config("structured_ingest")
+        
+        # Fallback to env if not in config, or default
+        model = self.config.get("model") or os.getenv("LOCAL_LLM_MODEL", "phi3:latest")
+        
+        params = self.config.get("parameters", {})
+        timeout = self.config.get("timeout", 600.0)
 
         self._llm = Ollama(
             model=model,
-            temperature=0.0,
-            request_timeout=600.0,
-            base_url="http://127.0.0.1:11434",
+            temperature=params.get("temperature", 0.0),
+            request_timeout=timeout,
+            base_url="http://127.0.0.1:11434", # Could also be configurable, but usually standard
             additional_kwargs={
-                "num_ctx": 1024,
-                "num_thread": 2,
-                "num_predict": 256
+                "num_ctx": params.get("num_ctx", 1024),
+                "num_thread": params.get("num_thread", 2),
+                "num_predict": params.get("num_predict", 256)
             }
         )
 

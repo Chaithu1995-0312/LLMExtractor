@@ -10,6 +10,7 @@ from typing import Optional
 
 from nexus.db import get_adapter
 from services.cortex.orchestration import TaskRegistry
+from nexus.cognition.goal_engine import GoalEngine
 
 # Import task logic to trigger registration
 import services.cortex.tasks 
@@ -20,6 +21,11 @@ class PGWorker:
         self.db = get_adapter()
         # Visibility timeout: How long before a 'running' task with no lock is reclaimed
         self.visibility_timeout = timedelta(minutes=5)
+        
+        # Initialize Goal Engine
+        self.goal_engine = GoalEngine(db_adapter=self.db)
+        self.last_goal_cycle = 0
+        self.goal_interval = 10 # Seconds
 
     # ------------------------------------------------------------------
     # Heartbeat — keeps locked_at fresh for long-running LLM tasks
@@ -238,10 +244,24 @@ class PGWorker:
         except Exception as e:
             print(f"[{self.worker_id}] WARN: Janitor sweep failed: {e}")
 
+    def _run_goal_cycle(self):
+        """Runs the goal engine cycle periodically."""
+        now = time.time()
+        if now - self.last_goal_cycle > self.goal_interval:
+            try:
+                self.goal_engine.run_cycle()
+                self.last_goal_cycle = now
+            except Exception as e:
+                print(f"[{self.worker_id}] Goal Engine cycle failed: {e}")
+
     def serve(self, interval: float = 1.0):
         print(f"[{self.worker_id}] Nexus Hardened L3 Worker Started (Postgres Queue)")
         try:
             while True:
+                # 1. Run Goal Engine (Periodically)
+                self._run_goal_cycle()
+
+                # 2. Run Task Execution
                 if not self.run_once():
                     self._cleanup_stalled_tasks()
                     time.sleep(interval)

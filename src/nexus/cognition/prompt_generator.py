@@ -6,12 +6,14 @@ from typing import Dict, Any, Optional
 from nexus.sync.llm import LLMClient
 from nexus.governance.alert_manager import AlertManager
 from nexus.cognition.coverage_scorer import CoverageScorer
+from nexus.config import get_agent_config
 
 class PromptGenerator:
     def __init__(self, llm_client: LLMClient, alert_manager: AlertManager, coverage_scorer: CoverageScorer):
         self.llm_client = llm_client
         self.alert_manager = alert_manager
         self.coverage_scorer = coverage_scorer
+        self.config = get_agent_config("prompt_generator")
 
     def generate_prompts(self, alert_id: str, actor: str) -> Dict[str, Any]:
         """
@@ -75,10 +77,11 @@ class PromptGenerator:
             last_attempt = attempts[0]
             # timestamp format: iso8601
             last_time = datetime.fromisoformat(last_attempt['attempted_at'].replace("Z", "+00:00"))
-            if datetime.now(timezone.utc) - last_time < timedelta(hours=48):
+            cooldown_hours = self.config.get("cooldown_hours", 48)
+            if datetime.now(timezone.utc) - last_time < timedelta(hours=cooldown_hours):
                  # Check if bricks were created? We don't track that connection easily yet.
                  # Assuming cooldown applies regardless for now as a safe default.
-                 return {"success": False, "reason": "Recent prompt attempt within 48h", "prompts": []}
+                 return {"success": False, "reason": f"Recent prompt attempt within {cooldown_hours}h", "prompts": []}
 
         # Rule 6: Deferred
         # We don't have a specific deferred flag in DB yet, skipping this check or assuming checked via state/metadata.
@@ -89,7 +92,7 @@ class PromptGenerator:
              # Fallback if we can't find specific missing questions
              missing = [alert['summary']]
 
-        system_prompt = """You are an ingestion prompt generator.
+        system_prompt = self.config.get("system_prompt", """You are an ingestion prompt generator.
 
 Your job is to generate precise, neutral questions
 that would help fill known knowledge gaps.
@@ -110,7 +113,7 @@ Output Schema:
     }
   ]
 }
-"""
+""")
         user_prompt = f"""
 Topic: {topic_id}
 
@@ -121,11 +124,14 @@ Generate 3-5 ingestion prompts that, if answered,
 would resolve these gaps.
 """
         try:
+            intent_class = self.config.get("intent_class", "INGEST_REWRITE")
+            cost_tolerance = self.config.get("cost_tolerance", "zero")
+
             response = self.llm_client.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                intent_class="INGEST_REWRITE", # Using REWRITE as close proxy for generation
-                cost_tolerance="zero",
+                intent_class=intent_class,
+                cost_tolerance=cost_tolerance,
                 user_visible=False
             )
             

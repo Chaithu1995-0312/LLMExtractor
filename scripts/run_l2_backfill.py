@@ -21,6 +21,20 @@ import hashlib
 from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
+# Audit hook (non-breaking — import failure disables hook silently)
+# ---------------------------------------------------------------------------
+_REPO_ROOT_L2 = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT_L2 not in sys.path:
+    sys.path.insert(0, _REPO_ROOT_L2)
+
+try:
+    from validation.checks.l2_validator import L2Validator as _L2Validator
+    _L2_AUDIT_ENABLED = True
+except ImportError:
+    _L2Validator = None
+    _L2_AUDIT_ENABLED = False
+
+# ---------------------------------------------------------------------------
 # Path bootstrap
 # ---------------------------------------------------------------------------
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -88,12 +102,29 @@ def run_state_driven_backfill(database_url: str, openai_api_key: str, batch_size
     1. Fetches nodes with status='L1_COMPLETE'
     2. Runs embedding generation
     3. Updates status='L2_COMPLETE'
+
+    Audit hook (non-breaking):
+      - L2Validator.validate_brick() is called before each brick is saved.
+      - Invalid bricks (empty content, missing id) are logged and skipped.
+      - Validation errors never stop the processing loop.
     """
     logger = logging.getLogger("l2_state_runner")
-    
+
+    # ── Open L2 audit validator (non-fatal if unavailable) ──────────────
+    l2_validator = None
+    if _L2_AUDIT_ENABLED:
+        try:
+            l2_validator = _L2Validator(batch_id=f"l2-backfill-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}")
+            l2_validator._open_db()
+            l2_validator.log("L2_BACKFILL_START", {"batch_size": batch_size})
+        except Exception as _ve:
+            logger.warning(f"L2 audit validator init failed (non-fatal): {_ve}")
+            l2_validator = None
+
     conn = psycopg2.connect(database_url)
     total_processed = 0
-    
+    total_skipped_invalid = 0
+
     try:
         while True:
             with conn.cursor() as cur:
@@ -129,6 +160,16 @@ def run_state_driven_backfill(database_url: str, openai_api_key: str, batch_size
                             cur.execute("UPDATE graph.nodes SET status = 'L2_COMPLETE', l2_completed_at = NOW() WHERE id = %s", (node_id,))
                             continue
 
+                        # ── Audit: validate brick before saving ──────────
+                        brick_dict = {"id": node_id, "content": text}
+                        if l2_validator and not l2_validator.validate_brick(brick_dict):
+                            logger.warning(f"[L2Audit] Invalid brick {node_id} — skipping save, marking skipped")
+                            total_skipped_invalid += 1
+                            # Do NOT save invalid brick; continue to next node
+                            # (still mark L2_COMPLETE so it doesn't loop forever)
+                            cur.execute("UPDATE graph.nodes SET status = 'L2_COMPLETE', l2_completed_at = NOW() WHERE id = %s", (node_id,))
+                            continue
+
                         # Generate Embedding
                         vector = generate_openai_embedding(text, openai_api_key)
                         
@@ -158,12 +199,33 @@ def run_state_driven_backfill(database_url: str, openai_api_key: str, batch_size
                         
                     except Exception as e:
                         logger.error(f"Failed to process node {node_id}: {e}")
+                        # Log to audit trail (non-fatal)
+                        if l2_validator:
+                            try:
+                                l2_validator.log_error("PROCESSING_ERROR", e, {"node_id": node_id})
+                            except Exception:
+                                pass
                         
-                conn.commit()
-                
+            conn.commit()
+            
     finally:
         conn.close()
-        
+        # ── Close audit validator ────────────────────────────────────────
+        if l2_validator:
+            try:
+                l2_validator.log(
+                    "L2_BACKFILL_COMPLETE",
+                    {
+                        "total_processed": total_processed,
+                        "total_skipped_invalid": total_skipped_invalid,
+                        **l2_validator.invalid_brick_summary(),
+                    },
+                    status="ok" if total_skipped_invalid == 0 else "warn",
+                )
+                l2_validator._close_db()
+            except Exception:
+                pass
+
     return total_processed
 
 # ---------------------------------------------------------------------------

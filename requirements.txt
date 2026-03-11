@@ -1,0 +1,71 @@
+# =============================================================================
+# Nexus Cognitive Pipeline — Requirements
+# =============================================================================
+# Install: pip install -r requirements.txt
+#
+# Sections:
+#   1. Core DB / infra (already used across the codebase)
+#   2. LLM / embedding
+#   3. Vector store
+#   4. API / serving
+#   5. Validation & Audit framework  ← NEW (added with validation/)
+#   6. Dev / test utilities
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. Core DB / infrastructure
+# -----------------------------------------------------------------------------
+psycopg2-binary>=2.9.9          # PostgreSQL adapter (used everywhere)
+python-dotenv>=1.0.0            # .env loading (all scripts)
+
+# -----------------------------------------------------------------------------
+# 2. LLM / embedding
+# -----------------------------------------------------------------------------
+openai>=1.14.0                  # OpenAI API (L2 embeddings, GPT calls)
+tiktoken>=0.6.0                 # Token counting
+
+# -----------------------------------------------------------------------------
+# 3. Vector store / ML
+# -----------------------------------------------------------------------------
+faiss-cpu>=1.8.0                # FAISS vector index
+numpy>=1.26.0                   # Numerical arrays
+sentence-transformers>=3.0.0    # Local sentence embeddings (VectorEmbedder)
+
+# -----------------------------------------------------------------------------
+# 4. API / serving
+# -----------------------------------------------------------------------------
+flask>=3.0.0                    # Cortex API server
+flask-socketio>=5.3.6           # Real-time pulse events
+
+# -----------------------------------------------------------------------------
+# 5. Ingestion / parsing
+# -----------------------------------------------------------------------------
+unstructured>=0.13.0            # Document parsing (optional — for ingestion)
+
+# -----------------------------------------------------------------------------
+# 6. Task queue / background workers
+# -----------------------------------------------------------------------------
+celery>=5.3.6                   # Task queue (if used)
+redis>=5.0.3                    # Redis broker/cache
+
+# -----------------------------------------------------------------------------
+# 7. Validation & Audit framework  ← NEW
+# -----------------------------------------------------------------------------
+# All validation/ modules use only stdlib + psycopg2 + python-dotenv (already
+# listed above). No additional packages required for the core framework.
+#
+# Optional: tabulate for pretty-printing audit tables in the terminal
+tabulate>=0.9.0                 # Table formatting for audit report CLI output
+#
+# TODO: PDF report generation (currently JSON only)
+# reportlab>=4.0.0              # PDF generation — uncomment when implementing
+# weasyprint>=60.0              # HTML→PDF alternative
+#
+# TODO: Security — for future read-only audit DB credential management
+# cryptography>=42.0.0          # Secret encryption utilities
+
+# -----------------------------------------------------------------------------
+# 8. Dev / test utilities
+# -----------------------------------------------------------------------------
+pytest>=8.0.0                   # Test runner
+pytest-asyncio>=0.23.0          # Async test support

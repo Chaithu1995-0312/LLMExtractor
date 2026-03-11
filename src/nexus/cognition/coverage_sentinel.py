@@ -7,10 +7,19 @@ from collections import deque
 
 from nexus.sync.llm import LLMClient
 from nexus.graph.schema import AuditEventType, DecisionAction
+from nexus.config import get_agent_config
+from nexus.cognition.goal_engine import GoalEngine
 
 class CoverageSentinel:
     def __init__(self, llm_client: LLMClient, history_size: int = 100):
         self.llm_client = llm_client
+        self.config = get_agent_config("coverage_sentinel")
+        self.goal_engine = GoalEngine() # Uses default db adapter
+        
+        # Override history size if config specifies it and default was passed
+        if history_size == 100 and "history_size" in self.config:
+             history_size = self.config["history_size"]
+             
         self.recent_fingerprints = deque(maxlen=history_size)
 
     def analyze_topic(self, topic_id: str, bricks: List[Dict[str, Any]], intents: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
@@ -28,7 +37,7 @@ class CoverageSentinel:
         if intents:
             intent_text = "\n".join([f"{i['id']}: {i.get('statement', '')}" for i in intents])
 
-        system_prompt = """You are CoverageSentinel.
+        system_prompt = self.config.get("system_prompt", """You are CoverageSentinel.
 
 Your role is to detect structural weaknesses in a knowledge topic.
 You do NOT create facts.
@@ -75,7 +84,7 @@ Schema for Alert Object:
 }
 
 Output a JSON object with a key "alerts" containing a list of these objects.
-"""
+""")
 
         user_prompt = f"""
 Topic: {topic_id}
@@ -89,11 +98,14 @@ Intents (optional):
 
         # Call LLM (L1 Local)
         try:
+            intent_class = self.config.get("intent_class", "COVERAGE_ANALYSIS")
+            cost_tolerance = self.config.get("cost_tolerance", "zero")
+
             response = self.llm_client.generate(
                 system_prompt=system_prompt, 
                 user_prompt=user_prompt, 
-                intent_class="COVERAGE_ANALYSIS", 
-                cost_tolerance="zero",
+                intent_class=intent_class, 
+                cost_tolerance=cost_tolerance,
                 user_visible=False
             )
             
@@ -122,6 +134,9 @@ Intents (optional):
                 else:
                     alert["is_duplicate"] = False
                     self.recent_fingerprints.append(fingerprint)
+
+                    # SELF-REPAIR: If a critical gap is found, create a goal
+                    self._trigger_repair_goal(alert)
                 
                 processed_alerts.append(alert)
             
@@ -130,6 +145,39 @@ Intents (optional):
         except Exception as e:
             print(f"[CoverageSentinel] Analysis failed: {e}")
             return []
+
+    def _trigger_repair_goal(self, alert: Dict[str, Any]):
+        """
+        Creates a goal in the Goal Engine if the alert warrants intervention.
+        """
+        alert_type = alert.get("type")
+        severity = alert.get("severity")
+        
+        # Only act on non-duplicate, actionable alerts
+        if alert.get("is_duplicate"):
+            return
+
+        target_types = ["COVERAGE_GAP", "LOW_SIGNAL_TOPIC", "ANALYSIS_WITHOUT_DECLARATION"]
+        
+        if alert_type in target_types:
+            topic_id = alert.get("topic_id")
+            details = alert.get("details", {})
+            summary = details.get("summary", "Unknown Issue")
+            
+            description = f"Resolve {alert_type} in topic {topic_id}: {summary}"
+            
+            print(f"[CoverageSentinel] Auto-creating goal for {alert_type}")
+            
+            self.goal_engine.create_goal(
+                description=description,
+                priority=10 if severity == 'critical' else 5,
+                metadata={
+                    "source": "CoverageSentinel",
+                    "alert_id": alert.get("alert_id"),
+                    "topic_id": topic_id,
+                    "alert_details": details
+                }
+            )
 
     def _generate_fingerprint(self, alert: Dict[str, Any]) -> str:
         """

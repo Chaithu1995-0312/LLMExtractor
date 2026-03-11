@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from nexus.db import get_adapter
 from nexus.sync.llm import LLMClient
 from nexus.graph.schema import EdgeType
+from nexus.config import get_agent_config
 
 class L23Linker:
     """
@@ -12,11 +13,14 @@ class L23Linker:
     def __init__(self):
         self.db = get_adapter()
         self.llm = LLMClient()
+        self.config = get_agent_config("l23_linker")
 
     def run_discovery_cycle(self, batch_size: int = 20):
         """
         Runs one cycle of generative linking on unprocessed bricks.
         """
+        # Allow config override for batch size if not explicitly passed (though strictly batch_size is arg)
+        # We'll respect the argument.
         print(f"[L2.3] Starting Generative Discovery cycle (batch_size: {batch_size})...")
         
         # 1. Fetch unprocessed bricks (those without 'linking_processed' tag)
@@ -46,11 +50,11 @@ class L23Linker:
             content = b_data.get("statement") or b_data.get("content")
             
             # Generative Linking Prompt
-            system_prompt = (
+            system_prompt = self.config.get("system_prompt", (
                 "You are the Nexus Cognitive Linker (L2.3). Your goal is to find non-obvious connections between a new thought and existing projects.\n"
                 "Think creatively. Connections can be functional, philosophical, or strategic.\n"
                 "Output strictly JSON: {\"links\": [{\"target_id\": \"...\", \"reason\": \"...\", \"confidence\": 0.0-1.0}]}"
-            )
+            ))
             
             user_prompt = f"""
             New Thought: "{content}"
@@ -63,11 +67,14 @@ class L23Linker:
             
             try:
                 # High Temperature for creative discovery
+                intent_class = self.config.get("intent_class", "DEEP_SYNTHESIS")
+                cost_tolerance = self.config.get("cost_tolerance", "low")
+
                 response_raw = self.llm.generate(
                     system_prompt, 
                     user_prompt, 
-                    intent_class="DEEP_SYNTHESIS",
-                    cost_tolerance="low" # Use gpt-4o-mini
+                    intent_class=intent_class,
+                    cost_tolerance=cost_tolerance
                 )
                 
                 # In this environment, llm.generate returns a stub if no API key

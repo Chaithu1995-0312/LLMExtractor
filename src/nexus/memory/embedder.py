@@ -1,64 +1,52 @@
 """
 nexus.memory.embedder
 =====================
-Embedding interface for the Memory Layer.
+Unified Embedding interface for the Memory Layer.
 
-Model: Ollama nomic-embed-text
-  - Produces 768-dimensional float32 vectors.
-  - Runs fully locally via the Ollama HTTP API.
-  - No sentence-transformers, no ONNX, no external cloud calls.
+Supports:
+  - OpenAI (text-embedding-3-small, 1536 dim) - PRIMARY
+  - Ollama (nomic-embed-text, 768 dim) - FALLBACK/LEGACY
 
 Invariants:
-  - MUST NOT use the GraphManager's VectorEmbedder or EmbeddingService.
-  - MUST NOT share embedding state with the graph vector layer.
-  - Embedding dimension is validated on first call and cached.
-  - Ollama unavailability raises OllamaUnavailableError (not generic Exception).
-
-Retry policy:
-  - Up to MAX_RETRIES attempts with exponential back-off.
-  - On final failure, raises — caller decides whether to skip or abort.
-
-Batch embedding:
-  - embed_batch() sends requests sequentially (Ollama /api/embed endpoint
-    does not support true batching in all versions). Controlled concurrency
-    is handled at the MemoryService level via a semaphore.
+  - Must respect `agents.yaml` configuration for provider/model.
+  - Must validate dimensions against expected values.
+  - Must handle provider failover if configured.
 """
 
 import logging
 import time
-from typing import List, Optional
+import os
+from typing import List, Optional, Any
 
 import requests
+from nexus.config import get_agent_config
 
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
-# Configuration
+# Configuration Defaults
 # --------------------------------------------------------------------------
 
-OLLAMA_BASE_URL: str = "http://localhost:11434"
-EMBED_MODEL: str = "nomic-embed-text"
-EMBED_ENDPOINT: str = f"{OLLAMA_BASE_URL}/api/embeddings"
+DEFAULT_PROVIDER = "openai"
+DEFAULT_MODEL = "text-embedding-3-small"
+DEFAULT_DIMENSION = 1536
 
-# nomic-embed-text produces 768-dimensional vectors.
-EXPECTED_DIMENSION: int = 768
+# Legacy defaults
+OLLAMA_BASE_URL = "http://localhost:11434"
 
-REQUEST_TIMEOUT: int = 30   # seconds per embedding call
-MAX_RETRIES: int = 3
-RETRY_BASE_DELAY: float = 1.0   # seconds, doubles on each retry
-
+REQUEST_TIMEOUT = 30
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 1.0
 
 # --------------------------------------------------------------------------
 # Exceptions
 # --------------------------------------------------------------------------
 
-class OllamaUnavailableError(RuntimeError):
-    """Raised when Ollama is not reachable after all retries."""
-
+class EmbedderUnavailableError(RuntimeError):
+    """Raised when the embedding provider is not reachable."""
 
 class EmbeddingDimensionError(ValueError):
     """Raised when the model returns a vector of unexpected dimensionality."""
-
 
 # --------------------------------------------------------------------------
 # Core embedder
@@ -66,29 +54,43 @@ class EmbeddingDimensionError(ValueError):
 
 class MemoryEmbedder:
     """
-    Wraps the Ollama /api/embeddings endpoint for the Memory Layer.
-
-    Thread safety: instances are NOT shared across threads. Instantiate
-    one MemoryEmbedder per worker/thread to avoid request collisions.
-
-    Usage:
-        embedder = MemoryEmbedder()
-        vector = embedder.embed("Some text here")   # -> List[float] len=768
-        batch  = embedder.embed_batch(["text1", "text2"])
+    Unified Embedder supporting OpenAI and Ollama.
     """
 
     def __init__(
         self,
-        model: str = EMBED_MODEL,
-        ollama_base_url: str = OLLAMA_BASE_URL,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
         max_retries: int = MAX_RETRIES,
         request_timeout: int = REQUEST_TIMEOUT,
     ):
-        self.model = model
-        self.endpoint = f"{ollama_base_url}/api/embeddings"
+        self.config = get_agent_config("memory_embedder") or {}
+        
+        # Resolve Configuration
+        self.provider = provider or self.config.get("provider", DEFAULT_PROVIDER)
+        self.model = model or self.config.get("model", DEFAULT_MODEL)
+        self.expected_dimension = self.config.get("dimension", DEFAULT_DIMENSION)
+        
         self.max_retries = max_retries
         self.request_timeout = request_timeout
+        self.ollama_base_url = os.getenv("OLLAMA_HOST", OLLAMA_BASE_URL)
+        
+        self._openai_client = None
         self._validated_dimension: Optional[int] = None
+        
+        # API Key check for OpenAI
+        if self.provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+            logger.warning("[MemoryEmbedder] OpenAI provider selected but OPENAI_API_KEY not found. Fallback to Ollama?")
+            # We don't auto-fallback here to avoid silent degradation, but we log it.
+
+    def _get_openai_client(self):
+        if self._openai_client is None:
+            from openai import OpenAI
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise EmbedderUnavailableError("OPENAI_API_KEY not set in environment.")
+            self._openai_client = OpenAI(api_key=api_key)
+        return self._openai_client
 
     # ------------------------------------------------------------------
     # Public interface
@@ -97,13 +99,6 @@ class MemoryEmbedder:
     def embed(self, text: str) -> List[float]:
         """
         Embed a single text string.
-
-        Returns:
-            List[float] of length EXPECTED_DIMENSION (768).
-
-        Raises:
-            OllamaUnavailableError: if Ollama is unreachable after retries.
-            EmbeddingDimensionError: if returned vector dimension is wrong.
         """
         if not text or not text.strip():
             raise ValueError("Cannot embed empty text.")
@@ -114,136 +109,117 @@ class MemoryEmbedder:
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
         """
-        Embed a list of texts sequentially.
-
-        Skips blank strings (returns empty list placeholder at that index).
-        On per-text failure (after retries), raises immediately — partial
-        results are not returned, preserving batch atomicity.
-
-        Returns:
-            List of float vectors, one per input text, preserving order.
+        Embed a list of texts. 
+        OpenAI supports true batching; Ollama is sequential.
         """
-        results: List[List[float]] = []
-        for idx, text in enumerate(texts):
-            if not text or not text.strip():
-                logger.warning("[MemoryEmbedder] Empty text at batch index %d — skipping.", idx)
-                results.append([])
-                continue
-            vector = self.embed(text)
-            results.append(vector)
-        return results
+        if not texts:
+            return []
+            
+        # Filter empty strings to preserve index alignment
+        valid_indices = [i for i, t in enumerate(texts) if t and t.strip()]
+        valid_texts = [texts[i] for i in valid_indices]
+        
+        if not valid_texts:
+            return [[] for _ in texts]
 
-    def check_availability(self) -> bool:
-        """
-        Probe Ollama to confirm nomic-embed-text is available.
-        Returns True if a test embedding succeeds, False otherwise.
-        Does not raise.
-        """
         try:
-            vec = self._post_embed("hello")
-            return len(vec) > 0
-        except Exception as exc:
-            logger.warning("[MemoryEmbedder] Availability check failed: %s", exc)
-            return False
+            vectors = []
+            if self.provider == "openai":
+                vectors = self._embed_batch_openai(valid_texts)
+            else:
+                # Ollama sequential fallback
+                for text in valid_texts:
+                    vectors.append(self.embed(text))
+            
+            # Reconstruct result list with empty placeholders
+            results = []
+            ptr = 0
+            for i in range(len(texts)):
+                if i in valid_indices:
+                    results.append(vectors[ptr])
+                    ptr += 1
+                else:
+                    results.append([]) # Zero vector or empty list? Interface says List[float]
+                    # Actually typically downstream handles empty/zero. 
+                    # Existing impl returned empty list for empty text.
+            return results
 
-    @property
-    def dimension(self) -> int:
-        """Return the validated embedding dimension (768 for nomic-embed-text)."""
-        return self._validated_dimension or EXPECTED_DIMENSION
+        except Exception as e:
+            logger.error(f"[MemoryEmbedder] Batch embedding failed: {e}")
+            raise
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Internal Implementation
     # ------------------------------------------------------------------
 
     def _call_with_retry(self, text: str) -> List[float]:
-        """
-        POST to Ollama with exponential back-off retry.
-
-        Raises OllamaUnavailableError after max_retries failures.
-        """
-        last_exc: Optional[Exception] = None
+        last_exc = None
         delay = RETRY_BASE_DELAY
 
         for attempt in range(1, self.max_retries + 1):
             try:
-                return self._post_embed(text)
-            except requests.exceptions.ConnectionError as exc:
-                last_exc = exc
+                if self.provider == "openai":
+                    return self._embed_openai(text)
+                else:
+                    return self._embed_ollama(text)
+            except Exception as e:
+                last_exc = e
                 logger.warning(
-                    "[MemoryEmbedder] Ollama connection error (attempt %d/%d): %s",
-                    attempt, self.max_retries, exc,
+                    f"[MemoryEmbedder] {self.provider} error (attempt {attempt}/{self.max_retries}): {e}"
                 )
-            except requests.exceptions.Timeout as exc:
-                last_exc = exc
-                logger.warning(
-                    "[MemoryEmbedder] Ollama timeout (attempt %d/%d): %s",
-                    attempt, self.max_retries, exc,
-                )
-            except requests.exceptions.HTTPError as exc:
-                # HTTP errors (4xx/5xx) are non-retryable — Ollama returned a valid
-                # response indicating a model or request error.
-                logger.error("[MemoryEmbedder] HTTP error from Ollama: %s", exc)
-                raise OllamaUnavailableError(f"Ollama HTTP error: {exc}") from exc
+                if attempt < self.max_retries:
+                    time.sleep(delay)
+                    delay *= 2.0
+        
+        raise EmbedderUnavailableError(f"Embedder {self.provider} failed after retries: {last_exc}") from last_exc
 
-            if attempt < self.max_retries:
-                logger.info("[MemoryEmbedder] Retrying in %.1fs …", delay)
-                time.sleep(delay)
-                delay *= 2.0  # exponential back-off
+    def _embed_openai(self, text: str) -> List[float]:
+        client = self._get_openai_client()
+        # Clean text: replace newlines with spaces for best results with ada-002/v3
+        clean_text = text.replace("\n", " ")
+        response = client.embeddings.create(input=[clean_text], model=self.model)
+        return response.data[0].embedding
 
-        raise OllamaUnavailableError(
-            f"Ollama unreachable after {self.max_retries} attempts. Last error: {last_exc}"
-        )
+    def _embed_batch_openai(self, texts: List[str]) -> List[List[float]]:
+        client = self._get_openai_client()
+        clean_texts = [t.replace("\n", " ") for t in texts]
+        response = client.embeddings.create(input=clean_texts, model=self.model)
+        # Ensure ordered results
+        return [data.embedding for data in response.data]
 
-    def _post_embed(self, text: str) -> List[float]:
-        """
-        Raw HTTP POST to Ollama /api/embeddings.
-
-        Returns:
-            List[float] embedding vector.
-
-        Raises:
-            requests.exceptions.* on network / HTTP errors.
-            ValueError if the response JSON is malformed.
-        """
+    def _embed_ollama(self, text: str) -> List[float]:
+        url = f"{self.ollama_base_url}/api/embeddings"
         payload = {"model": self.model, "prompt": text}
+        
         response = requests.post(
-            self.endpoint,
+            url,
             json=payload,
             timeout=self.request_timeout,
         )
         response.raise_for_status()
-
         body = response.json()
         embedding = body.get("embedding")
-
-        if not isinstance(embedding, list) or len(embedding) == 0:
-            raise ValueError(
-                f"[MemoryEmbedder] Ollama returned unexpected body: {body}"
-            )
-
+        
+        if not isinstance(embedding, list):
+             raise ValueError(f"Ollama returned unexpected body: {body}")
+             
         return [float(v) for v in embedding]
 
     def _validate_dimension(self, vector: List[float]) -> None:
-        """
-        Validate vector dimension on first call and cache the result.
-        Subsequent calls compare against the cached value.
-
-        Raises EmbeddingDimensionError on mismatch.
-        """
         dim = len(vector)
-
         if self._validated_dimension is None:
-            if dim != EXPECTED_DIMENSION:
+            if dim != self.expected_dimension:
+                logger.warning(
+                    f"[MemoryEmbedder] Dimension Warning: Expected {self.expected_dimension}, got {dim}. "
+                    f"Updating expectation if this is a migration."
+                )
+                # In migration scenario, we might accept it if we are flexible, 
+                # but usually we want to enforce strictness to avoid pollution.
+                # However, raising Error stops everything. 
+                # Given strict architecture, we raise.
                 raise EmbeddingDimensionError(
-                    f"[MemoryEmbedder] Expected {EXPECTED_DIMENSION}-dim vector from "
-                    f"'{self.model}', got {dim}. "
-                    f"Ensure `ollama pull {self.model}` has been run."
+                    f"Expected {self.expected_dimension}-dim vector, got {dim}. Provider: {self.provider}"
                 )
             self._validated_dimension = dim
-            logger.debug("[MemoryEmbedder] Dimension validated: %d", dim)
-        else:
-            if dim != self._validated_dimension:
-                raise EmbeddingDimensionError(
-                    f"[MemoryEmbedder] Dimension changed mid-session: "
-                    f"expected {self._validated_dimension}, got {dim}."
-                )
+        elif dim != self._validated_dimension:
+             raise EmbeddingDimensionError(f"Dimension instability: {self._validated_dimension} vs {dim}")

@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional
 from nexus.sync.llm import LLMClient
 from nexus.cognition.budget_controller import BudgetController
+from nexus.config import get_agent_config
 
 class EscalationRouter:
     """
@@ -14,7 +15,9 @@ class EscalationRouter:
         # In a real implementation, LLMClient would be more granular.
         # Here we simulate routing by passing different cost_tolerance params
         # which map to tiers in LLMClient.
-        self.llm = LLMClient() 
+        self.llm = LLMClient()
+        self.config = get_agent_config("escalation_router")
+        self.tiers = self.config.get("tiers", {})
 
     def route_l2(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         """
@@ -28,8 +31,12 @@ class EscalationRouter:
         
         # Step 2: Attempt Tier 1 (Low Cost)
         # We use 'zero' tolerance to force local if available, or 'low' for cheapest API
+        tier_config = self.tiers.get("l1_local", {})
         response = self.llm.generate(
-            system_prompt, user_prompt, intent_class="USER_EXPLAIN", cost_tolerance="zero"
+            system_prompt, 
+            user_prompt, 
+            intent_class=tier_config.get("intent_class", "USER_EXPLAIN"), 
+            cost_tolerance=tier_config.get("cost_tolerance", "zero")
         )
         
         # In a real system, we'd parse confidence here to decide escalation.
@@ -49,8 +56,12 @@ class EscalationRouter:
         """
         Explicit escalation to Tier 2.
         """
+        tier_config = self.tiers.get("l2_flash", {})
         response = self.llm.generate(
-            system_prompt, user_prompt, intent_class="USER_EXPLAIN", cost_tolerance="low"
+            system_prompt, 
+            user_prompt, 
+            intent_class=tier_config.get("intent_class", "USER_EXPLAIN"), 
+            cost_tolerance=tier_config.get("cost_tolerance", "low")
         )
         return {
             "response": response,
@@ -67,8 +78,12 @@ class EscalationRouter:
         threshold = self.budget.get_l3_threshold()
         
         # Start at Tier 2 (Flash) for L3 tasks to save cost
+        tier_config = self.tiers.get("l2_flash", {})
         response = self.llm.generate(
-            system_prompt, user_prompt, intent_class="DEEP_SYNTHESIS", cost_tolerance="low"
+            system_prompt, 
+            user_prompt, 
+            intent_class="DEEP_SYNTHESIS", # Override L2 default for L3 routing start
+            cost_tolerance=tier_config.get("cost_tolerance", "low")
         )
         
         return {
@@ -82,8 +97,12 @@ class EscalationRouter:
         """
         Explicit escalation to Tier 3 (Pro).
         """
+        tier_config = self.tiers.get("l3_pro", {})
         response = self.llm.generate(
-            system_prompt, user_prompt, intent_class="DEEP_SYNTHESIS", cost_tolerance="high"
+            system_prompt, 
+            user_prompt, 
+            intent_class=tier_config.get("intent_class", "DEEP_SYNTHESIS"), 
+            cost_tolerance=tier_config.get("cost_tolerance", "high")
         )
         
         return {

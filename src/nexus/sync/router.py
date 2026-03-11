@@ -19,6 +19,7 @@ import time
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+from nexus.config import get_agent_config
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +220,18 @@ class TopicRouter:
         self.llm = llm_client
         self.config = config or RouterConfig()
         self.keyword_map = keyword_map or TOPIC_KEYWORD_MAP
+        
+        # Load agent config and override defaults if present
+        self.agent_config = get_agent_config("topic_router")
+        if self.agent_config:
+            strategies = self.agent_config.get("strategies", {}).get("disambiguation", {})
+            if "min_confidence" in strategies:
+                self.config.llm_min_confidence = strategies["min_confidence"]
+            if "max_bricks_context" in strategies:
+                self.config.llm_max_bricks = strategies["max_bricks_context"]
+            if "max_chars_per_brick" in strategies:
+                self.config.llm_max_chars_per_brick = strategies["max_chars_per_brick"]
+
         # Collect valid topic IDs from keyword map for LLM response validation
         self._valid_topics = set(self.keyword_map.keys())
 
@@ -455,11 +468,11 @@ class TopicRouter:
 
         available_topics = sorted(self.keyword_map.keys())
 
-        system_prompt = (
+        system_prompt = self.agent_config.get("system_prompt", (
             "You are a topic classifier for the Nexus knowledge system. "
             "Your job is to classify content into one of the defined topics. "
             "Return ONLY valid JSON. No explanation. No markdown."
-        )
+        ))
 
         user_prompt = (
             f"Available topics:\n"

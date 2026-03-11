@@ -94,6 +94,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
+from nexus.config import get_agent_config
 
 logger = logging.getLogger(__name__)
 
@@ -112,29 +113,34 @@ DEFAULT_BATCH_SIZE = 50
 ELIGIBLE_LIFECYCLES = ("loose", "forming")
 
 # SQL: fetch eligible nodes with pagination
+# We re-process nodes that are not yet 'indexed_v2'
 _SQL_FETCH_ELIGIBLE = """
 SELECT id, data
 FROM graph.nodes
 WHERE data->>'lifecycle' = ANY(%s)
-AND   (data->>'vector_status' IS NULL OR data->>'vector_status' != 'indexed')
+AND   (data->>'vector_status' IS NULL OR data->>'vector_status' != 'indexed_v2')
 ORDER BY created_at ASC
 LIMIT %s OFFSET %s
 """
 
-# SQL: upsert vector_meta — ON CONFLICT DO NOTHING for idempotency
-# input_hash column added by schema patch (see ensure_schema_patch below)
+# SQL: upsert vector_meta — ON CONFLICT DO UPDATE for idempotency and v2 migration
+# Writes to embedding_v2 (1536) as per Critical Data Migration Plan.
 _SQL_UPSERT_VECTOR_META = """
 INSERT INTO graph.vector_meta
-    (node_id, embedding, embedding_model, embedding_version, is_stale, input_hash, indexed_at)
+    (node_id, embedding_v2, embedding_model_v2, embedding_version, is_stale, input_hash, indexed_at)
 VALUES
     (%s, %s::vector, %s, %s, FALSE, %s, NOW())
-ON CONFLICT (node_id) DO NOTHING
+ON CONFLICT (node_id) DO UPDATE SET
+    embedding_v2 = EXCLUDED.embedding_v2,
+    embedding_model_v2 = EXCLUDED.embedding_model_v2,
+    is_stale = FALSE,
+    indexed_at = NOW()
 """
 
 # SQL: update vector_status — lifecycle guard prevents flipping killed nodes
 _SQL_UPDATE_NODE_STATUS = """
 UPDATE graph.nodes
-SET data = jsonb_set(data, '{vector_status}', '"indexed"', true)
+SET data = jsonb_set(data, '{vector_status}', '"indexed_v2"', true)
 WHERE id = %s
 AND   data->>'lifecycle' = ANY(%s)
 """
@@ -144,16 +150,19 @@ _SQL_COUNT_ELIGIBLE = """
 SELECT COUNT(*)
 FROM graph.nodes
 WHERE data->>'lifecycle' = ANY(%s)
-AND   (data->>'vector_status' IS NULL OR data->>'vector_status' != 'indexed')
+AND   (data->>'vector_status' IS NULL OR data->>'vector_status' != 'indexed_v2')
 """
 
 # Schema patch: add stale tracking and input_hash columns if not present
+# Also ensures embedding_v2 exists (1536 dims).
 _SQL_ENSURE_VECTOR_META_COLUMNS = """
 ALTER TABLE graph.vector_meta
     ADD COLUMN IF NOT EXISTS is_stale      BOOLEAN   NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS stale_reason  TEXT,
     ADD COLUMN IF NOT EXISTS stale_at      TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS input_hash    TEXT;
+    ADD COLUMN IF NOT EXISTS input_hash    TEXT,
+    ADD COLUMN IF NOT EXISTS embedding_v2  vector(1536),
+    ADD COLUMN IF NOT EXISTS embedding_model_v2 TEXT DEFAULT 'text-embedding-3-small';
 """
 
 
@@ -203,6 +212,12 @@ class L2BackfillEngine:
     """
 
     def __init__(self, database_url: Optional[str] = None, openai_api_key: Optional[str] = None):
+        self.config = get_agent_config("vector_backfill")
+        self.model = self.config.get("model", EMBEDDING_MODEL)
+        self.dimension = self.config.get("dimension", EXPECTED_DIMENSIONS)
+        self.batch_size = self.config.get("batch_size", DEFAULT_BATCH_SIZE)
+        self.max_retries = self.config.get("max_retries", MAX_RETRIES)
+
         self._database_url = database_url or os.environ.get("DATABASE_URL")
         if not self._database_url:
             raise RuntimeError("DATABASE_URL not set. Cannot connect to PostgreSQL.")
@@ -215,7 +230,7 @@ class L2BackfillEngine:
         self._openai_client = None
 
         logger.info("[L2Backfill] Engine initialized. Model=%s Dimensions=%d",
-                    EMBEDDING_MODEL, EXPECTED_DIMENSIONS)
+                    self.model, self.dimension)
 
     # ------------------------------------------------------------------
     # Public API
@@ -334,10 +349,10 @@ class L2BackfillEngine:
         logger.debug("[L2Backfill] API latency for node=%s: %.3fs", node_id, api_latency)
 
         # 3. Validate dimensions
-        if len(embedding) != EXPECTED_DIMENSIONS:
+        if len(embedding) != self.dimension:
             logger.error(
                 "[L2Backfill] ❌ Dimension mismatch for node=%s: expected=%d got=%d",
-                node_id, EXPECTED_DIMENSIONS, len(embedding),
+                node_id, self.dimension, len(embedding),
             )
             return False, False
 
@@ -387,7 +402,7 @@ class L2BackfillEngine:
                     # Step 1: Insert into vector_meta (idempotent)
                     cur.execute(
                         _SQL_UPSERT_VECTOR_META,
-                        (node_id, embedding_str, EMBEDDING_MODEL, EMBEDDING_VERSION, input_hash),
+                        (node_id, embedding_str, self.model, EMBEDDING_VERSION, input_hash),
                     )
 
                     # Step 2: Update vector_status with lifecycle guard
@@ -427,10 +442,10 @@ class L2BackfillEngine:
         client = self._get_openai_client()
         last_exc: Optional[Exception] = None
 
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(self.max_retries):
             try:
                 response = client.embeddings.create(
-                    model=EMBEDDING_MODEL,
+                    model=self.model,
                     input=text,
                 )
                 return response.data[0].embedding
@@ -441,7 +456,7 @@ class L2BackfillEngine:
                 logger.warning(
                     "[L2Backfill] RateLimitError for node=%s (attempt %d/%d). "
                     "Retrying in %.1fs...",
-                    node_id, attempt + 1, MAX_RETRIES, wait,
+                    node_id, attempt + 1, self.max_retries, wait,
                 )
                 time.sleep(wait)
 
@@ -451,7 +466,7 @@ class L2BackfillEngine:
                 logger.warning(
                     "[L2Backfill] APIConnectionError for node=%s (attempt %d/%d). "
                     "Retrying in %.1fs...",
-                    node_id, attempt + 1, MAX_RETRIES, wait,
+                    node_id, attempt + 1, self.max_retries, wait,
                 )
                 time.sleep(wait)
 
@@ -461,7 +476,7 @@ class L2BackfillEngine:
                 logger.warning(
                     "[L2Backfill] APITimeoutError for node=%s (attempt %d/%d). "
                     "Retrying in %.1fs...",
-                    node_id, attempt + 1, MAX_RETRIES, wait,
+                    node_id, attempt + 1, self.max_retries, wait,
                 )
                 time.sleep(wait)
 
@@ -473,7 +488,7 @@ class L2BackfillEngine:
                     "[L2Backfill] APIStatusError (status=%s) for node=%s (attempt %d/%d). "
                     "Retrying in %.1fs...",
                     getattr(exc, 'status_code', '?'),
-                    node_id, attempt + 1, MAX_RETRIES, wait,
+                    node_id, attempt + 1, self.max_retries, wait,
                 )
                 time.sleep(wait)
 
@@ -484,12 +499,12 @@ class L2BackfillEngine:
                 logger.warning(
                     "[L2Backfill] OpenAIError for node=%s (attempt %d/%d): %s. "
                     "Retrying in %.1fs...",
-                    node_id, attempt + 1, MAX_RETRIES, exc, wait,
+                    node_id, attempt + 1, self.max_retries, exc, wait,
                 )
                 time.sleep(wait)
 
         raise RuntimeError(
-            f"[L2Backfill] embed_with_retry() failed after {MAX_RETRIES} attempts "
+            f"[L2Backfill] embed_with_retry() failed after {self.max_retries} attempts "
             f"for node={node_id}: {last_exc}"
         ) from last_exc
 

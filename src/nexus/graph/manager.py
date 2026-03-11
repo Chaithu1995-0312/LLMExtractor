@@ -214,7 +214,10 @@ class GraphManager:
             # Fetch all vectors not in FAISS (optimization: fetch all for now to be safe/simple)
             # vector_meta has: node_id, embedding (vector string/array)
             # Postgres 'vector' type returns as string "[0.1, 0.2, ...]" or list depending on adapter
-            query = "SELECT node_id, embedding FROM graph.vector_meta"
+            
+            # MIGRATION: Prefer embedding_v2 (1536) for unification
+            query = "SELECT node_id, embedding_v2 FROM graph.vector_meta WHERE embedding_v2 IS NOT NULL"
+            
             if self._is_adapter():
                 rows = self.db.fetch_all(query)
             else:
@@ -404,7 +407,7 @@ class GraphManager:
         )
 
         # Rebuild in-memory index
-        new_index = faiss.IndexFlatIP(384)
+        new_index = faiss.IndexFlatIP(1536) # UPDATED for text-embedding-3-small
         new_id_map: Dict[str, int] = {}
         new_reverse_map: Dict[int, str] = {}
         counter = 0

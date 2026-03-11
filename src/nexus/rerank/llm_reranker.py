@@ -3,6 +3,7 @@ import os
 import hashlib
 import time
 from functools import lru_cache
+from nexus.config import get_agent_config
 
 class LlmReranker:
     """
@@ -10,6 +11,15 @@ class LlmReranker:
     Uses local quantized LLM (e.g., via llama-cpp-python).
     """
     def __init__(self, model_path: str = "models/llama-3-8b-quantized.gguf", timeout_ms: int = 500):
+        self.config = get_agent_config("llm_reranker")
+        
+        # Override defaults with config if available
+        if model_path == "models/llama-3-8b-quantized.gguf" and "model_path" in self.config:
+            model_path = self.config["model_path"]
+            
+        if timeout_ms == 500 and "timeout_ms" in self.config:
+            timeout_ms = self.config["timeout_ms"]
+
         self.timeout_ms = timeout_ms
         if not os.path.exists(model_path):
              # If model not found, fail fast so Orchestrator picks fallback
@@ -20,7 +30,7 @@ class LlmReranker:
             # Initialize with deterministic settings
             self.llm = Llama(
                 model_path=model_path,
-                n_ctx=2048,
+                n_ctx=self.config.get("context_window", 2048),
                 verbose=False,
                 seed=42
             )
@@ -53,19 +63,22 @@ class LlmReranker:
             # Simple Heuristic Fallback (BM25 or similar could go here)
             # Currently just uses original confidence if timeout or failure
             
-            prompt = f"""Query: {query}
-Text: {text[:800]}
-Rate relevance (0.0-1.0):"""
+            prompt_template = self.config.get("prompt_template", "Query: {query}\nText: {text}\nRate relevance (0.0-1.0):")
+            prompt = prompt_template.format(query=query, text=text[:800])
             
             try:
                 # In a real async environment, we would use a timeout.
                 # In synchronous llama-cpp, we measure and log for heuristic fallback triggers.
+                gen_params = self.config.get("generation_params", {
+                    "max_tokens": 6,
+                    "stop": ["\n"],
+                    "temperature": 0.0
+                })
+                
                 output = self.llm(
                     prompt, 
-                    max_tokens=6, 
-                    stop=["\n"], 
                     echo=False,
-                    temperature=0.0 # Deterministic
+                    **gen_params
                 )
                 score_str = output['choices'][0]['text'].strip()
                 import re
