@@ -45,6 +45,10 @@ RETRY_BASE_DELAY = 1.0
 class EmbedderUnavailableError(RuntimeError):
     """Raised when the embedding provider is not reachable."""
 
+
+# Backward-compat alias (legacy imports still reference this name)
+OllamaUnavailableError = EmbedderUnavailableError
+
 class EmbeddingDimensionError(ValueError):
     """Raised when the model returns a vector of unexpected dimensionality."""
 

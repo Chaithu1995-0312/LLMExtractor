@@ -5,12 +5,8 @@ from pathlib import Path
 from typing import List, Dict
 import numpy as np
 
-# Importing existing Nexus components
-try:
-    from nexus.vector.pinecone_index import PineconeVectorIndex
-except Exception as e:
-    print(f"⚠️ Could not import PineconeVectorIndex: {e}")
-    PineconeVectorIndex = None
+# Legacy Pinecone fallback removed.
+PineconeVectorIndex = None
 
 from nexus.cognition.assembler import assemble_topic
 from nexus.vector.embedder import get_embedder
@@ -26,12 +22,9 @@ class NexusIngestor:
         if not dry_run:
             if not api_key:
                 raise ValueError("PINECONE_API_KEY environment variable is required.")
-            if PineconeVectorIndex is None:
-                print("❌ PineconeVectorIndex is not available. Forcing DRY_RUN.")
-                self.dry_run = True
-                self.index = None
-            else:
-                self.index = PineconeVectorIndex(api_key=api_key)
+            print("❌ PineconeVectorIndex is not available. Forcing DRY_RUN.")
+            self.dry_run = True
+            self.index = None
         else:
             print("🏗️ Running in DRY_RUN mode. Pinecone and Neo4j updates will be skipped.")
             self.index = None

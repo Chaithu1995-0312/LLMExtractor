@@ -1,31 +1,12 @@
-"""
-nexus.memory
-============
-Fully local semantic memory engine for Nexus.
+"""nexus.memory package public API.
 
-Responsibilities:
-- Ingest ChatGPT export JSON into deterministic, versioned datasets
-- Chunk text with deterministic SHA256 chunk IDs
-- Embed chunks via Ollama nomic-embed-text
-- Persist vectors in a ChromaDB collection isolated from Graph vectors
-- Support top-k semantic retrieval without forcing generation
-- Support optional LLM summarization via llama3:latest
-- Support explicit promotion of retrieved chunks to Nexus Bricks
-
-Invariants:
-- MUST NOT share vector namespace with graph.nodes or sync.bricks
-- MUST NOT modify GraphManager
-- MUST NOT bypass Cortex routing for Brick promotion
-- ALL mutations are idempotent and logged
+Uses lazy attribute loading to avoid circular-import side effects during module
+initialization (notably when vector and memory layers import each other).
 """
 
-from nexus.memory.dataset_manager import DatasetManager, MemoryDataset
-from nexus.memory.chunker import Chunker, Chunk
-from nexus.memory.embedder import MemoryEmbedder
-from nexus.memory.vector_store import MemoryVectorStore, ChromaMemoryVectorStore
-from nexus.memory.metadata_store import MetadataStore
-from nexus.memory.retriever import MemoryRetriever
-from nexus.memory.memory_service import MemoryService
+from __future__ import annotations
+
+from importlib import import_module
 
 __all__ = [
     "DatasetManager",
@@ -39,3 +20,28 @@ __all__ = [
     "MemoryRetriever",
     "MemoryService",
 ]
+
+
+def __getattr__(name: str):
+    if name in {"DatasetManager", "MemoryDataset"}:
+        m = import_module("nexus.memory.dataset_manager")
+        return getattr(m, name)
+    if name in {"Chunker", "Chunk"}:
+        m = import_module("nexus.memory.chunker")
+        return getattr(m, name)
+    if name in {"MemoryEmbedder"}:
+        m = import_module("nexus.memory.embedder")
+        return getattr(m, name)
+    if name in {"MemoryVectorStore", "ChromaMemoryVectorStore"}:
+        m = import_module("nexus.memory.vector_store")
+        return getattr(m, name)
+    if name in {"MetadataStore"}:
+        m = import_module("nexus.memory.metadata_store")
+        return getattr(m, name)
+    if name in {"MemoryRetriever"}:
+        m = import_module("nexus.memory.retriever")
+        return getattr(m, name)
+    if name in {"MemoryService"}:
+        m = import_module("nexus.memory.memory_service")
+        return getattr(m, name)
+    raise AttributeError(f"module 'nexus.memory' has no attribute {name!r}")

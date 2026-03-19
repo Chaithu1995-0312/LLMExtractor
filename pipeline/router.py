@@ -1,0 +1,6 @@
+def detect_mode(input_data):
+    if input_data.get("type") == "market":
+        return "trading"
+    elif input_data.get("type") == "chat":
+        return "decision"
+    return "default"
